@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>SapServer</RootNamespace>
+    <AssemblyName>SapServer</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.SqlClient" Version="6.*" />
+    <PackageReference Include="Serilog.AspNetCore" Version="9.*" />
+    <PackageReference Include="Serilog.Sinks.Console" Version="6.*" />
+    <PackageReference Include="Serilog.Sinks.File" Version="6.*" />
+  </ItemGroup>
+
+  <!--
+    SAP GUI COM Interop DLL.
+    Copy SAPFunctionsOCX.Interop.dll from an SAP GUI 7.x installation into the libs/ directory.
+    Typically found at: C:\Program Files (x86)\SAP\FrontEnd\SapGui\
+    You can also generate the interop assembly via Visual Studio:
+      Project > Add COM Reference > SAP Functions OCX
+  -->
+  <ItemGroup>
+    <Reference Include="SAPFunctionsOCX">
+      <HintPath>libs\SAPFunctionsOCX.Interop.dll</HintPath>
+      <EmbedInteropTypes>false</EmbedInteropTypes>
+    </Reference>
+  </ItemGroup>
+</Project>
