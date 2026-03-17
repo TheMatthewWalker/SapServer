@@ -225,15 +225,14 @@ internal sealed class SapStaWorker : IDisposable
         // Populate input tables
         foreach (var (tableName, rows) in request.InputTables)
         {
-            dynamic table = func.Tables(tableName);
+            dynamic table = func.Tables.Item(tableName);
             foreach (var row in rows)
             {
-                table.Rows.Add();
-                int idx = (int)table.Rows.Count - 1;
+                dynamic sapRow = table.Rows.Add();
                 foreach (var (col, val) in row)
                 {
                     if (val is not null)
-                        table.Rows.Item(idx).Value(col) = val;
+                        sapRow[col] = val;
                 }
             }
         }
