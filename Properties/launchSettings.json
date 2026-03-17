@@ -1,0 +1,12 @@
+{
+  "profiles": {
+    "SapServer": {
+      "commandName": "Project",
+      "launchBrowser": true,
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      },
+      "applicationUrl": "https://localhost:37647;http://localhost:37648"
+    }
+  }
+}
