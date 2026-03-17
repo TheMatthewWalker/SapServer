@@ -1,4 +1,5 @@
 using System.Text;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using Serilog;
@@ -30,30 +31,45 @@ var authOpts = builder.Configuration
     ?? throw new InvalidOperationException("Auth configuration section is missing.");
 
 // ---------------------------------------------------------------------------
-// Authentication — JWT Bearer tokens issued by sql2005-bridge
-//
-// sql2005-bridge signs tokens with HMAC-SHA256 using a shared secret.
-// SapServer validates the signature, issuer, audience, and lifetime locally
-// with no network round-trip.
+// Authentication — JWT Bearer tokens issued by sql2005-bridge.
+// In Development with Auth:DevBypassAuth=true, a passthrough scheme is used
+// instead so the API can be exercised without sql2005-bridge.
 // ---------------------------------------------------------------------------
-builder.Services
-    .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-    .AddJwtBearer(opts =>
-    {
-        opts.TokenValidationParameters = new TokenValidationParameters
+bool devBypass = builder.Environment.IsDevelopment() && authOpts.DevBypassAuth;
+
+if (devBypass)
+{
+    Console.WriteLine("*** DEV BYPASS AUTH IS ACTIVE — all requests are auto-authenticated ***");
+
+    builder.Services
+        .AddAuthentication(DevAuthHandler.SchemeName)
+        .AddScheme<AuthenticationSchemeOptions, DevAuthHandler>(DevAuthHandler.SchemeName, null);
+
+    builder.Services.AddScoped<IPermissionService, NullPermissionService>();
+}
+else
+{
+    builder.Services
+        .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+        .AddJwtBearer(opts =>
         {
-            ValidateIssuerSigningKey = true,
-            IssuerSigningKey         = new SymmetricSecurityKey(
-                                           Encoding.UTF8.GetBytes(authOpts.JwtSecret)),
-            ValidateIssuer   = true,
-            ValidIssuer      = authOpts.JwtIssuer,
-            ValidateAudience = true,
-            ValidAudience    = authOpts.JwtAudience,
-            ValidateLifetime = true,
-            // Small clock skew to accommodate minor time differences between servers
-            ClockSkew = TimeSpan.FromSeconds(30)
-        };
-    });
+            opts.TokenValidationParameters = new TokenValidationParameters
+            {
+                ValidateIssuerSigningKey = true,
+                IssuerSigningKey         = new SymmetricSecurityKey(
+                                               Encoding.UTF8.GetBytes(authOpts.JwtSecret)),
+                ValidateIssuer   = true,
+                ValidIssuer      = authOpts.JwtIssuer,
+                ValidateAudience = true,
+                ValidAudience    = authOpts.JwtAudience,
+                ValidateLifetime = true,
+                // Small clock skew to accommodate minor time differences between servers
+                ClockSkew = TimeSpan.FromSeconds(30)
+            };
+        });
+
+    builder.Services.AddScoped<IPermissionService, PermissionService>();
+}
 
 builder.Services.AddAuthorization();
 
@@ -80,10 +96,9 @@ builder.Services.AddSingleton<ISapConnectionPool, SapConnectionPool>();
 builder.Services.AddHostedService<SapSessionMonitor>();
 
 // ---------------------------------------------------------------------------
-// Permission service — scoped; uses IMemoryCache for short-lived caching
+// Permission service cache
 // ---------------------------------------------------------------------------
 builder.Services.AddMemoryCache();
-builder.Services.AddScoped<IPermissionService, PermissionService>();
 
 // ---------------------------------------------------------------------------
 // ASP.NET Core infrastructure

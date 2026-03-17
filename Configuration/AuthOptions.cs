@@ -21,4 +21,11 @@ public sealed class AuthOptions
 
     /// <summary>How long (seconds) to cache permission lookups before re-querying SQL Server.</summary>
     public int PermissionCacheSeconds { get; init; } = 60;
+
+    /// <summary>
+    /// When true (Development environment only), bypasses JWT validation and
+    /// permission checks so the API can be tested without sql2005-bridge.
+    /// Must never be enabled in Production.
+    /// </summary>
+    public bool DevBypassAuth { get; init; } = false;
 }

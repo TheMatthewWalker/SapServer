@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using SapServer.Configuration;
 using SapServer.Exceptions;
 using SapServer.Models;
+using SAPFunctionsOCX;
 
 namespace SapServer.Services;
 
@@ -29,7 +30,9 @@ internal sealed class SapStaWorker : IDisposable
     private readonly CancellationTokenSource _cts = new();
 
     // SAP COM object — must ONLY be touched from _staThread
-    private dynamic? _sapFunctions;
+    // Typed as SAPFunctions (COM interface) so .NET uses vtable dispatch, not IDispatch
+    // reflection. Dynamic dispatch via IDispatch fails with DISP_E_BADCALLEE on this OCX.
+    private SAPFunctionsOCX.SAPFunctions? _sapFunctions;
     private volatile bool _isConnected;
     private DateTime _lastActivity = DateTime.UtcNow;
 
@@ -137,10 +140,7 @@ internal sealed class SapStaWorker : IDisposable
     {
         try
         {
-            _sapFunctions = Activator.CreateInstance(
-                Type.GetTypeFromProgID("SAPFunctions.SAPFunctions")
-                ?? throw new InvalidOperationException(
-                    "SAPFunctions COM ProgID not found. Ensure SAP GUI 7.x is installed on this server."));
+            _sapFunctions = new SAPFunctionsOCX.SAPFunctions();
 
             dynamic conn  = _sapFunctions!.Connection;
             conn.System   = _options.ServiceAccount.System;
@@ -215,29 +215,57 @@ internal sealed class SapStaWorker : IDisposable
                 ex.Message);
         }
 
-        // Set scalar import (SAP EXPORTING) parameters
+        // Scalar import parameters — func.exports("KEY").Value pattern (lowercase, indexer call)
         foreach (var (key, value) in request.ImportParameters)
         {
             if (value is not null)
-                func.Exports.Item(key).Value = value;
+                func.exports(key).Value = UnwrapJson(value);
         }
 
-        // Populate input tables
+        // Input tables — clear with Freetable() then populate rows
         foreach (var (tableName, rows) in request.InputTables)
         {
-            dynamic table = func.Tables.Item(tableName);
+            dynamic table = func.Tables(tableName);
+            table.Freetable();
             foreach (var row in rows)
             {
                 dynamic sapRow = table.Rows.Add();
                 foreach (var (col, val) in row)
                 {
                     if (val is not null)
-                        sapRow[col] = val;
+                        sapRow[col] = UnwrapJson(val);
                 }
             }
         }
 
-        bool success = func.Call;
+
+        // Input table Items — clear with Freetable() then populate rows
+        foreach (var (tableName, rows) in request.InputTablesItems)
+        {
+            dynamic table = func.Tables.Item(tableName);
+            table.Freetable();
+            foreach (var row in rows)
+            {
+                dynamic sapRow = table.Rows.Add();
+                foreach (var (col, val) in row)
+                {
+                    if (val is not null)
+                        sapRow[col] = UnwrapJson(val);
+                }
+            }
+        }
+
+        bool success;
+        try
+        {
+            success = func.Call;
+        }
+        catch (System.Runtime.InteropServices.COMException ex)
+        {
+            throw new SapExecutionException(request.FunctionName,
+                $"SAP call failed (HRESULT 0x{ex.ErrorCode:X8}).", ex.Message);
+        }
+
         if (!success)
         {
             string? sapMsg = TryReadReturnMessage(func);
@@ -250,13 +278,32 @@ internal sealed class SapStaWorker : IDisposable
         return BuildResponse(func, request);
     }
 
+    /// <summary>
+    /// System.Text.Json deserialises <c>object?</c> values as <see cref="System.Text.Json.JsonElement"/>,
+    /// which COM cannot marshal to a VARIANT. Unwrap to the underlying CLR primitive.
+    /// </summary>
+    private static object UnwrapJson(object value)
+    {
+        if (value is not System.Text.Json.JsonElement je) return value;
+        return je.ValueKind switch
+        {
+            System.Text.Json.JsonValueKind.String  => je.GetString() ?? string.Empty,
+            System.Text.Json.JsonValueKind.Number
+                when je.TryGetInt64(out long l)    => l,
+            System.Text.Json.JsonValueKind.Number  => je.GetDouble(),
+            System.Text.Json.JsonValueKind.True    => true,
+            System.Text.Json.JsonValueKind.False   => false,
+            _                                      => je.ToString()
+        };
+    }
+
     private static string? TryReadReturnMessage(dynamic func)
     {
         try
         {
-            dynamic ret = func.Tables.Item("RETURN");
-            if ((int)ret.Rows.Count > 0)
-                return ret.Rows.Item(0)["MESSAGE"]?.ToString();
+            dynamic ret = func.tables.Item("RETURN");
+            foreach (var row in ret.Rows)
+                return row["MESSAGE"]?.ToString();
         }
         catch { /* RETURN table may not exist for this function */ }
         return null;
@@ -267,30 +314,27 @@ internal sealed class SapStaWorker : IDisposable
         var parameters = new Dictionary<string, object?>();
         var tables     = new Dictionary<string, List<Dictionary<string, object?>>>();
 
-        // Read scalar export (SAP IMPORTING) parameters
+        // Read scalar export (SAP IMPORTING) parameters — lowercase func.imports(name).Value
         foreach (var paramName in request.ExportParameters)
         {
-            try   { parameters[paramName] = func.Imports.Item(paramName)?.Value?.ToString(); }
+            try   { parameters[paramName] = func.imports(paramName)?.Value?.ToString(); }
             catch { parameters[paramName] = null; }
         }
 
-        // Read output tables
+        // Read output tables — lowercase func.tables.Item(name), foreach over rows
         foreach (var (tableName, fields) in request.OutputTables)
         {
             var resultRows = new List<Dictionary<string, object?>>();
             try
             {
-                dynamic table    = func.Tables.Item(tableName);
-                int     rowCount = (int)table.Rows.Count;
+                dynamic table = func.tables.Item(tableName);
 
-                for (int i = 0; i < rowCount; i++)
+                foreach (var sapRow in table.Rows)
                 {
-                    dynamic sapRow = table.Rows.Item(i);
                     var row = new Dictionary<string, object?>();
 
                     if (fields.Count > 0)
                     {
-                        // Caller specified which fields to extract
                         foreach (var field in fields)
                         {
                             try   { row[field] = sapRow[field]?.ToString(); }
@@ -299,8 +343,7 @@ internal sealed class SapStaWorker : IDisposable
                     }
                     else
                     {
-                        // No fields specified — fall back to reading the WA (work area) column.
-                        // This is the output format used by ZRFC_READ_TABLES.
+                        // No fields specified — read the WA (work area) column
                         try { row["WA"] = sapRow["WA"]?.ToString(); }
                         catch { /* WA column does not exist on this table */ }
                     }

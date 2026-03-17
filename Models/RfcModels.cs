@@ -18,6 +18,7 @@ public sealed class RfcRequest
 
     /// <summary>Input table data to populate before calling the RFC (SAP "TABLES" with input rows).</summary>
     public Dictionary<string, List<Dictionary<string, object?>>> InputTables { get; init; } = new();
+    public Dictionary<string, List<Dictionary<string, object?>>> InputTablesItems { get; init; } = new();
 
     /// <summary>
     /// Names of scalar export parameters to read from the RFC result (SAP "IMPORTING" params).

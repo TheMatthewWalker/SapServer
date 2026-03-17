@@ -1,0 +1,57 @@
+### SapServer – dev bypass (no JWT required)
+@baseUrl = http://localhost:5200
+
+### Ping: pool status (admin role auto-granted by DevAuthHandler)
+GET {{baseUrl}}/api/rfc/status
+
+###
+
+### RFC_READ_TABLE – read first 10 rows of T000 (SAP clients table)
+POST {{baseUrl}}/api/rfc/execute
+Content-Type: application/json
+
+{
+  "functionName": "ZRFC_READ_TABLES",
+  "importParameters": {
+    "DELIMITER": "|",
+    "ROWCOUNT": "10",
+    "NO_DATA": " "
+  },
+  "inputTables": {
+    "QUERY_TABLES": [
+      { "TABNAME": "T000" }
+    ]
+  },
+  "inputTablesItems": {
+      "query_FIELDS": [
+        { "TABNAME": "T000", "FIELDNAME": "MANDT" },
+        { "TABNAME": "T000", "FIELDNAME": "MTEXT" },
+        { "TABNAME": "T000", "FIELDNAME": "ORT01" }
+      ]
+  },
+  "exportParameters": [],
+  "outputTables": {
+    "data_display":   ["WA"]
+  }
+}
+
+###
+
+### RFC_READ_TABLE – read USR01 (current user profile), no field filter
+POST {{baseUrl}}/api/rfc/execute
+Content-Type: application/json
+
+{
+  "functionName": "RFC_READ_TABLE",
+  "importParameters": {
+    "QUERY_TABLE": "USR01",
+    "DELIMITER": "|",
+    "NO_RECS": "5"
+  },
+  "inputTables": {},
+  "exportParameters": [],
+  "outputTables": {
+    "DATA":   ["WA"],
+    "FIELDS": ["FIELDNAME", "OFFSET", "LENGTH", "TYPE"]
+  }
+}

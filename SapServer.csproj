@@ -5,13 +5,15 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>SapServer</RootNamespace>
     <AssemblyName>SapServer</AssemblyName>
+    <PlatformTarget>x86</PlatformTarget>
   </PropertyGroup>
-
   <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.*" />
     <PackageReference Include="Microsoft.Data.SqlClient" Version="6.*" />
     <PackageReference Include="Serilog.AspNetCore" Version="9.*" />
     <PackageReference Include="Serilog.Sinks.Console" Version="6.*" />
     <PackageReference Include="Serilog.Sinks.File" Version="6.*" />
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="7.*" />
   </ItemGroup>
 
   <!--
@@ -26,5 +28,13 @@
       <HintPath>libs\SAPFunctionsOCX.Interop.dll</HintPath>
       <EmbedInteropTypes>false</EmbedInteropTypes>
     </Reference>
+  </ItemGroup>
+  <ItemGroup>
+    <None Update="libs\SAPFunctionsOCX.Interop.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="libs\wdtfuncs.ocx">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
 </Project>

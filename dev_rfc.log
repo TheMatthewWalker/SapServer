@@ -1,0 +1,26 @@
+
+**** Log file opened at 2026-03-17 14:09:19.493090 UTC+00:00 (GMT Standard Time), Encoding UTF-8
+NW RFC Library: Kernel variant, Release 750 Patch Level 12 Hotfix 2
+Compilation date          : Feb 13 2024 03:59:37
+CPIC library              : 753.2024.01.25 version 3
+NI library                : 40
+Kernel Release            : 753 Patch Level 1300
+Current working directory : C:\Development\git-projects\SapServer
+Program                   : SapServer
+Process ID                : 95612
+User                      : matthew.walker
+Hardware                  : PC with Windows NT 12x Intel 80686 (Mod 151 Step 5)
+Binary Type               : 32bit
+Operating_system          : Windows NT 10.0
+Hostname                  : ENORW140
+IP address                : 10.1.152.12
+IPv6 address              : fe80::c811:431:8f19:f488
+Global trace level        : 0
+
+2026-03-17 14:09:19.493658 [65664] >> Info entry
+	Did not find config file C:\Development\git-projects\SapServer\sapnwrfc.ini.
+2026-03-17 14:09:20.186072 [65664] >> Error entry
+	Error in receive: 18, data rec 2, status rec 0, read 313, no SAP ErrInfo available
+2026-03-17 14:09:20.200921 [65664] >> Error entry
+	[Handle: 634226064	ConvID: 62278079	Target: ksnoka14.itkob.local	SysID: KAP	SysNr: 02	User: PTFENOGB	Client: 100	Language: E	Codepage: 4103]
+	RfcLogonException: Key: RFC_LOGON_FAILURE, Code: RFC_LOGON_FAILURE, Message: Name or password is incorrect (repeat logon)
