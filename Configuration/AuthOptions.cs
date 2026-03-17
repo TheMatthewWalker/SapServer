@@ -28,4 +28,12 @@ public sealed class AuthOptions
     /// Must never be enabled in Production.
     /// </summary>
     public bool DevBypassAuth { get; init; } = false;
+
+    /// <summary>
+    /// When true, skips the SQL-based permission lookup and allows any
+    /// authenticated caller to execute any RFC function. Use this when the
+    /// SapDepartmentPermissions table has not yet been provisioned.
+    /// JWT validation is still enforced — only permission checks are skipped.
+    /// </summary>
+    public bool BypassPermissions { get; init; } = false;
 }

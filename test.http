@@ -19,14 +19,14 @@ Content-Type: application/json
   },
   "inputTables": {
     "QUERY_TABLES": [
-      { "TABNAME": "T000" }
+      { "TABNAME": "LQUA" }
     ]
   },
   "inputTablesItems": {
       "query_FIELDS": [
-        { "TABNAME": "T000", "FIELDNAME": "MANDT" },
-        { "TABNAME": "T000", "FIELDNAME": "MTEXT" },
-        { "TABNAME": "T000", "FIELDNAME": "ORT01" }
+        { "TABNAME": "LQUA", "FIELDNAME": "MATNR" },
+        { "TABNAME": "LQUA", "FIELDNAME": "CHARG" },
+        { "TABNAME": "LQUA", "FIELDNAME": "VERME" }
       ]
   },
   "exportParameters": [],

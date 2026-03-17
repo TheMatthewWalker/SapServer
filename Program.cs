@@ -63,12 +63,16 @@ else
                 ValidateAudience = true,
                 ValidAudience    = authOpts.JwtAudience,
                 ValidateLifetime = true,
-                // Small clock skew to accommodate minor time differences between servers
-                ClockSkew = TimeSpan.FromSeconds(30)
+                ClockSkew        = TimeSpan.FromSeconds(30)
             };
         });
 
-    builder.Services.AddScoped<IPermissionService, PermissionService>();
+    // BypassPermissions skips the SQL lookup but still requires a valid JWT.
+    // Use this until dbo.SapDepartmentPermissions is provisioned.
+    if (authOpts.BypassPermissions)
+        builder.Services.AddScoped<IPermissionService, NullPermissionService>();
+    else
+        builder.Services.AddScoped<IPermissionService, PermissionService>();
 }
 
 builder.Services.AddAuthorization();
