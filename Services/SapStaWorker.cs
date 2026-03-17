@@ -219,21 +219,20 @@ internal sealed class SapStaWorker : IDisposable
         foreach (var (key, value) in request.ImportParameters)
         {
             if (value is not null)
-                func.Exports(key).Value = value;
+                func.Exports.Item(key).Value = value;
         }
 
         // Populate input tables
         foreach (var (tableName, rows) in request.InputTables)
         {
-            dynamic table = func.Tables(tableName);
+            dynamic table = func.Tables.Item(tableName);
             foreach (var row in rows)
             {
-                table.Rows.Add();
-                int idx = (int)table.Rows.Count - 1;
+                dynamic sapRow = table.Rows.Add();
                 foreach (var (col, val) in row)
                 {
                     if (val is not null)
-                        table.Rows.Item(idx).Value(col) = val;
+                        sapRow[col] = val;
                 }
             }
         }
@@ -255,9 +254,9 @@ internal sealed class SapStaWorker : IDisposable
     {
         try
         {
-            dynamic ret = func.Tables("RETURN");
+            dynamic ret = func.Tables.Item("RETURN");
             if ((int)ret.Rows.Count > 0)
-                return ret.Rows.Item(0).Value("MESSAGE")?.ToString();
+                return ret.Rows.Item(0)["MESSAGE"]?.ToString();
         }
         catch { /* RETURN table may not exist for this function */ }
         return null;
@@ -271,7 +270,7 @@ internal sealed class SapStaWorker : IDisposable
         // Read scalar export (SAP IMPORTING) parameters
         foreach (var paramName in request.ExportParameters)
         {
-            try   { parameters[paramName] = func.Imports(paramName)?.Value?.ToString(); }
+            try   { parameters[paramName] = func.Imports.Item(paramName)?.Value?.ToString(); }
             catch { parameters[paramName] = null; }
         }
 
@@ -281,7 +280,7 @@ internal sealed class SapStaWorker : IDisposable
             var resultRows = new List<Dictionary<string, object?>>();
             try
             {
-                dynamic table    = func.Tables(tableName);
+                dynamic table    = func.Tables.Item(tableName);
                 int     rowCount = (int)table.Rows.Count;
 
                 for (int i = 0; i < rowCount; i++)
@@ -294,7 +293,7 @@ internal sealed class SapStaWorker : IDisposable
                         // Caller specified which fields to extract
                         foreach (var field in fields)
                         {
-                            try   { row[field] = sapRow.Value(field)?.ToString(); }
+                            try   { row[field] = sapRow[field]?.ToString(); }
                             catch { row[field] = null; }
                         }
                     }
@@ -302,7 +301,7 @@ internal sealed class SapStaWorker : IDisposable
                     {
                         // No fields specified — fall back to reading the WA (work area) column.
                         // This is the output format used by ZRFC_READ_TABLES.
-                        try { row["WA"] = sapRow.Value("WA")?.ToString(); }
+                        try { row["WA"] = sapRow["WA"]?.ToString(); }
                         catch { /* WA column does not exist on this table */ }
                     }
 
