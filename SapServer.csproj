@@ -28,7 +28,7 @@
   <ItemGroup>
     <Reference Include="SAPFunctionsOCX">
       <HintPath>libs\SAPFunctionsOCX.Interop.dll</HintPath>
-      <EmbedInteropTypes>false</EmbedInteropTypes>
+      <EmbedInteropTypes>true</EmbedInteropTypes>
     </Reference>
   </ItemGroup>
   <ItemGroup>

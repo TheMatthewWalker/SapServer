@@ -86,7 +86,11 @@ internal sealed class SapStaWorker : IDisposable
 
     private void WorkerLoop()
     {
-        Connect();
+        try { Connect(); }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Slot {SlotId} failed initial SAP connection — will retry on first request.", SlotId);
+        }
 
         try
         {
@@ -120,9 +124,21 @@ internal sealed class SapStaWorker : IDisposable
         }
         catch (SapConnectionException ex)
         {
-            _isConnected = false;
-            _logger.LogWarning(ex, "SAP connection lost on slot {SlotId}; will reconnect on next call.", SlotId);
-            item.Tcs.TrySetException(ex);
+            _logger.LogWarning(ex, "SAP connection lost on slot {SlotId}; reconnecting and retrying '{Function}'.",
+                SlotId, item.Request.FunctionName);
+            try
+            {
+                Connect();
+                var response  = ExecuteRfc(item.Request);
+                _lastActivity = DateTime.UtcNow;
+                item.Tcs.TrySetResult(response);
+            }
+            catch (Exception retryEx)
+            {
+                _logger.LogError(retryEx, "RFC '{Function}' failed on slot {SlotId} after reconnect.",
+                    item.Request.FunctionName, SlotId);
+                item.Tcs.TrySetException(retryEx);
+            }
         }
         catch (Exception ex)
         {
@@ -268,10 +284,20 @@ internal sealed class SapStaWorker : IDisposable
 
         if (!success)
         {
-            string? sapMsg = TryReadReturnMessage(func);
+            string exceptionCode = Convert.ToString(func.Exception) ?? "";
+            string? sapMsg       = TryReadReturnMessage(func);
+
+            // The SAP OCX drops the connection after any failed call — always mark disconnected
+            // so EnsureConnected() reconnects before the next request.
+            _isConnected = false;
+
+            if (IsCommunicationError(exceptionCode))
+                throw new SapConnectionException(SlotId,
+                    $"SAP communication failure during '{request.FunctionName}': {exceptionCode}.");
+
             throw new SapExecutionException(
                 request.FunctionName,
-                $"RFC call to '{request.FunctionName}' returned false.",
+                $"RFC call to '{request.FunctionName}' returned {exceptionCode}.",
                 sapMsg);
         }
 
@@ -358,6 +384,11 @@ internal sealed class SapStaWorker : IDisposable
 
         return new RfcResponse { Parameters = parameters, Tables = tables };
     }
+
+    private static bool IsCommunicationError(string exceptionCode) =>
+        exceptionCode is "RFC_COMMUNICATION_FAILURE"
+                      or "RFC_SYSTEM_FAILURE"
+                      or "RFC_ABAP_RUNTIME_FAILURE";
 
     // -------------------------------------------------------------------------
 

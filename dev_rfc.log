@@ -24,3 +24,217 @@ Global trace level        : 0
 2026-03-17 14:09:20.200921 [65664] >> Error entry
 	[Handle: 634226064	ConvID: 62278079	Target: ksnoka14.itkob.local	SysID: KAP	SysNr: 02	User: PTFENOGB	Client: 100	Language: E	Codepage: 4103]
 	RfcLogonException: Key: RFC_LOGON_FAILURE, Code: RFC_LOGON_FAILURE, Message: Name or password is incorrect (repeat logon)
+
+**** Log file opened at 2026-03-18 10:55:46.307940 UTC+00:00 (GMT Standard Time), Encoding UTF-8
+NW RFC Library: Kernel variant, Release 750 Patch Level 12 Hotfix 2
+Compilation date          : Feb 13 2024 03:59:37
+CPIC library              : 753.2024.01.25 version 3
+NI library                : 40
+Kernel Release            : 753 Patch Level 1300
+Current working directory : C:\Development\git-projects\SapServer
+Program                   : SapServer
+Process ID                : 69300
+User                      : matthew.walker
+Hardware                  : PC with Windows NT 12x Intel 80686 (Mod 151 Step 5)
+Binary Type               : 32bit
+Operating_system          : Windows NT 10.0
+Hostname                  : ENORW140
+IP address                : 10.1.152.12
+IPv6 address              : fe80::c811:431:8f19:f488
+Global trace level        : 0
+
+2026-03-18 10:55:46.301771 [14592] >> Error entry
+	Error in receive: 18, data rec 2, status rec 0, read 934, no SAP ErrInfo available
+2026-03-18 10:56:00.695489 [14592] >> Error entry
+	[Handle: 629911440	ConvID: 34438199	Target: ksnoka25.itkob.local	SysID: KAP	SysNr: 04	User: MAWANOGB	Client: 100	Language: E	Codepage: 4103]
+	RfcCommunicationException: Return Value: 19, Code: RFC_COMMUNICATION_FAILURE, Message: 
+LOCATION    CPIC (TCP/IP) on local host with Unicode
+ERROR       no conversation found with id 34438199
+TIME        Wed Mar 18 10:56:00 2026
+RELEASE     753
+COMPONENT   CPIC (TCP/IP) with Unicode
+VERSION     3
+RC          473
+MODULE      D:/depot/bas/753_REL/src/krn/si/cpic/r3cpic.c
+LINE        10027
+COUNTER     2
+
+
+**** Log file opened at 2026-03-18 11:01:00.153258 UTC+00:00 (GMT Standard Time), Encoding UTF-8
+NW RFC Library: Kernel variant, Release 750 Patch Level 12 Hotfix 2
+Compilation date          : Feb 13 2024 03:59:37
+CPIC library              : 753.2024.01.25 version 3
+NI library                : 40
+Kernel Release            : 753 Patch Level 1300
+Current working directory : C:\Development\git-projects\SapServer
+Program                   : SapServer
+Process ID                : 29384
+User                      : matthew.walker
+Hardware                  : PC with Windows NT 12x Intel 80686 (Mod 151 Step 5)
+Binary Type               : 32bit
+Operating_system          : Windows NT 10.0
+Hostname                  : ENORW140
+IP address                : 10.1.152.12
+IPv6 address              : fe80::c811:431:8f19:f488
+Global trace level        : 0
+
+2026-03-18 11:01:00.150001 [93188] >> Error entry
+	Error in receive: 18, data rec 2, status rec 0, read 934, no SAP ErrInfo available
+2026-03-18 11:01:15.177771 [93188] >> Error entry
+	[Handle: 620995512	ConvID: 36356504	Target: ksnoka25.itkob.local	SysID: KAP	SysNr: 04	User: MAWANOGB	Client: 100	Language: E	Codepage: 4103]
+	RfcCommunicationException: Return Value: 19, Code: RFC_COMMUNICATION_FAILURE, Message: 
+LOCATION    CPIC (TCP/IP) on local host with Unicode
+ERROR       no conversation found with id 36356504
+TIME        Wed Mar 18 11:01:15 2026
+RELEASE     753
+COMPONENT   CPIC (TCP/IP) with Unicode
+VERSION     3
+RC          473
+MODULE      D:/depot/bas/753_REL/src/krn/si/cpic/r3cpic.c
+LINE        10027
+COUNTER     2
+
+
+**** Log file opened at 2026-03-18 11:04:22.906002 UTC+00:00 (GMT Standard Time), Encoding UTF-8
+NW RFC Library: Kernel variant, Release 750 Patch Level 12 Hotfix 2
+Compilation date          : Feb 13 2024 03:59:37
+CPIC library              : 753.2024.01.25 version 3
+NI library                : 40
+Kernel Release            : 753 Patch Level 1300
+Current working directory : C:\Development\git-projects\SapServer
+Program                   : SapServer
+Process ID                : 83560
+User                      : matthew.walker
+Hardware                  : PC with Windows NT 12x Intel 80686 (Mod 151 Step 5)
+Binary Type               : 32bit
+Operating_system          : Windows NT 10.0
+Hostname                  : ENORW140
+IP address                : 10.1.152.12
+IPv6 address              : fe80::c811:431:8f19:f488
+Global trace level        : 0
+
+2026-03-18 11:04:22.900513 [59152] >> Error entry
+	Error in receive: 18, data rec 2, status rec 0, read 934, no SAP ErrInfo available
+2026-03-18 11:04:36.559683 [59152] >> Error entry
+	[Handle: 625440488	ConvID: 36591863	Target: ksnoka25.itkob.local	SysID: KAP	SysNr: 04	User: MAWANOGB	Client: 100	Language: E	Codepage: 4103]
+	RfcCommunicationException: Return Value: 19, Code: RFC_COMMUNICATION_FAILURE, Message: 
+LOCATION    CPIC (TCP/IP) on local host with Unicode
+ERROR       no conversation found with id 36591863
+TIME        Wed Mar 18 11:04:36 2026
+RELEASE     753
+COMPONENT   CPIC (TCP/IP) with Unicode
+VERSION     3
+RC          473
+MODULE      D:/depot/bas/753_REL/src/krn/si/cpic/r3cpic.c
+LINE        10027
+COUNTER     2
+
+
+**** Log file opened at 2026-03-18 11:04:51.013519 UTC+00:00 (GMT Standard Time), Encoding UTF-8
+NW RFC Library: Kernel variant, Release 750 Patch Level 12 Hotfix 2
+Compilation date          : Feb 13 2024 03:59:37
+CPIC library              : 753.2024.01.25 version 3
+NI library                : 40
+Kernel Release            : 753 Patch Level 1300
+Current working directory : C:\Development\git-projects\SapServer
+Program                   : SapServer
+Process ID                : 87452
+User                      : matthew.walker
+Hardware                  : PC with Windows NT 12x Intel 80686 (Mod 151 Step 5)
+Binary Type               : 32bit
+Operating_system          : Windows NT 10.0
+Hostname                  : ENORW140
+IP address                : 10.1.152.12
+IPv6 address              : fe80::c811:431:8f19:f488
+Global trace level        : 0
+
+2026-03-18 11:04:51.011329 [101020] >> Error entry
+	Error in receive: 18, data rec 2, status rec 0, read 714, no SAP ErrInfo available
+
+**** Log file opened at 2026-03-18 11:16:53.376578 UTC+00:00 (GMT Standard Time), Encoding UTF-8
+NW RFC Library: Kernel variant, Release 750 Patch Level 12 Hotfix 2
+Compilation date          : Feb 13 2024 03:59:37
+CPIC library              : 753.2024.01.25 version 3
+NI library                : 40
+Kernel Release            : 753 Patch Level 1300
+Current working directory : C:\Development\git-projects\SapServer
+Program                   : SapServer
+Process ID                : 91948
+User                      : matthew.walker
+Hardware                  : PC with Windows NT 12x Intel 80686 (Mod 151 Step 5)
+Binary Type               : 32bit
+Operating_system          : Windows NT 10.0
+Hostname                  : ENORW140
+IP address                : 10.1.152.12
+IPv6 address              : fe80::c811:431:8f19:f488
+Global trace level        : 0
+
+2026-03-18 11:16:53.373757 [70100] >> Error entry
+	Error in receive: 18, data rec 2, status rec 0, read 904, no SAP ErrInfo available
+2026-03-18 11:17:15.808741 [70100] >> Error entry
+	[Handle: 623939000	ConvID: 37241837	Target: ksnoka25.itkob.local	SysID: KAP	SysNr: 04	User: MAWANOGB	Client: 100	Language: E	Codepage: 4103]
+	RfcCommunicationException: Return Value: 19, Code: RFC_COMMUNICATION_FAILURE, Message: 
+LOCATION    CPIC (TCP/IP) on local host with Unicode
+ERROR       no conversation found with id 37241837
+TIME        Wed Mar 18 11:17:15 2026
+RELEASE     753
+COMPONENT   CPIC (TCP/IP) with Unicode
+VERSION     3
+RC          473
+MODULE      D:/depot/bas/753_REL/src/krn/si/cpic/r3cpic.c
+LINE        10027
+COUNTER     2
+
+2026-03-18 11:19:19.425420 [70100] >> Error entry
+	Error in receive: 18, data rec 2, status rec 0, read 1336, no SAP ErrInfo available
+2026-03-18 11:19:31.039232 [70100] >> Error entry
+	[Handle: 665566952	ConvID: 35940087	Target: ksnoka15.itkob.local	SysID: KAP	SysNr: 03	User: MAWANOGB	Client: 100	Language: E	Codepage: 4103]
+	RfcCommunicationException: Return Value: 19, Code: RFC_COMMUNICATION_FAILURE, Message: 
+LOCATION    CPIC (TCP/IP) on local host with Unicode
+ERROR       no conversation found with id 35940087
+TIME        Wed Mar 18 11:19:31 2026
+RELEASE     753
+COMPONENT   CPIC (TCP/IP) with Unicode
+VERSION     3
+RC          473
+MODULE      D:/depot/bas/753_REL/src/krn/si/cpic/r3cpic.c
+LINE        10027
+COUNTER     4
+
+2026-03-18 11:19:47.785739 [70100] >> Error entry
+	Error in receive: 18, data rec 2, status rec 0, read 1336, no SAP ErrInfo available
+2026-03-18 11:20:02.083585 [70100] >> Error entry
+	[Handle: 556833904	ConvID: 36046668	Target: ksnoka15.itkob.local	SysID: KAP	SysNr: 03	User: MAWANOGB	Client: 100	Language: E	Codepage: 4103]
+	RfcCommunicationException: Return Value: 19, Code: RFC_COMMUNICATION_FAILURE, Message: 
+LOCATION    CPIC (TCP/IP) on local host with Unicode
+ERROR       no conversation found with id 36046668
+TIME        Wed Mar 18 11:20:02 2026
+RELEASE     753
+COMPONENT   CPIC (TCP/IP) with Unicode
+VERSION     3
+RC          473
+MODULE      D:/depot/bas/753_REL/src/krn/si/cpic/r3cpic.c
+LINE        10027
+COUNTER     6
+
+
+**** Log file opened at 2026-03-18 11:22:41.732766 UTC+00:00 (GMT Standard Time), Encoding UTF-8
+NW RFC Library: Kernel variant, Release 750 Patch Level 12 Hotfix 2
+Compilation date          : Feb 13 2024 03:59:37
+CPIC library              : 753.2024.01.25 version 3
+NI library                : 40
+Kernel Release            : 753 Patch Level 1300
+Current working directory : C:\Development\git-projects\SapServer
+Program                   : SapServer
+Process ID                : 86256
+User                      : matthew.walker
+Hardware                  : PC with Windows NT 12x Intel 80686 (Mod 151 Step 5)
+Binary Type               : 32bit
+Operating_system          : Windows NT 10.0
+Hostname                  : ENORW140
+IP address                : 10.1.152.12
+IPv6 address              : fe80::c811:431:8f19:f488
+Global trace level        : 0
+
+2026-03-18 11:22:41.730328 [13872] >> Error entry
+	Error in receive: 18, data rec 2, status rec 0, read 1104, no SAP ErrInfo available

@@ -10,10 +10,6 @@ using SapServer.Services.Interfaces;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Run as a Windows Service when installed via sc.exe.
-// Has no effect when started normally (dotnet run / console).
-builder.Host.UseWindowsService();
-
 // ---------------------------------------------------------------------------
 // Logging — Serilog reads its configuration from appsettings.json "Serilog" section
 // ---------------------------------------------------------------------------

@@ -1,14 +1,16 @@
-### SapServer – dev bypass (no JWT required)
-@baseUrl = http://localhost:5200
+@baseUrl = http://127.0.0.1:5200
+@token = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzcWwyMDA1LWJyaWRnZSIsImF1ZCI6InNhcC1zZXJ2ZXIiLCJzdWIiOiJkZXYiLCJ1c2VySWQiOjEsInJvbGUiOiJhZG1pbiIsImlhdCI6MTc3MzgyNDUyMCwiZXhwIjoxNzczODI4MTIwfQ.VKYemNDzHkLk3GgxRG5nxPvQ7x054-YziiNvJmYQIwE
 
-### Ping: pool status (admin role auto-granted by DevAuthHandler)
+### Ping: pool status
 GET {{baseUrl}}/api/rfc/status
+Authorization: Bearer {{token}}
 
 ###
 
-### RFC_READ_TABLE – read first 10 rows of T000 (SAP clients table)
+### ZRFC_READ_TABLES – read LQUA stock
 POST {{baseUrl}}/api/rfc/execute
 Content-Type: application/json
+Authorization: Bearer {{token}}
 
 {
   "functionName": "ZRFC_READ_TABLES",
@@ -40,18 +42,30 @@ Content-Type: application/json
 ### RFC_READ_TABLE – read USR01 (current user profile), no field filter
 POST {{baseUrl}}/api/rfc/execute
 Content-Type: application/json
+Authorization: Bearer {{token}}
 
 {
-  "functionName": "RFC_READ_TABLE",
-  "importParameters": {
-    "QUERY_TABLE": "USR01",
-    "DELIMITER": "|",
-    "NO_RECS": "5"
-  },
-  "inputTables": {},
-  "exportParameters": [],
-  "outputTables": {
-    "DATA":   ["WA"],
-    "FIELDS": ["FIELDNAME", "OFFSET", "LENGTH", "TYPE"]
-  }
-}
+        "functionName": "L_TO_CREATE_SINGLE",
+        "importParameters": {
+          "I_LGNUM": "312", 
+          "I_WERKS": "3012", 
+          "I_LGORT": "1710",
+          "I_SQUIT": "X",
+          "I_BWLVS": "999",
+          "I_MATNR": "000000000000010006",
+          "I_ANFME": 10,
+          "I_CHARG": "",
+          "I_ZEUGN": "",
+          "I_VLTYP": "RO",
+          "I_VLPLA": "YARD",
+          "I_BESTQ": "",
+          "I_SOBKZ": "",
+          "I_SONUM": "",
+          "I_NLPLA": "YARD",
+          "I_NLTYP": "RO"
+        },
+        "inputTables":      {},
+        "inputTablesItems": {},
+        "exportParameters": ["E_TANUM"],
+        "outputTables":     { "RETURN": ["TYPE", "MESSAGE"] }
+      }
