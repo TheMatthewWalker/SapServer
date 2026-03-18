@@ -69,3 +69,14 @@ Authorization: Bearer {{token}}
         "exportParameters": ["E_TANUM"],
         "outputTables":     { "RETURN": ["TYPE", "MESSAGE"] }
       }
+
+
+
+### TESTING cost-sheet API with hardcoded filters (ignoring request body filters)
+POST {{baseUrl}}/api/costing/cost-sheet
+Content-Type: application/json
+
+{
+    "date": "31.12.2026",
+    "status": "FR"
+}
