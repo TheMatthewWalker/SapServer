@@ -239,36 +239,44 @@ internal sealed class SapStaWorker : IDisposable
         }
 
         // Input tables — clear with Freetable() then populate rows
-        foreach (var (tableName, rows) in request.InputTables)
+        try
         {
-            dynamic table = func.Tables(tableName);
-            table.Freetable();
-            foreach (var row in rows)
+            foreach (var (tableName, rows) in request.InputTables)
             {
-                dynamic sapRow = table.Rows.Add();
-                foreach (var (col, val) in row)
+                dynamic table = func.Tables(tableName);
+                table.Freetable();
+                foreach (var row in rows)
                 {
-                    if (val is not null)
-                        sapRow[col] = UnwrapJson(val);
+                    dynamic sapRow = table.Rows.Add();
+                    foreach (var (col, val) in row)
+                    {
+                        if (val is not null)
+                            sapRow[col] = UnwrapJson(val);
+                    }
+                }
+            }
+
+            // Input table Items — clear with Freetable() then populate rows
+            foreach (var (tableName, rows) in request.InputTablesItems)
+            {
+                dynamic table = func.Tables.Item(tableName);
+                table.Freetable();
+                foreach (var row in rows)
+                {
+                    dynamic sapRow = table.Rows.Add();
+                    foreach (var (col, val) in row)
+                    {
+                        if (val is not null)
+                            sapRow[col] = UnwrapJson(val);
+                    }
                 }
             }
         }
-
-
-        // Input table Items — clear with Freetable() then populate rows
-        foreach (var (tableName, rows) in request.InputTablesItems)
+        catch (System.Runtime.InteropServices.COMException ex)
         {
-            dynamic table = func.Tables.Item(tableName);
-            table.Freetable();
-            foreach (var row in rows)
-            {
-                dynamic sapRow = table.Rows.Add();
-                foreach (var (col, val) in row)
-                {
-                    if (val is not null)
-                        sapRow[col] = UnwrapJson(val);
-                }
-            }
+            throw new SapExecutionException(request.FunctionName,
+                $"Failed to populate input tables for '{request.FunctionName}' (HRESULT 0x{ex.ErrorCode:X8}).",
+                ex.Message);
         }
 
         bool success;
@@ -295,10 +303,14 @@ internal sealed class SapStaWorker : IDisposable
                 throw new SapConnectionException(SlotId,
                     $"SAP communication failure during '{request.FunctionName}': {exceptionCode}.");
 
+            string detail = string.IsNullOrEmpty(sapMsg)
+                ? exceptionCode
+                : $"{exceptionCode}: {sapMsg}";
+
             throw new SapExecutionException(
                 request.FunctionName,
                 $"RFC call to '{request.FunctionName}' returned {exceptionCode}.",
-                sapMsg);
+                detail);
         }
 
         return BuildResponse(func, request);
@@ -344,6 +356,24 @@ internal sealed class SapStaWorker : IDisposable
         foreach (var paramName in request.ExportParameters)
         {
             try   { parameters[paramName] = func.imports(paramName)?.Value?.ToString(); }
+            catch { parameters[paramName] = null; }
+        }
+
+        // Read structure export parameters — positional fields joined with a space
+        // Mirrors VB: Set x = MyFunc.imports("MESSG") / x(1) & " " & x(2) & ...
+        foreach (var (paramName, fieldCount) in request.StructExportParameters)
+        {
+            try
+            {
+                dynamic s      = func.imports(paramName);
+                var     parts  = new List<string>(fieldCount);
+                for (int i = 1; i <= fieldCount; i++)
+                {
+                    try { parts.Add(s(i)?.ToString() ?? ""); }
+                    catch { parts.Add(""); }
+                }
+                parameters[paramName] = string.Join(" ", parts).Trim();
+            }
             catch { parameters[paramName] = null; }
         }
 

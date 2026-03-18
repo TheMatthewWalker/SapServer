@@ -26,6 +26,13 @@ public sealed class RfcRequest
     public List<string> ExportParameters { get; init; } = new();
 
     /// <summary>
+    /// Structure export parameters to read back as a concatenated string.
+    /// Key = SAP parameter name; Value = number of positional fields to read and join.
+    /// Mirrors the VB pattern: x(1) &amp; " " &amp; x(2) &amp; ... &amp; x(N).
+    /// </summary>
+    public Dictionary<string, int> StructExportParameters { get; init; } = new();
+
+    /// <summary>
     /// Output tables to read from the RFC result.
     /// Key = SAP table name; Value = list of field names to extract per row.
     /// Pass an empty field list to read only the "WA" (work area) column,

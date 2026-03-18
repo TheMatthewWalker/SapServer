@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace SapServer.Models.Bapi;
 
 // ── DisplayStock ─────────────────────────────────────────────────────────────
@@ -74,4 +76,28 @@ public sealed class SapReturnMessage
 {
     public string Type    { get; init; } = string.Empty;
     public string Message { get; init; } = string.Empty;
+}
+
+// ── ConsignmentMb1b ──────────────────────────────────────────────────────────
+
+public sealed class ConsignmentMb1bRequest
+{
+    [Required, MinLength(1)] public string  Material        { get; init; } = string.Empty; // MATNR → MSEG-MATNR(01), LTAP-MATNR
+    [Range(0.001, double.MaxValue, ErrorMessage = "Quantity must be greater than zero.")]
+                             public decimal Quantity        { get; init; }                  // ANFME → MSEG-ERFMG(01), RL03T-ANFME
+    [Required, MinLength(1)] public string  Header          { get; init; } = string.Empty; // MKPF-BKTXT
+    [Required, MinLength(1)] public string  Vendor          { get; init; } = string.Empty; // LIFNR → MSEGK-LIFNR, RL03T-LSONR
+    [Required, MinLength(1)] public string  StorageLocation { get; init; } = string.Empty; // LGORT → RM07M-LGORT, LTAP-LGORT
+    [Required, MinLength(1)] public string  SourceType      { get; init; } = string.Empty; // LGTYP → LTAP-VLTYP (non-consign source) / LTAP-NLTYP (consign dest)
+    [Required, MinLength(1)] public string  SourceBin       { get; init; } = string.Empty; // LGPLA → LTAP-VLPLA (non-consign source) / LTAP-NLPLA (consign dest)
+    [Required, MinLength(1)] public string  DestinationType { get; init; } = string.Empty; // LGTYP → LTAP-NLTYP (non-consign dest) / LTAP-VLTYP (consign source)
+    [Required, MinLength(1)] public string  DestinationBin  { get; init; } = string.Empty; // LGPLA → LTAP-NLPLA (non-consign dest) / LTAP-VLPLA (consign source)
+                             public string  DeliveryNote    { get; init; } = string.Empty; // RM07M-MTSNR (optional)
+}
+
+public sealed class ConsignmentMb1bResponse
+{
+    public string Mb1bMessage           { get; init; } = string.Empty;
+    public string ToNonConsignMessage   { get; init; } = string.Empty;
+    public string ToConsignMessage      { get; init; } = string.Empty;
 }

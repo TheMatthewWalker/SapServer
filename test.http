@@ -72,6 +72,26 @@ Authorization: Bearer {{token}}
 
 
 
+### POST /api/warehouse/consignment-mb1b — consignment receipt + stock swap
+POST {{baseUrl}}/api/warehouse/consignment-mb1b
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "material":        "10000",
+  "quantity":        1,
+  "header":          "test",
+  "vendor":          "200088",
+  "storageLocation": "1710",
+  "sourceType":      "RO",
+  "sourceBin":       "YARD",
+  "destinationType": "RO",
+  "destinationBin":  "YARD",
+  "deliveryNote":    ""
+}
+
+###
+
 ### TESTING cost-sheet API with hardcoded filters (ignoring request body filters)
 POST {{baseUrl}}/api/costing/cost-sheet
 Content-Type: application/json

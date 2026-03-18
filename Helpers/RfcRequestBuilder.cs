@@ -6,12 +6,13 @@ namespace SapServer.Helpers;
 public sealed class RfcRequestBuilder
 {
     private readonly string                                                    _functionName;
-    private readonly Dictionary<string, object?>                              _import       = new();
-    private readonly Dictionary<string, List<Dictionary<string, object?>>>   _tables       = new();
-    private readonly Dictionary<string, List<Dictionary<string, object?>>>   _tableItems   = new();
-    private readonly List<string>                                             _export       = new();
-    private readonly Dictionary<string, List<string>>                        _outputTables = new();
-    private readonly WhereClauseBuilder                                       _where        = new();
+    private readonly Dictionary<string, object?>                              _import         = new();
+    private readonly Dictionary<string, List<Dictionary<string, object?>>>   _tables         = new();
+    private readonly Dictionary<string, List<Dictionary<string, object?>>>   _tableItems     = new();
+    private readonly List<string>                                             _export         = new();
+    private readonly Dictionary<string, int>                                  _structExport   = new();
+    private readonly Dictionary<string, List<string>>                        _outputTables   = new();
+    private readonly WhereClauseBuilder                                       _where          = new();
     private bool _hasWhere;
 
     public RfcRequestBuilder(string functionName)
@@ -76,6 +77,16 @@ public sealed class RfcRequestBuilder
     }
 
     /// <summary>
+    /// Registers a structure export parameter to read back as a space-joined string.
+    /// Reads <paramref name="fieldCount"/> positional fields — mirrors VB: x(1) &amp; " " &amp; x(2) &amp; ...
+    /// </summary>
+    public RfcRequestBuilder ReadStructParam(string paramName, int fieldCount)
+    {
+        _structExport[paramName] = fieldCount;
+        return this;
+    }
+
+    /// <summary>
     /// Registers an output table to read back. Specify field names to extract individual columns.
     /// If no fields are provided, only the "WA" (work area) column is read — correct for ZRFC_READ_TABLES.
     /// </summary>
@@ -95,12 +106,13 @@ public sealed class RfcRequestBuilder
 
         return new RfcRequest
         {
-            FunctionName     = _functionName,
-            ImportParameters = _import,
-            InputTables      = _tables,
-            InputTablesItems = tableItems,
-            ExportParameters = _export,
-            OutputTables     = _outputTables
+            FunctionName           = _functionName,
+            ImportParameters       = _import,
+            InputTables            = _tables,
+            InputTablesItems       = tableItems,
+            ExportParameters       = _export,
+            StructExportParameters = _structExport,
+            OutputTables           = _outputTables
         };
     }
 
