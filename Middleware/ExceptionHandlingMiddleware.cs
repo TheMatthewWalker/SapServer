@@ -39,7 +39,7 @@ public sealed class ExceptionHandlingMiddleware
         {
             SapPermissionException    => (403, "FORBIDDEN",       ex.Message),
             SapConnectionException    => (503, "SAP_UNAVAILABLE", "The SAP system is currently unavailable. Please try again shortly."),
-            SapExecutionException e   => (422, "RFC_ERROR",       e.SapMessage ?? e.Message),
+            SapExecutionException e   => (422, "RFC_ERROR",       string.IsNullOrEmpty(e.SapMessage) ? e.Message : e.SapMessage),
             PoolExhaustedException    => (503, "POOL_EXHAUSTED",  "All SAP workers are busy. Please retry your request."),
             OperationCanceledException=> (499, "REQUEST_CANCELLED","The request was cancelled."),
             UnauthorizedAccessException => (401, "UNAUTHORIZED",  "Authentication is required."),

@@ -279,9 +279,14 @@ internal sealed class SapStaWorker : IDisposable
                 ex.Message);
         }
 
+        // Cast to the typed IFunction interface so Call() is invoked via FUNC dispatch
+        // (not PROPERTYGET), which is required for the COM server to populate Exception.
+        var typedFunc = (SAPFunctionsOCX.IFunction)func;
+
         bool success;
         try
         {
+            //success = typedFunc.Call();
             success = func.Call;
         }
         catch (System.Runtime.InteropServices.COMException ex)
@@ -292,8 +297,13 @@ internal sealed class SapStaWorker : IDisposable
 
         if (!success)
         {
-            string exceptionCode = Convert.ToString(func.Exception) ?? "";
-            string? sapMsg       = TryReadReturnMessage(func);
+            string exceptionCode = typedFunc.Exception ?? "";
+
+            string? sapMsg = TryReadReturnMessage(func, out string returnTableDiag);
+
+            _logger.LogWarning(
+                "RFC '{Function}' failed — Exception: '{ExCode}', ReturnTable: {RetDiag}, ReturnMsg: '{RetMsg}'",
+                request.FunctionName, exceptionCode, returnTableDiag, sapMsg ?? "(none)");
 
             // The SAP OCX drops the connection after any failed call — always mark disconnected
             // so EnsureConnected() reconnects before the next request.
@@ -303,9 +313,9 @@ internal sealed class SapStaWorker : IDisposable
                 throw new SapConnectionException(SlotId,
                     $"SAP communication failure during '{request.FunctionName}': {exceptionCode}.");
 
-            string detail = string.IsNullOrEmpty(sapMsg)
-                ? exceptionCode
-                : $"{exceptionCode}: {sapMsg}";
+            string detail = !string.IsNullOrEmpty(sapMsg)
+                ? (string.IsNullOrEmpty(exceptionCode) ? sapMsg : $"{exceptionCode}: {sapMsg}")
+                : (!string.IsNullOrEmpty(exceptionCode) ? exceptionCode : $"RFC call to '{request.FunctionName}' failed (no detail available).");
 
             throw new SapExecutionException(
                 request.FunctionName,
@@ -322,6 +332,9 @@ internal sealed class SapStaWorker : IDisposable
     /// </summary>
     private static object UnwrapJson(object value)
     {
+        // COM VARIANT doesn't support .NET decimal — coerce to double first
+        if (value is decimal d) return (double)d;
+
         if (value is not System.Text.Json.JsonElement je) return value;
         return je.ValueKind switch
         {
@@ -335,15 +348,41 @@ internal sealed class SapStaWorker : IDisposable
         };
     }
 
-    private static string? TryReadReturnMessage(dynamic func)
+    private static string? TryReadReturnMessage(dynamic func, out string diag)
     {
         try
         {
-            dynamic ret = func.tables.Item("RETURN");
+            dynamic ret      = func.tables.Item("RETURN");
+            int     rowCount = 0;
+            var     messages = new List<string>();
+
             foreach (var row in ret.Rows)
-                return row["MESSAGE"]?.ToString();
+            {
+                rowCount++;
+                // Prefer the pre-formatted MESSAGE field; fall back to MESSAGE_V1-V4
+                string msg = row["MESSAGE"]?.ToString() ?? "";
+                if (string.IsNullOrWhiteSpace(msg))
+                {
+                    var parts = new[]
+                    {
+                        row["MESSAGE_V1"]?.ToString(),
+                        row["MESSAGE_V2"]?.ToString(),
+                        row["MESSAGE_V3"]?.ToString(),
+                        row["MESSAGE_V4"]?.ToString(),
+                    };
+                    msg = string.Join(" ", parts.Where(p => !string.IsNullOrWhiteSpace(p)));
+                }
+                if (!string.IsNullOrWhiteSpace(msg))
+                    messages.Add($"[{row["TYPE"]}] {msg}");
+            }
+
+            diag = $"{rowCount} row(s)";
+            return messages.Count > 0 ? string.Join("; ", messages) : null;
         }
-        catch { /* RETURN table may not exist for this function */ }
+        catch (Exception ex)
+        {
+            diag = $"table access failed: {ex.Message}";
+        }
         return null;
     }
 

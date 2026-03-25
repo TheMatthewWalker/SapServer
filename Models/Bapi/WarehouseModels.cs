@@ -53,9 +53,9 @@ public sealed class CreateTransferOrderRequest
     public string  StorageLocation    { get; init; } = string.Empty; // I_LGORT
     public string  Material           { get; init; } = string.Empty; // I_MATNR (padded to 18)
     public decimal Quantity           { get; init; }                  // I_ANFME
-    public string  SourceBinType      { get; init; } = string.Empty; // I_VLTYP
+    public string  SourceType      { get; init; } = string.Empty; // I_VLTYP
     public string  SourceBin          { get; init; } = string.Empty; // I_VLPLA (padded to 10)
-    public string  DestinationBinType { get; init; } = string.Empty; // I_NLTYP
+    public string  DestinationType { get; init; } = string.Empty; // I_NLTYP
     public string  DestinationBin     { get; init; } = string.Empty; // I_NLPLA (padded to 10)
 
     // Optional
@@ -86,7 +86,7 @@ public sealed class ConsignmentMb1bRequest
     [Range(0.001, double.MaxValue, ErrorMessage = "Quantity must be greater than zero.")]
                              public decimal Quantity        { get; init; }                  // ANFME → MSEG-ERFMG(01), RL03T-ANFME
     [Required, MinLength(1)] public string  Header          { get; init; } = string.Empty; // MKPF-BKTXT
-    [Required, MinLength(1)] public string  Vendor          { get; init; } = string.Empty; // LIFNR → MSEGK-LIFNR, RL03T-LSONR
+    [Required, MinLength(1)] public string  SpecialStockNumber { get; init; } = string.Empty; // LIFNR → MSEGK-LIFNR, RL03T-LSONR
     [Required, MinLength(1)] public string  StorageLocation { get; init; } = string.Empty; // LGORT → RM07M-LGORT, LTAP-LGORT
     [Required, MinLength(1)] public string  SourceType      { get; init; } = string.Empty; // LGTYP → LTAP-VLTYP (non-consign source) / LTAP-NLTYP (consign dest)
     [Required, MinLength(1)] public string  SourceBin       { get; init; } = string.Empty; // LGPLA → LTAP-VLPLA (non-consign source) / LTAP-NLPLA (consign dest)

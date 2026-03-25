@@ -14,7 +14,7 @@ public static class SapPad
         if (string.IsNullOrEmpty(value)) return string.Empty;
         if (value.Length >= length)      return value;
 
-        bool isNumeric = value.All(char.IsDigit);
-        return isNumeric ? value.PadLeft(length, '0') : value.PadLeft(length, ' ');
+        if (!value.All(char.IsDigit)) return value;
+        return value.PadLeft(length, '0');
     }
 }
