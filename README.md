@@ -46,14 +46,14 @@ sql2005-bridge frontend  (browser)
 │    → logs disconnected slots          │
 └───────────────────────────────────────┘
         │
-        │  SAP GUI COM (SAPFunctionsOCX)
+        │  SAP GUI COM (SAPFunctions64)
         ▼
    SAP Application Server
 ```
 
 ### STA Thread Pool
 
-SAP's `SAPFunctionsOCX` COM component must be used from the apartment thread that created it, and that thread must be STA (Single-Threaded Apartment). ASP.NET Core's thread pool is MTA, so direct RFC calls from request handlers would fail or corrupt COM state.
+SAP's `SAPFunctions64` COM component must be used from the apartment thread that created it, and that thread must be STA (Single-Threaded Apartment). ASP.NET Core's thread pool is MTA, so direct RFC calls from request handlers would fail or corrupt COM state.
 
 The solution: each `SapStaWorker` owns one dedicated STA thread. HTTP request handlers post `SapWorkItem` objects (containing a `TaskCompletionSource`) to the worker's `BlockingCollection`. The STA thread executes the RFC call synchronously and sets the result on the TCS, which resumes the awaiting HTTP handler on the thread pool. This bridges async/await with COM-safe execution.
 
@@ -131,7 +131,7 @@ Permissions are cached for `PermissionCacheSeconds` (default 60) to reduce SQL l
 ```
 SapServer/
 └── libs/
-    └── SAPFunctionsOCX.Interop.dll   ← copy from SAP GUI installation
+    └── SAPFunctions64.Interop.dll   ← copy from SAP GUI installation
 ```
 
 If the file doesn't exist in `libs/`, you can generate it from Visual Studio:
@@ -139,7 +139,7 @@ If the file doesn't exist in `libs/`, you can generate it from Visual Studio:
 
 Or use `tlbimp.exe` from the Windows SDK:
 ```
-tlbimp "C:\Program Files (x86)\SAP\FrontEnd\SapGui\SAPFunctionsOCX.ocx" /out:libs\SAPFunctionsOCX.Interop.dll
+tlbimp "C:\Program Files (x86)\SAP\FrontEnd\SapGui\SAPFunctions64.ocx" /out:libs\SAPFunctions64.Interop.dll
 ```
 
 ### 2. Create the permissions table
@@ -342,7 +342,7 @@ SapServer/
 │   └── PermissionService.cs    # SQL Server permission lookup with caching
 ├── sql/
 │   └── SapPermissions_setup.sql
-├── libs/                       # Place SAPFunctionsOCX.Interop.dll here
+├── libs/                       # Place SAPFunctions64.Interop.dll here
 ├── Program.cs
 ├── appsettings.json
 └── appsettings.example.json

@@ -116,3 +116,11 @@ Content-Type: application/json
     "date": "31.12.2026",
     "status": "FR"
 }
+
+
+
+
+### Test KN API connectivity and token validity
+
+POST http://localhost:4000/api/freight-booking/shipment/1
+Accept: application/json

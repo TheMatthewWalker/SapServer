@@ -238,3 +238,602 @@ Global trace level        : 0
 
 2026-03-18 11:22:41.730328 [13872] >> Error entry
 	Error in receive: 18, data rec 2, status rec 0, read 1104, no SAP ErrInfo available
+
+**** Log file opened at 2026-03-18 21:14:34.816974 UTC+00:00 (GMT Standard Time), Encoding UTF-8
+NW RFC Library: Kernel variant, Release 750 Patch Level 12 Hotfix 2
+Compilation date          : Feb 13 2024 03:59:37
+CPIC library              : 753.2024.01.25 version 3
+NI library                : 40
+Kernel Release            : 753 Patch Level 1300
+Current working directory : C:\Development\git-projects\SapServer
+Program                   : SapServer
+Process ID                : 41920
+User                      : matthew.walker
+Hardware                  : PC with Windows NT 12x Intel 80686 (Mod 151 Step 5)
+Binary Type               : 32bit
+Operating_system          : Windows NT 10.0
+Hostname                  : ENORW140
+IP address                : 10.1.152.12
+IPv6 address              : fe80::c811:431:8f19:f488
+Global trace level        : 0
+
+2026-03-18 21:14:34.812151 [38964] >> Error entry
+	Error in receive: 20, data rec 0, status rec 0, read 0, 
+LOCATION    CPIC (TCP/IP) on local host with Unicode
+ERROR       connection to partner 'ksnoka15.itkob.local:3303' broken
+TIME        Wed Mar 18 21:14:34 2026
+RELEASE     753
+COMPONENT   NI (network interface)
+VERSION     40
+RC          -6
+MODULE      D:/depot/bas/753_REL/src/base/ni/nixxi.cpp
+LINE        5465
+DETAIL      NiIRead: P=10.39.204.39:3303; L=10.1.152.12:44345
+SYSTEM CALL recv
+ERRNO       10054
+ERRNO TEXT  WSAECONNRESET: Connection reset by peer
+COUNTER     5
+
+2026-03-18 21:14:34.820279 [38964] >> Error entry
+	[Handle: 606991488	ConvID: 54697971	Target: ksnoka15.itkob.local	SysID: KAP	SysNr: 03	User: MAWANOGB	Client: 100	Language: E	Codepage: 4103]
+	RfcCommunicationException: Return Value: 20, Code: RFC_COMMUNICATION_FAILURE, Message: 
+LOCATION    CPIC (TCP/IP) on local host with Unicode
+ERROR       connection to partner 'ksnoka15.itkob.local:3303' broken
+TIME        Wed Mar 18 21:14:34 2026
+RELEASE     753
+COMPONENT   NI (network interface)
+VERSION     40
+RC          -6
+MODULE      D:/depot/bas/753_REL/src/base/ni/nixxi.cpp
+LINE        5465
+DETAIL      NiIRead: P=10.39.204.39:3303; L=10.1.152.12:44345
+SYSTEM CALL recv
+ERRNO       10054
+ERRNO TEXT  WSAECONNRESET: Connection reset by peer
+COUNTER     5
+
+2026-03-19 15:14:24.576809 [38964] >> Error entry
+	Error in receive: 20, data rec 0, status rec 0, read 0, 
+LOCATION    CPIC (TCP/IP) on local host with Unicode
+ERROR       connection to partner 'ksnoka14.itkob.local:3302' broken
+TIME        Thu Mar 19 15:14:24 2026
+RELEASE     753
+COMPONENT   NI (network interface)
+VERSION     40
+RC          -6
+MODULE      D:/depot/bas/753_REL/src/base/ni/nixxi.cpp
+LINE        5465
+DETAIL      NiIRead: P=10.39.204.38:3302; L=10.1.152.12:24945
+SYSTEM CALL recv
+ERRNO       10054
+ERRNO TEXT  WSAECONNRESET: Connection reset by peer
+COUNTER     10
+
+2026-03-19 15:14:24.577527 [38964] >> Error entry
+	[Handle: 606507240	ConvID: 74891273	Target: ksnoka14.itkob.local	SysID: KAP	SysNr: 02	User: MAWANOGB	Client: 100	Language: E	Codepage: 4103]
+	RfcCommunicationException: Return Value: 20, Code: RFC_COMMUNICATION_FAILURE, Message: 
+LOCATION    CPIC (TCP/IP) on local host with Unicode
+ERROR       connection to partner 'ksnoka14.itkob.local:3302' broken
+TIME        Thu Mar 19 15:14:24 2026
+RELEASE     753
+COMPONENT   NI (network interface)
+VERSION     40
+RC          -6
+MODULE      D:/depot/bas/753_REL/src/base/ni/nixxi.cpp
+LINE        5465
+DETAIL      NiIRead: P=10.39.204.38:3302; L=10.1.152.12:24945
+SYSTEM CALL recv
+ERRNO       10054
+ERRNO TEXT  WSAECONNRESET: Connection reset by peer
+COUNTER     10
+
+2026-03-19 17:14:10.833828 [38964] >> Error entry
+	Error in receive: 20, data rec 0, status rec 0, read 0, 
+LOCATION    CPIC (TCP/IP) on local host with Unicode
+ERROR       connection to partner 'ksnoka25.itkob.local:3304' broken
+TIME        Thu Mar 19 17:14:10 2026
+RELEASE     753
+COMPONENT   NI (network interface)
+VERSION     40
+RC          -6
+MODULE      D:/depot/bas/753_REL/src/base/ni/nixxi.cpp
+LINE        5465
+DETAIL      NiIRead: P=10.39.204.40:3304; L=10.1.152.12:49354
+SYSTEM CALL recv
+ERRNO       10054
+ERRNO TEXT  WSAECONNRESET: Connection reset by peer
+COUNTER     15
+
+2026-03-19 17:14:10.834026 [38964] >> Error entry
+	[Handle: 512697824	ConvID: 38045502	Target: ksnoka25.itkob.local	SysID: KAP	SysNr: 04	User: MAWANOGB	Client: 100	Language: E	Codepage: 4103]
+	RfcCommunicationException: Return Value: 20, Code: RFC_COMMUNICATION_FAILURE, Message: 
+LOCATION    CPIC (TCP/IP) on local host with Unicode
+ERROR       connection to partner 'ksnoka25.itkob.local:3304' broken
+TIME        Thu Mar 19 17:14:10 2026
+RELEASE     753
+COMPONENT   NI (network interface)
+VERSION     40
+RC          -6
+MODULE      D:/depot/bas/753_REL/src/base/ni/nixxi.cpp
+LINE        5465
+DETAIL      NiIRead: P=10.39.204.40:3304; L=10.1.152.12:49354
+SYSTEM CALL recv
+ERRNO       10054
+ERRNO TEXT  WSAECONNRESET: Connection reset by peer
+COUNTER     15
+
+2026-03-19 23:14:41.731903 [38964] >> Error entry
+	Error in receive: 20, data rec 0, status rec 0, read 0, 
+LOCATION    CPIC (TCP/IP) on local host with Unicode
+ERROR       connection to partner '10.39.204.38:3302' broken
+TIME        Thu Mar 19 23:14:41 2026
+RELEASE     753
+COMPONENT   NI (network interface)
+VERSION     40
+RC          -6
+MODULE      D:/depot/bas/753_REL/src/base/ni/nixxi.cpp
+LINE        5465
+DETAIL      NiIRead: P=10.39.204.38:3302; L=10.1.152.12:43730
+SYSTEM CALL recv
+ERRNO       10054
+ERRNO TEXT  WSAECONNRESET: Connection reset by peer
+COUNTER     20
+
+2026-03-19 23:14:41.732206 [38964] >> Error entry
+	[Handle: 555995752	ConvID: 46552179	Target: ksnoka14.itkob.local	SysID: KAP	SysNr: 02	User: MAWANOGB	Client: 100	Language: E	Codepage: 4103]
+	RfcCommunicationException: Return Value: 20, Code: RFC_COMMUNICATION_FAILURE, Message: 
+LOCATION    CPIC (TCP/IP) on local host with Unicode
+ERROR       connection to partner '10.39.204.38:3302' broken
+TIME        Thu Mar 19 23:14:41 2026
+RELEASE     753
+COMPONENT   NI (network interface)
+VERSION     40
+RC          -6
+MODULE      D:/depot/bas/753_REL/src/base/ni/nixxi.cpp
+LINE        5465
+DETAIL      NiIRead: P=10.39.204.38:3302; L=10.1.152.12:43730
+SYSTEM CALL recv
+ERRNO       10054
+ERRNO TEXT  WSAECONNRESET: Connection reset by peer
+COUNTER     20
+
+2026-03-20 08:36:58.529053 [38964] >> Error entry
+	Error in receive: 20, data rec 0, status rec 0, read 0, 
+LOCATION    CPIC (TCP/IP) on local host with Unicode
+ERROR       connection to partner 'ksnoka14.itkob.local:3302' broken
+TIME        Fri Mar 20 08:36:58 2026
+RELEASE     753
+COMPONENT   NI (network interface)
+VERSION     40
+RC          -6
+MODULE      D:/depot/bas/753_REL/src/base/ni/nixxi.cpp
+LINE        5465
+DETAIL      NiIRead: P=10.39.204.38:3302; L=10.1.152.12:24628
+SYSTEM CALL recv
+ERRNO       10054
+ERRNO TEXT  WSAECONNRESET: Connection reset by peer
+COUNTER     25
+
+2026-03-20 08:36:58.529285 [38964] >> Error entry
+	[Handle: 556175992	ConvID: 68512092	Target: ksnoka14.itkob.local	SysID: KAP	SysNr: 02	User: MAWANOGB	Client: 100	Language: E	Codepage: 4103]
+	RfcCommunicationException: Return Value: 20, Code: RFC_COMMUNICATION_FAILURE, Message: 
+LOCATION    CPIC (TCP/IP) on local host with Unicode
+ERROR       connection to partner 'ksnoka14.itkob.local:3302' broken
+TIME        Fri Mar 20 08:36:58 2026
+RELEASE     753
+COMPONENT   NI (network interface)
+VERSION     40
+RC          -6
+MODULE      D:/depot/bas/753_REL/src/base/ni/nixxi.cpp
+LINE        5465
+DETAIL      NiIRead: P=10.39.204.38:3302; L=10.1.152.12:24628
+SYSTEM CALL recv
+ERRNO       10054
+ERRNO TEXT  WSAECONNRESET: Connection reset by peer
+COUNTER     25
+
+2026-03-20 15:14:56.170522 [38964] >> Error entry
+	Error in receive: 20, data rec 0, status rec 0, read 0, 
+LOCATION    CPIC (TCP/IP) on local host with Unicode
+ERROR       connection to partner 'ksnoka15.itkob.local:3303' broken
+TIME        Fri Mar 20 15:14:56 2026
+RELEASE     753
+COMPONENT   NI (network interface)
+VERSION     40
+RC          -6
+MODULE      D:/depot/bas/753_REL/src/base/ni/nixxi.cpp
+LINE        5465
+DETAIL      NiIRead: P=10.39.204.39:3303; L=10.1.152.12:56121
+SYSTEM CALL recv
+ERRNO       10054
+ERRNO TEXT  WSAECONNRESET: Connection reset by peer
+COUNTER     30
+
+2026-03-20 15:14:56.176959 [38964] >> Error entry
+	[Handle: 512659432	ConvID: 99083118	Target: ksnoka15.itkob.local	SysID: KAP	SysNr: 03	User: MAWANOGB	Client: 100	Language: E	Codepage: 4103]
+	RfcCommunicationException: Return Value: 20, Code: RFC_COMMUNICATION_FAILURE, Message: 
+LOCATION    CPIC (TCP/IP) on local host with Unicode
+ERROR       connection to partner 'ksnoka15.itkob.local:3303' broken
+TIME        Fri Mar 20 15:14:56 2026
+RELEASE     753
+COMPONENT   NI (network interface)
+VERSION     40
+RC          -6
+MODULE      D:/depot/bas/753_REL/src/base/ni/nixxi.cpp
+LINE        5465
+DETAIL      NiIRead: P=10.39.204.39:3303; L=10.1.152.12:56121
+SYSTEM CALL recv
+ERRNO       10054
+ERRNO TEXT  WSAECONNRESET: Connection reset by peer
+COUNTER     30
+
+2026-03-20 17:14:56.646686 [38964] >> Error entry
+	Error in receive: 20, data rec 0, status rec 0, read 0, 
+LOCATION    CPIC (TCP/IP) on local host with Unicode
+ERROR       connection to partner 'ksnoka15.itkob.local:3303' broken
+TIME        Fri Mar 20 17:14:56 2026
+RELEASE     753
+COMPONENT   NI (network interface)
+VERSION     40
+RC          -6
+MODULE      D:/depot/bas/753_REL/src/base/ni/nixxi.cpp
+LINE        5465
+DETAIL      NiIRead: P=10.39.204.39:3303; L=10.1.152.12:1494
+SYSTEM CALL recv
+ERRNO       10054
+ERRNO TEXT  WSAECONNRESET: Connection reset by peer
+COUNTER     35
+
+2026-03-20 17:14:56.646884 [38964] >> Error entry
+	[Handle: 512659432	ConvID: 22253663	Target: ksnoka15.itkob.local	SysID: KAP	SysNr: 03	User: MAWANOGB	Client: 100	Language: E	Codepage: 4103]
+	RfcCommunicationException: Return Value: 20, Code: RFC_COMMUNICATION_FAILURE, Message: 
+LOCATION    CPIC (TCP/IP) on local host with Unicode
+ERROR       connection to partner 'ksnoka15.itkob.local:3303' broken
+TIME        Fri Mar 20 17:14:56 2026
+RELEASE     753
+COMPONENT   NI (network interface)
+VERSION     40
+RC          -6
+MODULE      D:/depot/bas/753_REL/src/base/ni/nixxi.cpp
+LINE        5465
+DETAIL      NiIRead: P=10.39.204.39:3303; L=10.1.152.12:1494
+SYSTEM CALL recv
+ERRNO       10054
+ERRNO TEXT  WSAECONNRESET: Connection reset by peer
+COUNTER     35
+
+2026-03-20 23:14:25.726944 [38964] >> Error entry
+	Error in receive: 20, data rec 0, status rec 0, read 0, 
+LOCATION    CPIC (TCP/IP) on local host with Unicode
+ERROR       connection to partner 'ksnoka14.itkob.local:3302' broken
+TIME        Fri Mar 20 23:14:25 2026
+RELEASE     753
+COMPONENT   NI (network interface)
+VERSION     40
+RC          -6
+MODULE      D:/depot/bas/753_REL/src/base/ni/nixxi.cpp
+LINE        5465
+DETAIL      NiIRead: P=10.39.204.38:3302; L=10.1.152.12:30725
+SYSTEM CALL recv
+ERRNO       10054
+ERRNO TEXT  WSAECONNRESET: Connection reset by peer
+COUNTER     40
+
+2026-03-20 23:14:25.728726 [38964] >> Error entry
+	[Handle: 512659432	ConvID: 33264045	Target: ksnoka14.itkob.local	SysID: KAP	SysNr: 02	User: MAWANOGB	Client: 100	Language: E	Codepage: 4103]
+	RfcCommunicationException: Return Value: 20, Code: RFC_COMMUNICATION_FAILURE, Message: 
+LOCATION    CPIC (TCP/IP) on local host with Unicode
+ERROR       connection to partner 'ksnoka14.itkob.local:3302' broken
+TIME        Fri Mar 20 23:14:25 2026
+RELEASE     753
+COMPONENT   NI (network interface)
+VERSION     40
+RC          -6
+MODULE      D:/depot/bas/753_REL/src/base/ni/nixxi.cpp
+LINE        5465
+DETAIL      NiIRead: P=10.39.204.38:3302; L=10.1.152.12:30725
+SYSTEM CALL recv
+ERRNO       10054
+ERRNO TEXT  WSAECONNRESET: Connection reset by peer
+COUNTER     40
+
+2026-03-21 01:14:25.552615 [38964] >> Error entry
+	Error in receive: 20, data rec 0, status rec 0, read 0, 
+LOCATION    CPIC (TCP/IP) on local host with Unicode
+ERROR       connection to partner 'ksnoka25.itkob.local:3304' broken
+TIME        Sat Mar 21 01:14:25 2026
+RELEASE     753
+COMPONENT   NI (network interface)
+VERSION     40
+RC          -6
+MODULE      D:/depot/bas/753_REL/src/base/ni/nixxi.cpp
+LINE        5465
+DETAIL      NiIRead: P=10.39.204.40:3304; L=10.1.152.12:56602
+SYSTEM CALL recv
+ERRNO       10054
+ERRNO TEXT  WSAECONNRESET: Connection reset by peer
+COUNTER     45
+
+2026-03-21 01:14:25.552871 [38964] >> Error entry
+	[Handle: 512659432	ConvID: 53513142	Target: ksnoka25.itkob.local	SysID: KAP	SysNr: 04	User: MAWANOGB	Client: 100	Language: E	Codepage: 4103]
+	RfcCommunicationException: Return Value: 20, Code: RFC_COMMUNICATION_FAILURE, Message: 
+LOCATION    CPIC (TCP/IP) on local host with Unicode
+ERROR       connection to partner 'ksnoka25.itkob.local:3304' broken
+TIME        Sat Mar 21 01:14:25 2026
+RELEASE     753
+COMPONENT   NI (network interface)
+VERSION     40
+RC          -6
+MODULE      D:/depot/bas/753_REL/src/base/ni/nixxi.cpp
+LINE        5465
+DETAIL      NiIRead: P=10.39.204.40:3304; L=10.1.152.12:56602
+SYSTEM CALL recv
+ERRNO       10054
+ERRNO TEXT  WSAECONNRESET: Connection reset by peer
+COUNTER     45
+
+2026-03-24 11:57:27.527738 [38964] >> Error entry
+	Error in receive: 20, data rec 0, status rec 0, read 0, 
+LOCATION    CPIC (TCP/IP) on local host with Unicode
+ERROR       connection to partner 'ksnoka14.itkob.local:3302' broken
+TIME        Tue Mar 24 11:57:27 2026
+RELEASE     753
+COMPONENT   NI (network interface)
+VERSION     40
+RC          -6
+MODULE      D:/depot/bas/753_REL/src/base/ni/nixxi.cpp
+LINE        5465
+DETAIL      NiIRead: P=10.39.204.38:3302; L=10.1.152.12:7777
+SYSTEM CALL recv
+ERRNO       10054
+ERRNO TEXT  WSAECONNRESET: Connection reset by peer
+COUNTER     51
+
+2026-03-24 11:57:27.529570 [38964] >> Error entry
+	[Handle: 556175568	ConvID: 48021864	Target: ksnoka14.itkob.local	SysID: KAP	SysNr: 02	User: MAWANOGB	Client: 100	Language: E	Codepage: 4103]
+	RfcCommunicationException: Return Value: 20, Code: RFC_COMMUNICATION_FAILURE, Message: 
+LOCATION    CPIC (TCP/IP) on local host with Unicode
+ERROR       connection to partner 'ksnoka14.itkob.local:3302' broken
+TIME        Tue Mar 24 11:57:27 2026
+RELEASE     753
+COMPONENT   NI (network interface)
+VERSION     40
+RC          -6
+MODULE      D:/depot/bas/753_REL/src/base/ni/nixxi.cpp
+LINE        5465
+DETAIL      NiIRead: P=10.39.204.38:3302; L=10.1.152.12:7777
+SYSTEM CALL recv
+ERRNO       10054
+ERRNO TEXT  WSAECONNRESET: Connection reset by peer
+COUNTER     51
+
+
+**** Log file opened at 2026-03-24 16:31:33.123707 UTC+00:00 (GMT Standard Time), Encoding UTF-8
+NW RFC Library: Kernel variant, Release 750 Patch Level 12 Hotfix 2
+Compilation date          : Feb 13 2024 03:59:37
+CPIC library              : 753.2024.01.25 version 3
+NI library                : 40
+Kernel Release            : 753 Patch Level 1300
+Current working directory : C:\Development\git-projects\SapServer
+Program                   : SapServer
+Process ID                : 59120
+User                      : matthew.walker
+Hardware                  : PC with Windows NT 12x Intel 80686 (Mod 151 Step 5)
+Binary Type               : 32bit
+Operating_system          : Windows NT 10.0
+Hostname                  : ENORW140
+IP address                : 10.1.152.12
+IPv6 address              : fe80::c811:431:8f19:f488
+Global trace level        : 0
+
+2026-03-24 16:31:33.119650 [109680] >> Error entry
+	Error in receive: 18, data rec 2, status rec 0, read 738, no SAP ErrInfo available
+
+**** Log file opened at 2026-03-24 16:36:06.008197 UTC+00:00 (GMT Standard Time), Encoding UTF-8
+NW RFC Library: Kernel variant, Release 750 Patch Level 12 Hotfix 2
+Compilation date          : Feb 13 2024 03:59:37
+CPIC library              : 753.2024.01.25 version 3
+NI library                : 40
+Kernel Release            : 753 Patch Level 1300
+Current working directory : C:\Development\git-projects\SapServer
+Program                   : SapServer
+Process ID                : 96724
+User                      : matthew.walker
+Hardware                  : PC with Windows NT 12x Intel 80686 (Mod 151 Step 5)
+Binary Type               : 32bit
+Operating_system          : Windows NT 10.0
+Hostname                  : ENORW140
+IP address                : 10.1.152.12
+IPv6 address              : fe80::c811:431:8f19:f488
+Global trace level        : 0
+
+2026-03-24 16:36:06.003570 [53548] >> Error entry
+	Error in receive: 18, data rec 2, status rec 0, read 740, no SAP ErrInfo available
+2026-03-25 10:47:58.957922 [53548] >> Error entry
+	Error in receive: 18, data rec 2, status rec 0, read 740, no SAP ErrInfo available
+2026-03-25 10:49:02.794762 [53548] >> Error entry
+	Error in receive: 18, data rec 2, status rec 0, read 740, no SAP ErrInfo available
+2026-03-25 10:49:12.044809 [53548] >> Error entry
+	Error in receive: 18, data rec 2, status rec 0, read 740, no SAP ErrInfo available
+2026-03-25 10:49:40.895109 [53548] >> Error entry
+	Error in receive: 18, data rec 2, status rec 0, read 740, no SAP ErrInfo available
+2026-03-25 10:55:45.136756 [53548] >> Error entry
+	Error in receive: 18, data rec 2, status rec 0, read 740, no SAP ErrInfo available
+2026-03-25 10:55:54.650775 [53548] >> Error entry
+	Error in receive: 18, data rec 2, status rec 0, read 740, no SAP ErrInfo available
+
+**** Log file opened at 2026-03-25 10:59:44.231267 UTC+00:00 (GMT Standard Time), Encoding UTF-8
+NW RFC Library: Kernel variant, Release 750 Patch Level 12 Hotfix 2
+Compilation date          : Feb 13 2024 03:59:37
+CPIC library              : 753.2024.01.25 version 3
+NI library                : 40
+Kernel Release            : 753 Patch Level 1300
+Current working directory : C:\Development\git-projects\SapServer
+Program                   : SapServer
+Process ID                : 103976
+User                      : matthew.walker
+Hardware                  : PC with Windows NT 12x Intel 80686 (Mod 151 Step 5)
+Binary Type               : 32bit
+Operating_system          : Windows NT 10.0
+Hostname                  : ENORW140
+IP address                : 10.1.152.12
+IPv6 address              : fe80::c811:431:8f19:f488
+Global trace level        : 0
+
+2026-03-25 10:59:44.228545 [87728] >> Error entry
+	Error in receive: 18, data rec 2, status rec 0, read 740, no SAP ErrInfo available
+2026-03-25 11:02:00.211670 [87728] >> Error entry
+	Error in receive: 18, data rec 2, status rec 0, read 740, no SAP ErrInfo available
+2026-03-25 11:05:18.975910 [87728] >> Error entry
+	Error in receive: 18, data rec 2, status rec 0, read 738, no SAP ErrInfo available
+2026-03-25 11:14:18.322210 [87728] >> Error entry
+	Error in receive: 18, data rec 2, status rec 0, read 740, no SAP ErrInfo available
+
+**** Log file opened at 2026-03-25 11:23:35.375033 UTC+00:00 (GMT Standard Time), Encoding UTF-8
+NW RFC Library: Kernel variant, Release 750 Patch Level 12 Hotfix 2
+Compilation date          : Feb 13 2024 03:59:37
+CPIC library              : 753.2024.01.25 version 3
+NI library                : 40
+Kernel Release            : 753 Patch Level 1300
+Current working directory : C:\Development\git-projects\SapServer
+Program                   : SapServer
+Process ID                : 07316
+User                      : matthew.walker
+Hardware                  : PC with Windows NT 12x Intel 80686 (Mod 151 Step 5)
+Binary Type               : 32bit
+Operating_system          : Windows NT 10.0
+Hostname                  : ENORW140
+IP address                : 10.1.152.12
+IPv6 address              : fe80::c811:431:8f19:f488
+Global trace level        : 0
+
+2026-03-25 11:23:35.370470 [36240] >> Error entry
+	Error in receive: 18, data rec 2, status rec 0, read 1168, no SAP ErrInfo available
+
+**** Log file opened at 2026-03-25 12:43:36.205112 UTC+00:00 (GMT Standard Time), Encoding UTF-8
+NW RFC Library: Kernel variant, Release 750 Patch Level 12 Hotfix 2
+Compilation date          : Feb 13 2024 03:59:37
+CPIC library              : 753.2024.01.25 version 3
+NI library                : 40
+Kernel Release            : 753 Patch Level 1300
+Current working directory : C:\Development\git-projects\SapServer
+Program                   : SapServer
+Process ID                : 123492
+User                      : matthew.walker
+Hardware                  : PC with Windows NT 12x Intel 80686 (Mod 151 Step 5)
+Binary Type               : 32bit
+Operating_system          : Windows NT 10.0
+Hostname                  : ENORW140
+IP address                : 10.1.152.12
+IPv6 address              : fe80::c811:431:8f19:f488
+Global trace level        : 0
+
+2026-03-25 12:43:36.200022 [43004] >> Error entry
+	Error in receive: 18, data rec 2, status rec 0, read 1168, no SAP ErrInfo available
+
+**** Log file opened at 2026-03-25 12:52:06.188133 UTC+00:00 (GMT Standard Time), Encoding UTF-8
+NW RFC Library: Kernel variant, Release 750 Patch Level 12 Hotfix 2
+Compilation date          : Feb 13 2024 03:59:37
+CPIC library              : 753.2024.01.25 version 3
+NI library                : 40
+Kernel Release            : 753 Patch Level 1300
+Current working directory : C:\Development\git-projects\SapServer
+Program                   : SapServer
+Process ID                : 37064
+User                      : matthew.walker
+Hardware                  : PC with Windows NT 12x Intel 80686 (Mod 151 Step 5)
+Binary Type               : 32bit
+Operating_system          : Windows NT 10.0
+Hostname                  : ENORW140
+IP address                : 10.1.152.12
+IPv6 address              : fe80::c811:431:8f19:f488
+Global trace level        : 0
+
+2026-03-25 12:52:06.185737 [36352] >> Error entry
+	Error in receive: 18, data rec 2, status rec 0, read 1168, no SAP ErrInfo available
+
+**** Log file opened at 2026-03-25 13:04:09.076130 UTC+00:00 (GMT Standard Time), Encoding UTF-8
+NW RFC Library: Kernel variant, Release 750 Patch Level 12 Hotfix 2
+Compilation date          : Feb 13 2024 03:59:37
+CPIC library              : 753.2024.01.25 version 3
+NI library                : 40
+Kernel Release            : 753 Patch Level 1300
+Current working directory : C:\Development\git-projects\SapServer
+Program                   : SapServer
+Process ID                : 67992
+User                      : matthew.walker
+Hardware                  : PC with Windows NT 12x Intel 80686 (Mod 151 Step 5)
+Binary Type               : 32bit
+Operating_system          : Windows NT 10.0
+Hostname                  : ENORW140
+IP address                : 10.1.152.12
+IPv6 address              : fe80::c811:431:8f19:f488
+Global trace level        : 0
+
+2026-03-25 13:04:09.070427 [33488] >> Error entry
+	Error in receive: 18, data rec 2, status rec 0, read 1168, no SAP ErrInfo available
+
+**** Log file opened at 2026-03-25 13:05:50.409393 UTC+00:00 (GMT Standard Time), Encoding UTF-8
+NW RFC Library: Kernel variant, Release 750 Patch Level 12 Hotfix 2
+Compilation date          : Feb 13 2024 03:59:37
+CPIC library              : 753.2024.01.25 version 3
+NI library                : 40
+Kernel Release            : 753 Patch Level 1300
+Current working directory : C:\Development\git-projects\SapServer
+Program                   : SapServer
+Process ID                : 47872
+User                      : matthew.walker
+Hardware                  : PC with Windows NT 12x Intel 80686 (Mod 151 Step 5)
+Binary Type               : 32bit
+Operating_system          : Windows NT 10.0
+Hostname                  : ENORW140
+IP address                : 10.1.152.12
+IPv6 address              : fe80::c811:431:8f19:f488
+Global trace level        : 0
+
+2026-03-25 13:05:50.404047 [103160] >> Error entry
+	Error in receive: 18, data rec 2, status rec 0, read 1166, no SAP ErrInfo available
+2026-03-25 13:07:26.185272 [103160] >> Error entry
+	Error in receive: 18, data rec 2, status rec 0, read 1388, no SAP ErrInfo available
+
+**** Log file opened at 2026-03-25 13:19:51.330898 UTC+00:00 (GMT Standard Time), Encoding UTF-8
+NW RFC Library: Kernel variant, Release 750 Patch Level 12 Hotfix 2
+Compilation date          : Feb 13 2024 03:59:37
+CPIC library              : 753.2024.01.25 version 3
+NI library                : 40
+Kernel Release            : 753 Patch Level 1300
+Current working directory : C:\Development\git-projects\SapServer
+Program                   : SapServer
+Process ID                : 15428
+User                      : matthew.walker
+Hardware                  : PC with Windows NT 12x Intel 80686 (Mod 151 Step 5)
+Binary Type               : 32bit
+Operating_system          : Windows NT 10.0
+Hostname                  : ENORW140
+IP address                : 10.1.152.12
+IPv6 address              : fe80::c811:431:8f19:f488
+Global trace level        : 0
+
+2026-03-25 13:19:51.325971 [91704] >> Error entry
+	Error in receive: 18, data rec 2, status rec 0, read 1386, no SAP ErrInfo available
+
+**** Log file opened at 2026-03-25 13:42:38.251351 UTC+00:00 (GMT Standard Time), Encoding UTF-8
+NW RFC Library: Kernel variant, Release 750 Patch Level 12 Hotfix 2
+Compilation date          : Feb 13 2024 03:59:37
+CPIC library              : 753.2024.01.25 version 3
+NI library                : 40
+Kernel Release            : 753 Patch Level 1300
+Current working directory : C:\Development\git-projects\SapServer
+Program                   : SapServer
+Process ID                : 43832
+User                      : matthew.walker
+Hardware                  : PC with Windows NT 12x Intel 80686 (Mod 151 Step 5)
+Binary Type               : 32bit
+Operating_system          : Windows NT 10.0
+Hostname                  : ENORW140
+IP address                : 10.1.152.12
+IPv6 address              : fe80::c811:431:8f19:f488
+Global trace level        : 0
+
+2026-03-25 13:42:38.247247 [36136] >> Error entry
+	Error in receive: 18, data rec 2, status rec 0, read 1388, no SAP ErrInfo available

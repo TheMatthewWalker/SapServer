@@ -5,9 +5,16 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>SapServer</RootNamespace>
     <AssemblyName>SapServer</AssemblyName>
-    <PlatformTarget>x86</PlatformTarget>
+    <PlatformTarget>x64</PlatformTarget>
     <UserSecretsId>sap-server-secrets</UserSecretsId>
+    <Platforms>AnyCPU;x64</Platforms>
   </PropertyGroup>
+  <ItemGroup>
+      <Reference Include="SAPFunctions64">
+        <HintPath>libs\Interop.SAPFunctions64.dll</HintPath>
+        <Private>true</Private>
+      </Reference>
+  </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.*" />
     <PackageReference Include="Microsoft.Data.SqlClient" Version="6.*" />
@@ -17,26 +24,17 @@
     <PackageReference Include="Serilog.Sinks.File" Version="6.*" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="7.*" />
   </ItemGroup>
+  <ItemGroup>
+    <None Update="libs\Interop.SAPFunctions64.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
 
   <!--
     SAP GUI COM Interop DLL.
-    Copy SAPFunctionsOCX.Interop.dll from an SAP GUI 7.x installation into the libs/ directory.
+    Copy SAPFunctions64.Interop.dll from an SAP GUI 7.x installation into the libs/ directory.
     Typically found at: C:\Program Files (x86)\SAP\FrontEnd\SapGui\
     You can also generate the interop assembly via Visual Studio:
       Project > Add COM Reference > SAP Functions OCX
   -->
-  <ItemGroup>
-    <Reference Include="SAPFunctionsOCX">
-      <HintPath>libs\SAPFunctionsOCX.Interop.dll</HintPath>
-      <EmbedInteropTypes>true</EmbedInteropTypes>
-    </Reference>
-  </ItemGroup>
-  <ItemGroup>
-    <None Update="libs\SAPFunctionsOCX.Interop.dll">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
-    <None Update="libs\wdtfuncs.ocx">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
-  </ItemGroup>
 </Project>

@@ -2,7 +2,7 @@ using System.Collections.Concurrent;
 using SapServer.Configuration;
 using SapServer.Exceptions;
 using SapServer.Models;
-using SAPFunctionsOCX;
+using SAPFunctions64;
 
 namespace SapServer.Services;
 
@@ -10,7 +10,7 @@ namespace SapServer.Services;
 /// Owns a single dedicated STA thread and a persistent SAP GUI COM connection.
 ///
 /// Why STA?
-/// SAPFunctionsOCX is a COM object. COM objects must be used from the apartment
+/// SAPFunctions64 is a COM object. COM objects must be used from the apartment
 /// thread that created them; for legacy in-process COM servers this is STA.
 /// .NET thread-pool threads are MTA — so we create our own STA threads and keep
 /// the COM objects alive for the lifetime of the application.
@@ -32,7 +32,7 @@ internal sealed class SapStaWorker : IDisposable
     // SAP COM object — must ONLY be touched from _staThread
     // Typed as SAPFunctions (COM interface) so .NET uses vtable dispatch, not IDispatch
     // reflection. Dynamic dispatch via IDispatch fails with DISP_E_BADCALLEE on this OCX.
-    private SAPFunctionsOCX.SAPFunctions? _sapFunctions;
+    private SAPFunctions64.SAPFunctions? _sapFunctions;
     private volatile bool _isConnected;
     private DateTime _lastActivity = DateTime.UtcNow;
 
@@ -156,7 +156,7 @@ internal sealed class SapStaWorker : IDisposable
     {
         try
         {
-            _sapFunctions = new SAPFunctionsOCX.SAPFunctions();
+            _sapFunctions = new SAPFunctions64.SAPFunctions();
 
             dynamic conn  = _sapFunctions!.Connection;
             conn.System   = _options.ServiceAccount.System;
@@ -281,7 +281,7 @@ internal sealed class SapStaWorker : IDisposable
 
         // Cast to the typed IFunction interface so Call() is invoked via FUNC dispatch
         // (not PROPERTYGET), which is required for the COM server to populate Exception.
-        var typedFunc = (SAPFunctionsOCX.IFunction)func;
+        var typedFunc = (SAPFunctions64.IFunction)func;
 
         bool success;
         try
