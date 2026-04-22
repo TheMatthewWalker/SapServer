@@ -36,4 +36,5 @@ public sealed class AuthOptions
     /// JWT validation is still enforced — only permission checks are skipped.
     /// </summary>
     public bool BypassPermissions { get; init; } = false;
+
 }

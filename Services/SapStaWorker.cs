@@ -29,6 +29,12 @@ internal sealed class SapStaWorker : IDisposable
     private readonly ILogger _logger;
     private readonly CancellationTokenSource _cts = new();
 
+    // Prevents concurrent SAPFunctions64 COM initialization across STA threads.
+    // The OCX has a race in its constructor/Connection property when multiple instances
+    // are created simultaneously — serializing here eliminates the AccessViolationException
+    // that silently kills worker threads 1+ at startup.
+    private static readonly SemaphoreSlim _connectLock = new(1, 1);
+
     // SAP COM object — must ONLY be touched from _staThread
     // Typed as SAPFunctions (COM interface) so .NET uses vtable dispatch, not IDispatch
     // reflection. Dynamic dispatch via IDispatch fails with DISP_E_BADCALLEE on this OCX.
@@ -154,6 +160,7 @@ internal sealed class SapStaWorker : IDisposable
 
     private void Connect()
     {
+        _connectLock.Wait();
         try
         {
             _sapFunctions = new SAPFunctions64.SAPFunctions();
@@ -179,6 +186,10 @@ internal sealed class SapStaWorker : IDisposable
         catch (Exception ex) when (ex is not SapConnectionException)
         {
             throw new SapConnectionException(SlotId, "Failed to establish SAP connection.", ex);
+        }
+        finally
+        {
+            _connectLock.Release();
         }
     }
 
