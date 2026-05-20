@@ -18,4 +18,14 @@ public interface ISapConnectionPool
     /// <paramref name="idleThreshold"/>. Called by the session monitor.
     /// </summary>
     void PingIdleWorkers(TimeSpan idleThreshold);
+
+
+    SapWorkerHandle AcquireWorker();
+
+    Task<RfcResponse> ExecuteOnWorkerAsync(
+        SapWorkerHandle worker,
+        RfcRequest request,
+        CancellationToken cancellationToken = default);
+
+
 }

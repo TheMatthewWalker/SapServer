@@ -67,14 +67,18 @@ internal static class CustomsHelpers
 
         builder
             .WhereCondition($"LIPS~WERKS EQ '{Plant}'")
-            .WhereCondition("LIPS~KCMENG GT '0'")
+            .WhereCondition("LIPS~KCMENG > 0")
             .WhereCondition("LIPS~VBELN IN opt");
 
         foreach (var d in req.Deliveries)
             builder.TableItemRow("value_list", new
             {
-                TABNAME = "LIPS", FIELDNAME = "VBELN",
-                SIGN = "I", OPTION = "EQ", LOW = SapPad.Pad(d, 10), HIGH = ""
+                TABNAME = "LIPS", 
+                FIELDNAME = "VBELN",
+                SIGN = "I", 
+                OPTION = "", 
+                LOW = SapPad.Pad(d, 10), 
+                HIGH = ""
             });
 
         return builder.ReadTable("data_display").Build();

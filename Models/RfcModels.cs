@@ -15,6 +15,7 @@ public sealed class RfcRequest
 
     /// <summary>Scalar import parameters to pass to the RFC (SAP "EXPORTING" params).</summary>
     public Dictionary<string, object?> ImportParameters { get; init; } = new();
+    public Dictionary<string, Dictionary<string, object?>> StructImportParameters { get; init; } = new();
 
     /// <summary>Input table data to populate before calling the RFC (SAP "TABLES" with input rows).</summary>
     public Dictionary<string, List<Dictionary<string, object?>>> InputTables { get; init; } = new();

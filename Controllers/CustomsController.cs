@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using SapServer.Helpers;
@@ -8,15 +9,15 @@ namespace SapServer.Controllers;
 
 [ApiController]
 [Authorize]
-[Route("api/sap")]
-public sealed class CustomsController : ControllerBase
+[Route("api/customs")]
+public sealed class CustomsController : SapControllerBase
 {
-    private readonly ISapConnectionPool _pool;
-
-    public CustomsController(ISapConnectionPool pool)
-    {
-        _pool = pool;
-    }
+    private static readonly JsonSerializerOptions _debugJson = new() { WriteIndented = true };
+    public CustomsController(
+        ISapConnectionPool pool,
+        IPermissionService permissions,
+        ILogger<CostingController> logger)
+        : base(pool, permissions, logger) { }
 
     [HttpPost("lips")]
     [ProducesResponseType(typeof(ApiResponse<LipsRow[]>), 200)]
@@ -25,8 +26,12 @@ public sealed class CustomsController : ControllerBase
         if (request.Deliveries.Count == 0)
             return Ok(ApiResponse<LipsRow[]>.Ok([]));
 
+        _logger.LogInformation(
+        "User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "lips");
+
         var rfcRequest = CustomsHelpers.BuildLipsRequest(request);
-        var response   = await _pool.ExecuteAsync(rfcRequest, ct);
+
+        var response = await _pool.ExecuteAsync(rfcRequest, ct);
         return Ok(ApiResponse<LipsRow[]>.Ok(CustomsHelpers.ParseLipsRows(response)));
     }
 
@@ -37,8 +42,12 @@ public sealed class CustomsController : ControllerBase
         if (request.Deliveries.Count == 0)
             return Ok(ApiResponse<LikpRow[]>.Ok([]));
 
+        _logger.LogInformation(
+        "User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "likp");
+
         var rfcRequest = CustomsHelpers.BuildLikpRequest(request);
-        var response   = await _pool.ExecuteAsync(rfcRequest, ct);
+
+        var response = await _pool.ExecuteAsync(rfcRequest, ct);
         return Ok(ApiResponse<LikpRow[]>.Ok(CustomsHelpers.ParseLikpRows(response)));
     }
 
@@ -48,9 +57,13 @@ public sealed class CustomsController : ControllerBase
     {
         if (request.Lines.Count == 0)
             return Ok(ApiResponse<VbfaRow[]>.Ok([]));
+            
+        _logger.LogInformation(
+        "User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "vbfa");
 
         var rfcRequest = CustomsHelpers.BuildVbfaRequest(request);
-        var response   = await _pool.ExecuteAsync(rfcRequest, ct);
+
+        var response = await _pool.ExecuteAsync(rfcRequest, ct);
         return Ok(ApiResponse<VbfaRow[]>.Ok(CustomsHelpers.ParseVbfaRows(response, request)));
     }
 
@@ -61,8 +74,12 @@ public sealed class CustomsController : ControllerBase
         if (request.Materials.Count == 0)
             return Ok(ApiResponse<MarcRow[]>.Ok([]));
 
+        _logger.LogInformation(
+        "User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "marc");
+
         var rfcRequest = CustomsHelpers.BuildMarcRequest(request);
-        var response   = await _pool.ExecuteAsync(rfcRequest, ct);
+
+        var response = await _pool.ExecuteAsync(rfcRequest, ct);
         return Ok(ApiResponse<MarcRow[]>.Ok(CustomsHelpers.ParseMarcRows(response)));
     }
 
@@ -73,8 +90,14 @@ public sealed class CustomsController : ControllerBase
         if (request.Customers.Count == 0)
             return Ok(ApiResponse<Kna1Row[]>.Ok([]));
 
+        _logger.LogInformation(
+        "User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "kna1");
+
         var rfcRequest = CustomsHelpers.BuildKna1Request(request);
-        var response   = await _pool.ExecuteAsync(rfcRequest, ct);
+
+        var response = await _pool.ExecuteAsync(rfcRequest, ct);
         return Ok(ApiResponse<Kna1Row[]>.Ok(CustomsHelpers.ParseKna1Rows(response)));
     }
+
+
 }

@@ -1,6 +1,70 @@
 @baseUrl = http://127.0.0.1:5200
 @token = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzcWwyMDA1LWJyaWRnZSIsImF1ZCI6InNhcC1zZXJ2ZXIiLCJzdWIiOiJkZXYiLCJ1c2VySWQiOjEsInJvbGUiOiJhZG1pbiIsImlhdCI6MTc3MzgyNDUyMCwiZXhwIjoxNzczODI4MTIwfQ.VKYemNDzHkLk3GgxRG5nxPvQ7x054-YziiNvJmYQIwE
 
+### Test KN API connectivity and token validity
+
+POST http://localhost:4000/api/freight-booking/shipment/1
+Accept: application/json
+
+
+
+### Customs — LIPS (delivery items)
+POST {{baseUrl}}/api/sap/lips
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "deliveries": ["82878876"]
+}
+
+###
+
+### Customs — LIKP (delivery header: incoterms + consignee)
+POST {{baseUrl}}/api/sap/likp
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "deliveries": ["82878876"]
+}
+
+###
+
+### Customs — VBFA (invoice lookup by delivery + item)
+POST {{baseUrl}}/api/sap/vbfa
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "lines": [
+    { "delivery": "82878876", "item": "000010" }
+  ]
+}
+
+###
+
+### Customs — MARC (commodity code + country of origin)
+POST {{baseUrl}}/api/sap/marc
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "materials": ["TSDL4-8B01C02/S"]
+}
+
+###
+
+### Customs — KNA1 (customer destination country)
+POST {{baseUrl}}/api/sap/kna1
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "customers": ["363720"]
+}
+
+###
+
 ### Ping: pool status
 GET {{baseUrl}}/api/rfc/status
 Authorization: Bearer {{token}}
@@ -118,9 +182,131 @@ Content-Type: application/json
 }
 
 
+### POST /api/production/backflush — test ZF40N with charge and customer fields
+POST {{baseUrl}}/api/production/backflush
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "Material":        "TCEV9-5B01/S",
+  "Quantity":        1,
+  "Header":      "DR00000014",
+  "Charge":       "363660",
+  "Customer": "363660",
+  "Packaging":  "MD"
+}
+
+###
 
 
-### Test KN API connectivity and token validity
+### POST /api/production/reverse-backflush — test MF41 with material document input
+POST {{baseUrl}}/api/production/reverse-backflush
+Content-Type: application/json
+Authorization: Bearer {{token}}
 
-POST http://localhost:4000/api/freight-booking/shipment/1
-Accept: application/json
+{
+  "MaterialDocument": "4973006744"
+}
+
+###
+
+
+### POST /api/production/scrap/post — test MB11 with material and quantity input
+POST {{baseUrl}}/api/production/scrap/post
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "Material": "TCEV9-5B01",
+  "Quantity": 1,
+  "MovementType": "551",
+  "Header": "TEST",
+  "ScrapReason": "4801"
+}
+
+###
+
+### POST /api/production/scrap/reverse — test MBST with material document input
+POST {{baseUrl}}/api/production/scrap/reverse
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "MaterialDocument": "4973095655"
+}
+
+###
+
+
+### POST /api/quality/block — test MB1B with quality block movement type
+POST {{baseUrl}}/api/quality/block
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "Material": "TCEV9-5B01",
+  "Quantity": 1,
+  "Header": "TEST",
+  "Username": "MAWANOGB",
+  "StorageLocation": "1716"
+}
+
+###
+
+
+### POST /api/quality/unblock — test MB1B with quality block movement type
+POST {{baseUrl}}/api/quality/unblock
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "Material": "TCEV9-5B01",
+  "Quantity": 1,
+  "Header": "TEST",
+  "Username": "MAWANOGB",
+  "StorageLocation": "1716"
+}
+
+###
+
+
+### POST /api/costing/profit-center
+POST {{baseUrl}}/api/costing/profit-center
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "DateFrom": "01.01.2026",
+  "DateTo": "31.01.2026",
+  "GlAccounts": ["301000"]
+}
+###
+
+
+
+### GET /api/logistics/picksheets/open
+GET {{baseUrl}}/api/logistics/picksheets/open
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+}
+###
+
+
+### GET /api/logistics/picksheets/open
+POST {{baseUrl}}/api/costing/freight-posting
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+    "Shipment": "00014541",
+    "DocDate": "21.04.2026",
+    "Vendor": "19609",
+    "GlAccount": "601200",
+    "ProfitCenter": "2004",
+    "Currency": "EUR",
+    "Amount": 1600,
+    "Information": "26 PLTS, 4092KG, WF61TN -> PL31752"
+}
+###

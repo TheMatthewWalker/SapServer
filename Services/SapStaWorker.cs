@@ -246,8 +246,30 @@ internal sealed class SapStaWorker : IDisposable
         foreach (var (key, value) in request.ImportParameters)
         {
             if (value is not null)
-                func.exports(key).Value = UnwrapJson(value);
+                try
+                { func.exports(key).Value = UnwrapJson(value);  }
+                catch (Exception ex)
+                { Console.WriteLine($"SCALAR IMPORT ERROR: {key} -> {ex.Message}");
+                    throw; }
         }
+
+
+        // Structured import parameters — func.exports("STRUCT").Field(n) pattern (lowercase, indexer call)
+        foreach (var (structName, fields) in request.StructImportParameters)
+        {
+            dynamic sapStruct = func.exports(structName);
+
+            foreach (var (field, value) in fields)
+            {
+                if (value is not null)
+                    try
+                    { sapStruct[field] = UnwrapJson(value); }
+                    catch (Exception ex)
+                    { Console.WriteLine($"STRUCT FIELD ERROR: {structName}.{field} -> {ex.Message}");
+                        throw; }
+            }
+        }
+
 
         // Input tables — clear with Freetable() then populate rows
         try
@@ -262,7 +284,11 @@ internal sealed class SapStaWorker : IDisposable
                     foreach (var (col, val) in row)
                     {
                         if (val is not null)
-                            sapRow[col] = UnwrapJson(val);
+                            try
+                            { sapRow[col] = UnwrapJson(val); }
+                            catch (Exception ex)
+                            { Console.WriteLine($"INPUT TABLE ERROR: {tableName}.{col} -> {ex.Message}");
+                                throw; }
                     }
                 }
             }
@@ -278,7 +304,11 @@ internal sealed class SapStaWorker : IDisposable
                     foreach (var (col, val) in row)
                     {
                         if (val is not null)
-                            sapRow[col] = UnwrapJson(val);
+                            try
+                            { sapRow[col] = UnwrapJson(val); }
+                            catch (Exception ex)
+                            { Console.WriteLine($"INPUT TABLE ERROR: {tableName}.{col} -> {ex.Message}");
+                                throw; }
                     }
                 }
             }
@@ -471,6 +501,7 @@ internal sealed class SapStaWorker : IDisposable
                       or "RFC_ABAP_RUNTIME_FAILURE";
 
     // -------------------------------------------------------------------------
+
 
     public void Dispose()
     {

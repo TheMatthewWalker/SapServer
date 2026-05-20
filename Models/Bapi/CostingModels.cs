@@ -9,6 +9,75 @@ public sealed class CostSheetRequest
     public List<string> Materials { get; init; } = [];
 }
 
+
+public sealed class ProfitCenterRequest
+{
+    /// <summary>Cost date in SAP format (e.g. "01.01.2026" or "20260101").</summary>
+    public string DateFrom { get; init; } = string.Empty;
+    public string DateTo { get; init; } = string.Empty;
+    public string[] GlAccounts { get; init; } = [];
+}
+
+public sealed class FreightPostingRequest
+{
+    /// <summary>Cost date in SAP format (e.g. "01.01.2026" or "20260101").</summary>
+    public string   DocDate    { get; init; } = string.Empty;
+    public string   Vendor     { get; init; } = string.Empty;
+    public decimal  Amount     { get; init; }
+    public string   Currency   { get; init; } = string.Empty;
+    public string   GlAccount  { get; init; } = string.Empty;
+    public string   ProfitCenter { get; init; } = string.Empty;
+    public string   Shipment   { get; init; } = string.Empty;
+    public string   Information    { get; init; } = string.Empty;
+}
+
+
+public sealed class PeriodBalanceRequest
+{
+    public string FiscalYear { get; init; } = string.Empty; 
+    public string PeriodFrom { get; init; } = string.Empty;
+    public string PeriodTo { get; init; } = string.Empty;
+    public string[] GlAccounts { get; init; } = [];
+}
+
+
+public class PeriodBalanceRow
+{
+    public string GlAccount { get; set; } = "";
+    public string Period { get; set; } = "";
+    public decimal Debit { get; set; }
+    public decimal Credit { get; set; }
+    public decimal Balance { get; set; }
+    public decimal CumBalance { get; set; }
+}
+
+
+public class FreightPostingRow
+{
+    public string               AccountingNumber    { get; init; } = string.Empty;
+    public bool                 Success             { get; init; }
+    public List<SapReturnMessage> Messages          { get; init; } = [];
+}
+
+
+
+public sealed class ProfitCenterRow
+{
+                public string GlAccount { get; set; } = "";
+                public string ProfitCenter { get; set; } = "";
+                public string FiscalYear { get; set; } = "";
+                public string PostingDate { get; set; } = "";
+                public decimal CompanyCodeValue { get; set; }
+                public string InvoiceNumber { get; set; } = "";
+                public string InvoiceItem { get; set; } = "";
+                public string MaterialNumber { get; set; } = "";
+                public string Customer { get; set; } = "";
+                public string SalesOrder { get; set; } = "";
+                public string SalesOrderItem { get; set; } = "";
+}
+
+
+
 /// <summary>
 /// A single row from the ZRFC_READ_TABLES multi-table join across
 /// ZCOST_INFO3, PATN, and ZCOST_SHEET. Column order mirrors query_FIELDS registration.

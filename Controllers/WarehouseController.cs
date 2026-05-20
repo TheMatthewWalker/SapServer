@@ -23,6 +23,10 @@ public sealed class WarehouseController : SapControllerBase
     public async Task<IActionResult> GetStock([FromQuery] StockQuery query, CancellationToken ct)
     {
         await CheckPermissionAsync(GetUserId(), WarehouseHelpers.FnReadTables, ct);
+
+        _logger.LogInformation(
+        "User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "stock");
+
         var response = await _pool.ExecuteAsync(WarehouseHelpers.BuildStockRequest(query), ct);
         return Ok(ApiResponse<StockRow[]>.Ok(WarehouseHelpers.ParseStockRows(response)));
     }
@@ -35,6 +39,10 @@ public sealed class WarehouseController : SapControllerBase
     public async Task<IActionResult> GetStockTotals([FromQuery] StockQuery query, CancellationToken ct)
     {
         await CheckPermissionAsync(GetUserId(), WarehouseHelpers.FnReadTables, ct);
+
+        _logger.LogInformation(
+        "User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "stock/totals");
+        
         var response = await _pool.ExecuteAsync(WarehouseHelpers.BuildStockRequest(query), ct);
         return Ok(ApiResponse<MaterialTotalRow[]>.Ok(
             WarehouseHelpers.AggregateByMaterial(WarehouseHelpers.ParseStockRows(response))));
@@ -48,6 +56,10 @@ public sealed class WarehouseController : SapControllerBase
     public async Task<IActionResult> GetStockBins([FromQuery] StockQuery query, CancellationToken ct)
     {
         await CheckPermissionAsync(GetUserId(), WarehouseHelpers.FnReadTables, ct);
+        
+        _logger.LogInformation(
+        "User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "stock/bins");
+        
         var response = await _pool.ExecuteAsync(WarehouseHelpers.BuildStockRequest(query), ct);
         return Ok(ApiResponse<BinSummaryRow[]>.Ok(
             WarehouseHelpers.AggregateByBin(WarehouseHelpers.ParseStockRows(response))));
@@ -64,6 +76,10 @@ public sealed class WarehouseController : SapControllerBase
         CancellationToken ct)
     {
         await CheckPermissionAsync(GetUserId(), WarehouseHelpers.FnCreateTo, ct);
+
+        _logger.LogInformation(
+        "User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "transfer-order");
+
         var response = await _pool.ExecuteAsync(WarehouseHelpers.BuildTransferOrderRequest(body), ct);
         return Ok(ApiResponse<CreateTransferOrderResponse>.Ok(
             WarehouseHelpers.ParseTransferOrderResponse(response)));
@@ -78,11 +94,18 @@ public sealed class WarehouseController : SapControllerBase
         [FromBody] ConsignmentMb1bRequest body,
         CancellationToken ct)
     {
-        await CheckPermissionAsync(GetUserId(), WarehouseHelpers.FnConsignment, ct);
+        await CheckPermissionAsync(GetUserId(), WarehouseHelpers.FnConsignment, ct);    
+
+        _logger.LogInformation(
+        "User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "consignment-mb1b");
+
         var mb1b   = await _pool.ExecuteAsync(WarehouseHelpers.BuildMb1bRequest(body),          ct);
         var toNonC = await _pool.ExecuteAsync(WarehouseHelpers.BuildToNonConsignRequest(body),   ct);
         var toC    = await _pool.ExecuteAsync(WarehouseHelpers.BuildToConsignRequest(body),      ct);
         return Ok(ApiResponse<ConsignmentMb1bResponse>.Ok(
             WarehouseHelpers.ParseConsignmentResponse(mb1b, toNonC, toC)));
     }
+
+
+
 }

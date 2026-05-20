@@ -55,6 +55,34 @@ public sealed class SapConnectionPool : ISapConnectionPool, IDisposable
         return await tcs.Task.ConfigureAwait(false);
     }
 
+    // For advanced scenarios where the caller needs direct access to a worker's STA thread,
+    // e.g. to execute multiple calls in sequence without returning to the thread pool.
+    public SapWorkerHandle AcquireWorker()
+    {
+        var worker = SelectWorker();
+        return new SapWorkerHandle(worker);
+    }
+
+
+    // Executes a request directly on the specified worker's STA thread.
+    public async Task<RfcResponse> ExecuteOnWorkerAsync(
+        SapWorkerHandle handle,
+        RfcRequest request,
+        CancellationToken ct = default)
+    {
+        var worker = handle.Worker;
+
+        var tcs = new TaskCompletionSource<RfcResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var item = new SapWorkItem(request, tcs, ct);
+
+        using var reg = ct.Register(() => tcs.TrySetCanceled(ct));
+
+        worker.Enqueue(item);
+        return await tcs.Task.ConfigureAwait(false);
+    }
+
+
+
     /// <inheritdoc/>
     public IReadOnlyList<WorkerStatus> GetPoolStatus() =>
         _workers.Select(w => new WorkerStatus
@@ -107,5 +135,17 @@ public sealed class SapConnectionPool : ISapConnectionPool, IDisposable
     {
         foreach (var worker in _workers)
             worker.Dispose();
+    }
+}
+
+
+
+public sealed class SapWorkerHandle
+{
+    internal SapStaWorker Worker { get; }
+
+    internal SapWorkerHandle(SapStaWorker worker)
+    {
+        Worker = worker;
     }
 }

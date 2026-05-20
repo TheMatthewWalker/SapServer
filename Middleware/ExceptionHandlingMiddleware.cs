@@ -54,7 +54,15 @@ public sealed class ExceptionHandlingMiddleware
         ctx.Response.StatusCode  = statusCode;
         ctx.Response.ContentType = "application/json";
 
-        var body = ApiResponse<object>.Fail(errorCode, message);
+        
+        var safeError = new
+        {
+            ExceptionType = ex.GetType().Name,
+            Message = ex.Message
+        };
+
+
+        var body = ApiResponse<object>.Fail(errorCode, message, safeError);
         await ctx.Response.WriteAsJsonAsync(body, ctx.RequestAborted);
     }
 }

@@ -72,11 +72,12 @@ public sealed class CreateTransferOrderResponse
     public List<SapReturnMessage> Messages          { get; init; } = [];
 }
 
-public sealed class SapReturnMessage
+
+public sealed class TransferOrderWrapper
 {
-    public string Type    { get; init; } = string.Empty;
-    public string Message { get; init; } = string.Empty;
+    public List<CreateTransferOrderResponse> Responses { get; init; } = [];
 }
+
 
 // ── ConsignmentMb1b ──────────────────────────────────────────────────────────
 

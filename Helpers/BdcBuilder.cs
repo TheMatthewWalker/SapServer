@@ -65,6 +65,38 @@ public sealed class BdcBuilder
         });
         return this;
     }
+    public BdcBuilder Field(string name, decimal value)
+    {
+        _rows.Add(new Dictionary<string, object?>
+        {
+            ["FNAM"] = name,
+            ["FVAL"] = value
+        });
+        return this;
+    }
+    public BdcBuilder Field(string name, int value)
+    {
+        _rows.Add(new Dictionary<string, object?>
+        {
+            ["FNAM"] = name,
+            ["FVAL"] = value
+        });
+        return this;
+    }
+
+
+    /// <summary>
+    /// Appends a field value row — on condition being true. 
+    /// Useful for optional fields to avoid unnecessary blank entries.
+    /// </summary>
+    public BdcBuilder FieldIf(bool condition, string name, string value)
+    {
+        if (condition)
+            Field(name, value);
+
+        return this;
+    }
+
 
     /// <summary>
     /// Builds the <see cref="RfcRequest"/> ready to pass to <c>ISapConnectionPool.ExecuteAsync</c>.
@@ -83,4 +115,58 @@ public sealed class BdcBuilder
 
         return builder.Build();
     }
+
+    public BdcBuilder Debug()
+    {
+        Console.WriteLine("=== BDC TABLE (GRID VIEW) ===");
+
+        // Collect all possible column names across all rows
+        var allColumns = _rows
+            .SelectMany(r => r.Keys)
+            .Distinct()
+            .OrderBy(k => k)
+            .ToList();
+
+        // Determine column widths
+        var colWidths = allColumns.ToDictionary(
+            col => col,
+            col => Math.Max(col.Length, _rows.Max(r => r.ContainsKey(col) && r[col] != null
+                ? r[col]!.ToString()!.Length
+                : 0))
+        );
+
+        // Print header
+        foreach (var col in allColumns)
+            Console.Write($"{col.PadRight(colWidths[col] + 2)}");
+        Console.WriteLine();
+
+        // Print separator
+        foreach (var col in allColumns)
+            Console.Write(new string('-', colWidths[col]) + "  ");
+        Console.WriteLine();
+
+        // Print each row
+        foreach (var row in _rows)
+        {
+            foreach (var col in allColumns)
+            {
+                var value = row.ContainsKey(col) && row[col] != null
+                    ? row[col]!.ToString()
+                    : "";
+
+                Console.Write(value.PadRight(colWidths[col] + 2));
+            }
+            Console.WriteLine();
+        }
+
+        Console.WriteLine("=== END BDC TABLE ===");
+
+        return this;
+    }
+
+
+
 }
+
+
+
