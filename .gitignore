@@ -47,7 +47,6 @@ appsettings.Development.json
 appsettings.Production.json
 appsettings.json
 libs/
-scripts/
 
 # MSBuild Binary and Structured Log
 *.binlog
