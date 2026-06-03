@@ -3164,3 +3164,237 @@ ERRNO       10054
 ERRNO TEXT  WSAECONNRESET: Connection reset by peer
 COUNTER     8
 
+
+**** Log file opened at 2026-05-21 10:55:31.911607 UTC+01:00 (GMT Standard Time), Encoding UTF-8
+NW RFC Library: Kernel variant, Release 750 Patch Level 11
+Compilation date          : Jan 25 2023 01:21:13
+CPIC library              : 753.2022.12.23 version 3
+NI library                : 40
+Kernel Release            : 753 Patch Level 1116
+Current working directory : C:\Development\git-projects\SapServer
+Program                   : SapServer
+Process ID                : 53032
+User                      : matthew.walker
+Hardware                  : PC with Windows NT 12x AMD64 Level 6 (Mod 151 Step 5)
+Operating_system          : Windows NT 10.0
+Hostname                  : ENORW140
+IP address                : 10.1.152.12
+IPv6 address              : fe80::c811:431:8f19:f488
+Global trace level        : 0
+
+2026-05-21 10:55:31.884560 [47312] >> Error entry
+	[Handle: 2194788710928	ConvID: 97340741	Target: ksnoka14.itkob.local	SysID: KAP	SysNr: 02	User: PTFEGBNO	Client: 100	Language: E	Codepage: 4103]
+	RfcCommunicationException: Return Value: 20, Code: RFC_COMMUNICATION_FAILURE, Message: 
+LOCATION    CPIC (TCP/IP) on local host with Unicode
+ERROR       connection to partner 'ksnoka14.itkob.local:3302' broken
+TIME        Thu May 21 10:55:31 2026
+RELEASE     753
+COMPONENT   NI (network interface)
+VERSION     40
+RC          -6
+MODULE      D:/depot/bas/753_REL/src/base/ni/nixxi.cpp
+LINE        4872
+DETAIL      NiIWrite: P=10.39.204.38:3302; L=10.1.152.12:10446
+SYSTEM CALL WSASend
+ERRNO       10054
+ERRNO TEXT  WSAECONNRESET: Connection reset by peer
+COUNTER     4
+
+2026-05-21 10:55:31.888991 [33756] >> Error entry
+	[Handle: 2194788331424	ConvID: 97337563	Target: ksnoka14.itkob.local	SysID: KAP	SysNr: 02	User: PTFEGBNO	Client: 100	Language: E	Codepage: 4103]
+	RfcCommunicationException: Return Value: 20, Code: RFC_COMMUNICATION_FAILURE, Message: 
+LOCATION    CPIC (TCP/IP) on local host with Unicode
+ERROR       connection to partner 'ksnoka14.itkob.local:3302' broken
+TIME        Thu May 21 10:55:31 2026
+RELEASE     753
+COMPONENT   NI (network interface)
+VERSION     40
+RC          -6
+MODULE      D:/depot/bas/753_REL/src/base/ni/nixxi.cpp
+LINE        4872
+DETAIL      NiIWrite: P=10.39.204.38:3302; L=10.1.152.12:10442
+SYSTEM CALL WSASend
+ERRNO       10054
+ERRNO TEXT  WSAECONNRESET: Connection reset by peer
+COUNTER     4
+
+2026-05-21 10:55:51.249213 [15696] >> Error entry
+	[Handle: 2194787829664	ConvID: 97339278	Target: ksnoka14.itkob.local	SysID: KAP	SysNr: 02	User: PTFEGBNO	Client: 100	Language: E	Codepage: 4103]
+	RfcCommunicationException: Return Value: 20, Code: RFC_COMMUNICATION_FAILURE, Message: 
+LOCATION    CPIC (TCP/IP) on local host with Unicode
+ERROR       connection to partner 'ksnoka14.itkob.local:3302' broken
+TIME        Thu May 21 10:55:51 2026
+RELEASE     753
+COMPONENT   NI (network interface)
+VERSION     40
+RC          -6
+MODULE      D:/depot/bas/753_REL/src/base/ni/nixxi.cpp
+LINE        5434
+DETAIL      NiIRead: P=10.39.204.38:3302; L=10.1.152.12:10444
+SYSTEM CALL recv
+ERRNO       10054
+ERRNO TEXT  WSAECONNRESET: Connection reset by peer
+COUNTER     4
+
+2026-05-21 14:08:29.977232 [33756] >> Error entry
+	[Handle: 2194791866320	ConvID: 62241075	Target: ksnoka25.itkob.local	SysID: KAP	SysNr: 04	User: PTFEGBNO	Client: 100	Language: E	Codepage: 4103]
+	RfcCommunicationException: Return Value: 20, Code: RFC_COMMUNICATION_FAILURE, Message: 
+LOCATION    CPIC (TCP/IP) on local host with Unicode
+ERROR       connection to partner 'ksnoka25.itkob.local:3304' broken
+TIME        Thu May 21 14:08:29 2026
+RELEASE     753
+COMPONENT   NI (network interface)
+VERSION     40
+RC          -6
+MODULE      D:/depot/bas/753_REL/src/base/ni/nixxi.cpp
+LINE        5434
+DETAIL      NiIRead: P=10.39.204.40:3304; L=10.1.152.12:63446
+SYSTEM CALL recv
+ERRNO       10054
+ERRNO TEXT  WSAECONNRESET: Connection reset by peer
+COUNTER     8
+
+2026-05-21 14:08:58.240706 [15696] >> Error entry
+	[Handle: 2194787062688	ConvID: 62275240	Target: ksnoka25.itkob.local	SysID: KAP	SysNr: 04	User: PTFEGBNO	Client: 100	Language: E	Codepage: 4103]
+	RfcCommunicationException: Return Value: 20, Code: RFC_COMMUNICATION_FAILURE, Message: 
+LOCATION    CPIC (TCP/IP) on local host with Unicode
+ERROR       connection to partner 'ksnoka25.itkob.local:3304' broken
+TIME        Thu May 21 14:08:58 2026
+RELEASE     753
+COMPONENT   NI (network interface)
+VERSION     40
+RC          -6
+MODULE      D:/depot/bas/753_REL/src/base/ni/nixxi.cpp
+LINE        5434
+DETAIL      NiIRead: P=10.39.204.40:3304; L=10.1.152.12:1259
+SYSTEM CALL recv
+ERRNO       10054
+ERRNO TEXT  WSAECONNRESET: Connection reset by peer
+COUNTER     8
+
+2026-05-21 14:08:58.255305 [47312] >> Error entry
+	[Handle: 2194788104416	ConvID: 62239278	Target: ksnoka25.itkob.local	SysID: KAP	SysNr: 04	User: PTFEGBNO	Client: 100	Language: E	Codepage: 4103]
+	RfcCommunicationException: Return Value: 20, Code: RFC_COMMUNICATION_FAILURE, Message: 
+LOCATION    CPIC (TCP/IP) on local host with Unicode
+ERROR       connection to partner 'ksnoka25.itkob.local:3304' broken
+TIME        Thu May 21 14:08:58 2026
+RELEASE     753
+COMPONENT   NI (network interface)
+VERSION     40
+RC          -6
+MODULE      D:/depot/bas/753_REL/src/base/ni/nixxi.cpp
+LINE        5434
+DETAIL      NiIRead: P=10.39.204.40:3304; L=10.1.152.12:49083
+SYSTEM CALL recv
+ERRNO       10054
+ERRNO TEXT  WSAECONNRESET: Connection reset by peer
+COUNTER     8
+
+2026-05-21 17:05:03.854512 [33756] >> Error entry
+	[Handle: 2194790182928	ConvID: 71508449	Target: ksnoka15.itkob.local	SysID: KAP	SysNr: 03	User: PTFEGBNO	Client: 100	Language: E	Codepage: 4103]
+	RfcCommunicationException: Return Value: 20, Code: RFC_COMMUNICATION_FAILURE, Message: 
+LOCATION    CPIC (TCP/IP) on local host with Unicode
+ERROR       connection to partner 'ksnoka15.itkob.local:3303' broken
+TIME        Thu May 21 17:05:03 2026
+RELEASE     753
+COMPONENT   NI (network interface)
+VERSION     40
+RC          -6
+MODULE      D:/depot/bas/753_REL/src/base/ni/nixxi.cpp
+LINE        5434
+DETAIL      NiIRead: P=10.39.204.39:3303; L=10.1.152.12:43721
+SYSTEM CALL recv
+ERRNO       10054
+ERRNO TEXT  WSAECONNRESET: Connection reset by peer
+COUNTER     12
+
+2026-05-21 17:05:03.855833 [15696] >> Error entry
+	[Handle: 2194847957152	ConvID: 71539615	Target: ksnoka15.itkob.local	SysID: KAP	SysNr: 03	User: PTFEGBNO	Client: 100	Language: E	Codepage: 4103]
+	RfcCommunicationException: Return Value: 20, Code: RFC_COMMUNICATION_FAILURE, Message: 
+LOCATION    CPIC (TCP/IP) on local host with Unicode
+ERROR       connection to partner 'ksnoka15.itkob.local:3303' broken
+TIME        Thu May 21 17:05:03 2026
+RELEASE     753
+COMPONENT   NI (network interface)
+VERSION     40
+RC          -6
+MODULE      D:/depot/bas/753_REL/src/base/ni/nixxi.cpp
+LINE        5434
+DETAIL      NiIRead: P=10.39.204.39:3303; L=10.1.152.12:21380
+SYSTEM CALL recv
+ERRNO       10054
+ERRNO TEXT  WSAECONNRESET: Connection reset by peer
+COUNTER     12
+
+2026-05-21 17:05:03.870618 [47312] >> Error entry
+	[Handle: 2194785175744	ConvID: 71541124	Target: ksnoka15.itkob.local	SysID: KAP	SysNr: 03	User: PTFEGBNO	Client: 100	Language: E	Codepage: 4103]
+	RfcCommunicationException: Return Value: 20, Code: RFC_COMMUNICATION_FAILURE, Message: 
+LOCATION    CPIC (TCP/IP) on local host with Unicode
+ERROR       connection to partner 'ksnoka15.itkob.local:3303' broken
+TIME        Thu May 21 17:05:03 2026
+RELEASE     753
+COMPONENT   NI (network interface)
+VERSION     40
+RC          -6
+MODULE      D:/depot/bas/753_REL/src/base/ni/nixxi.cpp
+LINE        5434
+DETAIL      NiIRead: P=10.39.204.39:3303; L=10.1.152.12:21382
+SYSTEM CALL recv
+ERRNO       10054
+ERRNO TEXT  WSAECONNRESET: Connection reset by peer
+COUNTER     12
+
+2026-05-21 20:08:01.303829 [47312] >> Error entry
+	[Handle: 2194792058240	ConvID: 82862191	Target: ksnoka15.itkob.local	SysID: KAP	SysNr: 03	User: PTFEGBNO	Client: 100	Language: E	Codepage: 4103]
+	RfcCommunicationException: Return Value: 20, Code: RFC_COMMUNICATION_FAILURE, Message: 
+LOCATION    CPIC (TCP/IP) on local host with Unicode
+ERROR       connection to partner 'ksnoka15.itkob.local:3303' broken
+TIME        Thu May 21 20:08:01 2026
+RELEASE     753
+COMPONENT   NI (network interface)
+VERSION     40
+RC          -6
+MODULE      D:/depot/bas/753_REL/src/base/ni/nixxi.cpp
+LINE        5434
+DETAIL      NiIRead: P=10.39.204.39:3303; L=10.1.152.12:22211
+SYSTEM CALL recv
+ERRNO       10054
+ERRNO TEXT  WSAECONNRESET: Connection reset by peer
+COUNTER     16
+
+2026-05-21 20:08:01.319013 [15696] >> Error entry
+	[Handle: 2194852209488	ConvID: 82860735	Target: ksnoka15.itkob.local	SysID: KAP	SysNr: 03	User: PTFEGBNO	Client: 100	Language: E	Codepage: 4103]
+	RfcCommunicationException: Return Value: 20, Code: RFC_COMMUNICATION_FAILURE, Message: 
+LOCATION    CPIC (TCP/IP) on local host with Unicode
+ERROR       connection to partner 'ksnoka15.itkob.local:3303' broken
+TIME        Thu May 21 20:08:01 2026
+RELEASE     753
+COMPONENT   NI (network interface)
+VERSION     40
+RC          -6
+MODULE      D:/depot/bas/753_REL/src/base/ni/nixxi.cpp
+LINE        5434
+DETAIL      NiIRead: P=10.39.204.39:3303; L=10.1.152.12:22209
+SYSTEM CALL recv
+ERRNO       10054
+ERRNO TEXT  WSAECONNRESET: Connection reset by peer
+COUNTER     16
+
+2026-05-22 08:49:25.145240 [15696] >> Error entry
+	[Handle: 2194790182928	ConvID: 97079232	Target: ksnoka14.itkob.local	SysID: KAP	SysNr: 02	User: PTFEGBNO	Client: 100	Language: E	Codepage: 4103]
+	RfcCommunicationException: Return Value: 20, Code: RFC_COMMUNICATION_FAILURE, Message: 
+LOCATION    CPIC (TCP/IP) on local host with Unicode
+ERROR       connection to partner 'ksnoka14.itkob.local:3302' broken
+TIME        Fri May 22 08:49:25 2026
+RELEASE     753
+COMPONENT   NI (network interface)
+VERSION     40
+RC          -6
+MODULE      D:/depot/bas/753_REL/src/base/ni/nixxi.cpp
+LINE        5434
+DETAIL      NiIRead: P=10.39.204.38:3302; L=10.1.152.12:12757
+SYSTEM CALL recv
+ERRNO       10054
+ERRNO TEXT  WSAECONNRESET: Connection reset by peer
+COUNTER     20
+

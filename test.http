@@ -310,3 +310,14 @@ Authorization: Bearer {{token}}
     "Information": "26 PLTS, 4092KG, WF61TN -> PL31752"
 }
 ###
+
+
+### GET /api/logistics/picksheets/open
+GET {{baseUrl}}/api/function/params
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+    "FunctionName": "RFC_READ_TABLE"
+}
+###
