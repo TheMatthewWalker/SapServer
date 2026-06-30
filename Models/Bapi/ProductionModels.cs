@@ -12,6 +12,8 @@ public sealed class BomQuery
     public int     RowCount    { get; init; } = 9999;
 }
 
+
+
 /// <summary>A single quant row from the LQUA table.</summary>
 public sealed class BomRow
 {
@@ -24,6 +26,21 @@ public sealed class BomRow
     public string  StorageLocation   { get; init; } = string.Empty; // LGORT
     public string  SupplyArea { get; init; } = string.Empty; // PRVBE
 }
+
+
+
+public sealed class KgToUnitQuery
+{
+    public string Material    { get; init; } = string.Empty;
+}
+
+
+public sealed class KgToUnitRow
+{
+    public string  Material { get; init; } = string.Empty; // MATNR
+    public decimal KgConversion    { get; init; }                  // MENGE
+}
+
 
 
 /// <summary>A single material document row from the MSEG table.</summary>

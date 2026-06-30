@@ -38,7 +38,7 @@ public sealed class ProductionController : SapControllerBase
                 ProductionHelpers.ParseRequiresCharge(charge)),
             ct);
         var response = ProductionHelpers.ParseBdcResponse(zf40n);
-        Console.WriteLine("Backflushing: " + body.Material + " x " + body.Quantity + " || " + response.RawMessage);
+        _logger.LogInformation("Backflushing: " + body.Material + " x " + body.Quantity + " || " + response.RawMessage);
 
         return Ok(ApiResponse<BdcResponse>.Ok(response));
     }
@@ -61,7 +61,7 @@ public sealed class ProductionController : SapControllerBase
 
         var mf41    = await _pool.ExecuteAsync( ProductionHelpers.BuildMf41Request( body ), ct );
         var response = ProductionHelpers.ParseBdcResponse(mf41);
-        Console.WriteLine("Reversing: " + body.MaterialDocument + " || " + response.RawMessage);
+        _logger.LogInformation("Reversing Backflush: " + body.MaterialDocument + " || " + response.RawMessage);
 
         return Ok(ApiResponse<BdcResponse>.Ok(response));
     }
@@ -91,28 +91,33 @@ public sealed class ProductionController : SapControllerBase
 
         var bom    = await _pool.ExecuteAsync(ProductionHelpers.BuildBomRequest(new BomQuery { Material = body.Material }), ct);
         var bomResponse = ProductionHelpers.ParseBomRows(bom);
-        Console.WriteLine($"Scrapping {body.Quantity} x {body.Material} - found {bomResponse.Length} components in BOM");
+        _logger.LogInformation($"Scrapping {body.Quantity} x {body.Material} - found {bomResponse.Length} components in BOM");
  
+        var kgToUnit = await _pool.ExecuteAsync(ProductionHelpers.BuildKgToUnitRequest(new KgToUnitQuery { Material = body.Material }), ct);
+        var kgToUnitResponse = ProductionHelpers.ParseKgToUnit(kgToUnit).FirstOrDefault();
+        var units = Math.Round(body.Quantity / kgToUnitResponse.KgConversion, 3);
+
         foreach (var row in bomResponse)
         {
             var slocArray = await _pool.ExecuteAsync(ProductionHelpers.BuildStorageLocation(row.Component), ct);
             var sloc = ProductionHelpers.ParseSingleSapResult(slocArray);
 
             var mb11    = await _pool.ExecuteAsync( ProductionHelpers.BuildBomScrapRequest(
-                            new BomScrapRequest { Material = row.Component, Quantity = Math.Round(row.ComponentQty * body.Quantity, 3), Header = body.Header,
+                            new BomScrapRequest { Material = row.Component, Quantity = Math.Round(row.ComponentQty * units, 3), Header = body.Header,
                                 MovementType = "551", ScrapReason = body.ScrapReason, StorageLocation = sloc, ProfitCentre = profitCentre } ), ct );
 
             var scrapResponse = ProductionHelpers.ParseBdcResponse(mb11);
             scrapResponses.Responses.Add(scrapResponse);
-            Console.WriteLine($"Posting scrap: {row.Component} x {row.ComponentQty * body.Quantity} {row.ComponentUnit} from {sloc} || {scrapResponse.RawMessage}");
+            _logger.LogInformation($"Posting scrap: {row.Component} x {row.ComponentQty * units} {row.ComponentUnit} from {sloc} || {scrapResponse.RawMessage}");
 
-            var lt01   = await _pool.ExecuteAsync( WarehouseHelpers.BuildTransferOrderRequest(
-                            new CreateTransferOrderRequest  {   StorageLocation = sloc, Material = row.Component,  Quantity = row.ComponentQty * body.Quantity,
-                                SourceType = "SA", SourceBin = "PTFE", DestinationType = "999", DestinationBin = "SCRAP", } ), ct );
-
-            var whmResponse = WarehouseHelpers.ParseTransferOrderResponse(lt01);
-            whmResponses.Responses.Add(whmResponse);
-            Console.WriteLine($"Transfer Order for {row.Component}: {whmResponse.TransferOrderNumber}");
+            if (sloc == "1710" || sloc == "1711") {
+                var lt01   = await _pool.ExecuteAsync( WarehouseHelpers.BuildTransferOrderRequest(
+                                new CreateTransferOrderRequest  {   StorageLocation = sloc, Material = row.Component,  Quantity = row.ComponentQty * units,
+                                    SourceType = "SA", SourceBin = "PTFE", DestinationType = "999", DestinationBin = "SCRAP", } ), ct );
+                var whmResponse = WarehouseHelpers.ParseTransferOrderResponse(lt01);
+                whmResponses.Responses.Add(whmResponse);
+                _logger.LogInformation($"Transfer Order for {row.Component}: {whmResponse.TransferOrderNumber}");
+            }
         }
 
         return Ok(ApiResponse<BdcWrapper>.Ok(scrapResponses));
@@ -137,22 +142,25 @@ public sealed class ProductionController : SapControllerBase
 
         var mbst    = await _pool.ExecuteAsync( ProductionHelpers.BuildMbstRequest( body ), ct );
         var response = ProductionHelpers.ParseBdcResponse(mbst);
-        Console.WriteLine("Reversing: " + body.MaterialDocument + " || " + response.RawMessage);
+        _logger.LogInformation($"Reversing Scrap: {body.MaterialDocument} || {response.RawMessage}");
 
         var matDocData = await _pool.ExecuteAsync( ProductionHelpers.BuildMatDocRequest( body.MaterialDocument ), ct );
         var matDoc = ProductionHelpers.ParseMaterialDocument(matDocData).FirstOrDefault();
 
-        if (matDoc == null)
-            throw new Exception("Material document not found.");
+        if (matDoc == null) {
+            return BadRequest(ApiResponse<BdcResponse>.Fail("403",response.RawMessage,response));
+        }
 
-        var lt01Data = new CreateTransferOrderRequest  {   StorageLocation = matDoc.StorageLocation, Material = matDoc.Material,  Quantity = matDoc.Quantity,
-                            SourceType = "999", SourceBin = "SCRAP", DestinationType = "SA", DestinationBin = "PTFE", };
+        if (matDoc.StorageLocation == "1710" || matDoc.StorageLocation == "1711") {
+            var lt01Data = new CreateTransferOrderRequest  {   StorageLocation = matDoc.StorageLocation, Material = matDoc.Material,  Quantity = matDoc.Quantity,
+                                SourceType = "999", SourceBin = "SCRAP", DestinationType = "SA", DestinationBin = "PTFE", };
 
-        var lt01   = await _pool.ExecuteAsync( WarehouseHelpers.BuildTransferOrderRequest( lt01Data ), ct );
+            var lt01   = await _pool.ExecuteAsync( WarehouseHelpers.BuildTransferOrderRequest( lt01Data ), ct );
 
-        var whmResponse = WarehouseHelpers.ParseTransferOrderResponse(lt01);
-        whmResponses.Responses.Add(whmResponse);
-        Console.WriteLine($"Transfer Order for {matDoc.Material}: {whmResponse.TransferOrderNumber}");
+            var whmResponse = WarehouseHelpers.ParseTransferOrderResponse(lt01);
+            whmResponses.Responses.Add(whmResponse);
+            _logger.LogInformation($"Transfer Order for {matDoc.Material}: {whmResponse.TransferOrderNumber}");
+        }
 
         return Ok(ApiResponse<BdcResponse>.Ok(response));
     }

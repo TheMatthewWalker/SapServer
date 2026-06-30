@@ -1,5 +1,7 @@
 @baseUrl = http://127.0.0.1:5200
-@token = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzcWwyMDA1LWJyaWRnZSIsImF1ZCI6InNhcC1zZXJ2ZXIiLCJzdWIiOiJkZXYiLCJ1c2VySWQiOjEsInJvbGUiOiJhZG1pbiIsImlhdCI6MTc3MzgyNDUyMCwiZXhwIjoxNzczODI4MTIwfQ.VKYemNDzHkLk3GgxRG5nxPvQ7x054-YziiNvJmYQIwE
+@token = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzcWwyMDA1LWJyaWRnZSIsImF1ZCI6InNhcC1zZXJ2ZXIiLCJzdWIiOiJkZXYiLCJ1c2VySWQiOjEsInJvbGUiOiJhZG1pbiIsImlhdCI6MTc4MjgzMTI2MiwiZXhwIjoxNzgyODM0ODYyfQ.NyXgHoP1OdCwLg8o8LJ_VD4SwdhdRLU75fWxOb4CU0o
+
+
 
 ### Test KN API connectivity and token validity
 
@@ -312,12 +314,59 @@ Authorization: Bearer {{token}}
 ###
 
 
-### GET /api/logistics/picksheets/open
+### GET /api/function/params
 GET {{baseUrl}}/api/function/params
 Content-Type: application/json
 Authorization: Bearer {{token}}
 
 {
-    "FunctionName": "RFC_READ_TABLE"
+    "FunctionName": "Z_CURR_RATE_GET"
+}
+###
+
+
+
+### GET /api/performance/agreements
+GET {{baseUrl}}/api/performance/agreements
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+
+}
+###
+
+
+### GET /api/performance/invoicing
+GET {{baseUrl}}/api/performance/invoicing
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+
+}
+###
+
+
+
+
+### GET /api/performance/otif
+GET {{baseUrl}}/api/performance/otif
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+
+}
+###
+
+
+### GET /api/performance/stock
+GET {{baseUrl}}/api/performance/stock
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+
 }
 ###

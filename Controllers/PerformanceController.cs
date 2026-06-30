@@ -1,6 +1,9 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.OpenApi.Services;
 using SapServer.Helpers;
 using SapServer.Models;
+using SapServer.Models.Bapi;
+using SapServer.Services.Interfaces;
 
 namespace SapServer.Controllers;
 
@@ -19,7 +22,7 @@ public sealed class PerformanceController : SapControllerBase
     // ── GET /api/performance/stock ───────────────────────────────────────
 
     [HttpGet("stock")]
-    [ProducesResponseType(typeof(ApiResponse<StockRow[]>), 200)]
+    [ProducesResponseType(typeof(ApiResponse<PerformanceStockRow[]>), 200)]
     [ProducesResponseType(typeof(ApiResponse<object>), 403)]
     public async Task<IActionResult> GetStock(CancellationToken ct)
     {
@@ -30,7 +33,7 @@ public sealed class PerformanceController : SapControllerBase
         var response = await _pool.ExecuteAsync(PerformanceHelpers.BuildStockRequest(), ct);
         var rows = PerformanceHelpers.ParseStockRows(response);
 
-        return Ok(ApiResponse<StockRow[]>.Ok(rows));
+        return Ok(ApiResponse<PerformanceStockRow[]>.Ok(rows));
     }
 
     // ── GET /api/performance/agreements ──────────────────────────────────
@@ -52,8 +55,20 @@ public sealed class PerformanceController : SapControllerBase
             _logger.LogInformation("Z_STOCK_REQ_LIST returned RC=4 (no data for selection) for user {UserId}.", GetUserId());
 
         var rows = PerformanceHelpers.ParseAgreementRows(response);
+        var currencies = rows.Select(r => r.Currency).Distinct();
+        var localCurrency = rows.FirstOrDefault()?.LocalCurrency ?? "GBP";
+        var rateDict = new Dictionary<string, decimal>();
 
-        return Ok(ApiResponse<AgreementRow[]>.Ok(rows));
+        foreach (var reqCur in PerformanceHelpers.BuildCurrencyRequests(currencies, localCurrency))
+        {   var res = await _pool.ExecuteAsync(reqCur, ct);
+            var parsed = PerformanceHelpers.ParseCurrencyRows(res);
+            foreach (var kv in parsed)
+                rateDict[kv.Key] = kv.Value;
+        }
+
+        var rowsWithCur = PerformanceHelpers.ApplyCurrencyConversion(rows, rateDict);
+
+        return Ok(ApiResponse<AgreementRow[]>.Ok(rowsWithCur));
     }
 
     // ── GET /api/performance/invoicing ───────────────────────────────────
@@ -67,7 +82,7 @@ public sealed class PerformanceController : SapControllerBase
 
         _logger.LogInformation("User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "performance/invoicing");
 
-        var fromDate = from ?? DateTime.Today.AddDays(-1000); // 1000 days matches the VBA's Now()-1000
+        var fromDate = from ?? DateTime.Today.AddDays(-30); // 1000 days matches the VBA's Now()-1000
         var toDate   = to ?? DateTime.Today;
         var response = await _pool.ExecuteAsync(PerformanceHelpers.BuildInvoicingRequest(fromDate, toDate), ct);
         var rows = PerformanceHelpers.ParseInvoiceRows(response);

@@ -10,8 +10,12 @@ internal static class PerformanceHelpers
     internal const string FnStockReqList  = "Z_STOCK_REQ_LIST";
     internal const string FnSaleAnalHist  = "Z_SALE_ANAL_HIST";
     internal const string FnCustIndexAnal = "Z_CUST_INDEX_ANALYSE";
+    internal const string FnReadTables  = "ZRFC_READ_TABLES";
+    internal const string FnCreate = "Z_RFC_CALL_TRANSACTION";
+    internal const string Warehouse     = "312";
+    internal const string Plant         = "3012";
 
-    private static readonly string[] StockColumns = ["MATNR", "CHARG", "LGPLA", "GESME", "VERME", "LGORT"];
+    private static readonly string[] StockColumns = ["MATNR", "CHARG", "LGPLA", "LGTYP", "GESME", "VERME", "LGORT"];
 
     // ── Stock (LQUA) ─────────────────────────────────────────────────────────
     // Direct port of Get_Stock — same shape as ProductionHelpers.BuildBomRequest,
@@ -19,37 +23,44 @@ internal static class PerformanceHelpers
 
     internal static RfcRequest BuildStockRequest()
     {
-        var builder = new RfcRequestBuilder(ProductionHelpers.FnReadTables)
+        var builder = new RfcRequestBuilder(FnReadTables)
             .Import("DELIMITER", "|")
             .Import("NO_DATA", " ")
-            .TableRow("QUERY_TABLES", new { TABNAME = "LQUA" });
+            .TableRow("QUERY_TABLES", new { TABNAME = "LQUA" })
+            .TableRow("QUERY_TABLES", new { TABNAME = "ZPRODBATCH" });
 
         foreach (var field in StockColumns)
             builder.TableItemRow("query_FIELDS", new { TABNAME = "LQUA", FIELDNAME = field });
 
-        builder.WhereCondition($"LQUA~LGNUM EQ '{ProductionHelpers.Warehouse}'");
-        builder.WhereCondition("LQUA~BESTQ NE 'S'"); // exclude blocked stock — mirrors Get_Stock's add_wc filter
+        builder.TableItemRow("query_FIELDS", new { TABNAME = "ZPRODBATCH", FIELDNAME = "PALL_MATNR" });
+        builder.TableItemRow("join_FIELDS", new { TAB_FROM = "LQUA", FLD_FROM = "CHARG", TAB_TO = "ZPRODBATCH", FLD_TO = "CHARG" });
+
+        builder.WhereCondition($"LQUA~LGNUM EQ '{Warehouse}'");
+        builder.WhereCondition("LQUA~BESTQ NE 'S'"); // exclude blocked stock
+        builder.WhereCondition("LQUA~LGORT EQ '1711'"); // only finished goods
 
         builder.ReadTable("data_display");
         return builder.Build();
     }
 
-    internal static StockRow[] ParseStockRows(RfcResponse response)
+    internal static PerformanceStockRow[] ParseStockRows(RfcResponse response)
     {
         if (!response.Tables.TryGetValue("data_display", out var sapRows))
             return [];
 
         return SapDelimitedParser
             .ParseRows(sapRows, '|', skipHeader: true)
-            .Where(cols => cols.Length >= StockColumns.Length)
-            .Select(cols => new StockRow
+            .Where(cols => cols.Length >= 8)
+            .Select(cols => new PerformanceStockRow
             {
                 Material        = cols[0],
                 Batch           = cols[1],
                 StorageBin      = cols[2],
-                TotalQty        = decimal.TryParse(cols[3], out var gesme) ? gesme : 0m,
-                AvailableQty    = decimal.TryParse(cols[4], out var verme) ? verme : 0m,
-                StorageLocation = cols[5]
+                StorageType     = cols[3],
+                TotalQty        = decimal.TryParse(cols[4], out var gesme) ? gesme : 0m,
+                AvailableQty    = decimal.TryParse(cols[5], out var verme) ? verme : 0m,
+                StorageLocation = cols[6],
+                PackagingMaterial = cols[7]
             })
             .ToArray();
     }
@@ -69,7 +80,10 @@ internal static class PerformanceHelpers
             .TableRow("WERKSRANGE",    new { SIGN = "I", OPTION = "EQ", LOW = "3012" })
             .TableRow("MTARTRANGE",    new { SIGN = "I", OPTION = "EQ", LOW = "FERT" })
             .TableRow("MTARTRANGE",    new { SIGN = "I", OPTION = "EQ", LOW = "HALB" })
-            .TableRow("DATERANGE",     new { SIGN = "I", OPTION = "LT", LOW = horizonEnd.ToString("yyyyMMdd") })
+            // DATERANGE is typed /SAPNEA/BAPIDATUM, not the usual SIGN/OPTION/LOW/HIGH range —
+            // its bounds are DATUM_LOW/DATUM_HIGH. Confirmed against the actual RFM metadata;
+            // every other *RANGE table below this one does use plain LOW/HIGH.
+            .TableRow("DATERANGE",     new { SIGN = "I", OPTION = "LT", DATUM_LOW = horizonEnd.ToString("yyyyMMdd") })
             .Import("SHOW_MATNR_REQ", "X")
             .Import("SHOW_MATNR_INV", "X")
             .Import("ADD_MATNR_REQ_INFO", "X")
@@ -144,12 +158,14 @@ internal static class PerformanceHelpers
                 CustomerMaterial  = reqInfo is null ? "" : Str(reqInfo, "KDMAT"),
                 CustomerReference = reqInfo is null ? "" : Str(reqInfo, "KNREF"),
                 UnloadingPoint    = reqInfo is null ? "" : Str(reqInfo, "ABLAD"),
-                RequestDate       = ParseSapDate(req.GetValueOrDefault("DATUM")) ?? default,
+                RequestDate       = reqInfo is null  ? DateTime.MinValue : DateTime.TryParse(Str(reqInfo, "DATUM"), 
+                                    out var date) ? date : DateTime.MinValue,
                 Week              = Str(req, "WEEK"),
                 Period            = Str(req, "PERIOD"),
                 OrderQty          = qty,
                 Amount            = kpein == 0 ? 0 : qty * (netpr / kpein),
-                Currency          = cur
+                Currency          = cur,
+                LocalAmount       = 1m
             });
         }
 
@@ -188,7 +204,8 @@ internal static class PerformanceHelpers
             {
                 Plant          = Str(r, "WERKS"),
                 SalesOrg       = Str(r, "VKORG"),
-                InvoiceDate    = ParseSapDate(r.GetValueOrDefault("FKDAT")) ?? default,
+                InvoiceDate    = DateTime.TryParse(Str(r, "FKDAT"), 
+                                    out var date) ? date : DateTime.MinValue,
                 InvoiceType    = Str(r, "FKART"),
                 InvoiceNumber  = Str(r, "VBELN"),
                 DeliveryNote   = Str(r, "VGBEL"),
@@ -236,15 +253,74 @@ internal static class PerformanceHelpers
                 Material     = Str(r, "MATNR"),
                 MaterialText = Str(r, "MAKTX"),
                 Delivery     = Str(r, "VBELN"),
-                DeliveryDate = ParseSapDate(r.GetValueOrDefault("LFDAT")) ?? default,
+                DeliveryDate = DateTime.TryParse(Str(r, "LFDAT"), 
+                                    out var date) ? date : DateTime.MinValue,
                 DeliveryQty  = Dec(r, "MENGE"),
                 Uom          = Str(r, "MEINS"),
-                TargetDate   = ParseSapDate(r.GetValueOrDefault("TARG1_DT")) ?? default,
+                TargetDate   = DateTime.TryParse(Str(r, "TARG1_DT"), 
+                                    out var tdate) ? tdate : DateTime.MinValue,
                 TargetQty    = Dec(r, "TARG1_ORIG"),
                 QtyClass     = Str(r, "QTYCLASS"),
                 DateClass    = Str(r, "DATCLASS")
             })
             .ToArray();
+
+    // ── Currency Convertors ────────────────────────────────────────────────────────
+    //
+    // 
+    internal static IEnumerable<RfcRequest> BuildCurrencyRequests(
+        IEnumerable<string> curr,
+        string localCurrency)
+    {
+        foreach (var c in curr)
+        {
+            if (string.IsNullOrEmpty(c))
+                continue;
+
+            yield return new RfcRequestBuilder("Z_CURR_RATE_GET")
+                .Import("FOREIGN_CURRENCY", c)
+                .Import("LOCAL_CURRENCY", localCurrency)
+                .Import("TYPE_OF_RATE", "M")
+                .Import("VALID_DATE", DateTime.Today.ToString("yyyyMMdd"))
+                .ReadTable("CURR_RATE_T", ["FCURR", "UKURS"])
+                .Build();
+        }
+    }
+
+    internal static Dictionary<string, decimal> ParseCurrencyRows(RfcResponse response)
+    {
+        var dict = new Dictionary<string, decimal>();
+        var rows = GetRows(response, "CURR_RATE_T");
+
+        foreach (var r in rows)
+        {   var currency = Str(r, "FCURR");
+            var rate     = Dec(r, "UKURS");
+            if (!string.IsNullOrEmpty(currency))
+                { dict[currency] = rate; }
+        }
+
+        return dict;
+    }
+
+  internal static AgreementRow[] ApplyCurrencyConversion(
+        AgreementRow[] rows,
+        Dictionary<string, decimal> rates)
+    {
+        foreach (var row in rows) {
+            
+            Console.WriteLine($"Row currency: {row.Currency}");
+            Console.WriteLine($"Rate found: {rates.GetValueOrDefault(row.Currency, -1)}");
+
+            if (string.IsNullOrEmpty(row.Currency))
+            { row.LocalAmount = row.Amount;
+                continue; }
+
+            decimal rate = rates.GetValueOrDefault(row.Currency, 1m);
+            row.LocalAmount = row.Amount * rate;
+        }
+        return rows;
+    }
+
 
     // ── Shared helpers ────────────────────────────────────────────────────────
     //
@@ -258,6 +334,8 @@ internal static class PerformanceHelpers
     // the WA-only ZRFC_READ_TABLES route), so if your actual RfcResponse shapes this
     // differently, this is the only method that needs to change — everything above
     // it (the Build*Request methods) doesn't depend on this assumption at all.
+
+
 
     private static List<Dictionary<string, object?>> GetRows(RfcResponse response, string table) =>
         response.Tables.TryGetValue(table, out var rows) ? rows : [];

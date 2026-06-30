@@ -64,6 +64,44 @@ internal static class ProductionHelpers
             .ToArray();
     }
 
+
+    internal static RfcRequest BuildKgToUnitRequest(KgToUnitQuery query)
+    {
+        var builder = new RfcRequestBuilder(FnReadTables)
+            .Import("DELIMITER", "|")
+            .Import("ROWCOUNT",  "1")
+            .Import("NO_DATA",   " ")
+            .TableRow("QUERY_TABLES", new { TABNAME = "MARA" });
+
+        builder.TableItemRow("query_FIELDS", new { TABNAME = "MARA", FIELDNAME = "MATNR" });
+        builder.TableItemRow("query_FIELDS", new { TABNAME = "MARA", FIELDNAME = "BRGEW" });
+        builder.WhereCondition($"MARA~MATNR EQ '{(SapPad.Pad(query.Material, 18) ?? "").ToUpperInvariant()}'");
+
+        builder.ReadTable("data_display"); // no fields → WA column only
+
+        return builder.Build();
+    }
+
+
+    internal static KgToUnitRow[] ParseKgToUnit(RfcResponse response)
+    {
+        if (!response.Tables.TryGetValue("data_display", out var sapRows))
+            return [];
+
+        return SapDelimitedParser
+            .ParseRows(sapRows, '|', skipHeader: true)
+            .Where(cols => cols.Length >= 2)
+            .Select(cols => new KgToUnitRow
+            {
+                Material =         cols[0],
+                KgConversion =     decimal.TryParse(cols[1], out var kg) ? kg : 0m,
+            })
+            .ToArray();
+    }
+
+
+
+
 // ── Material Document ─────────────────────────────────────────────────────────────────
     internal static MsegRow[] ParseMaterialDocument(RfcResponse response)
     {
@@ -72,7 +110,7 @@ internal static class ProductionHelpers
 
         return SapDelimitedParser
             .ParseRows(sapRows, '|', skipHeader: true)
-            .Where(cols => cols.Length >= BomColumns.Length)
+            .Where(cols => cols.Length >= 3)
             .Select(cols => new MsegRow
             {
                 StorageLocation =  cols[0],

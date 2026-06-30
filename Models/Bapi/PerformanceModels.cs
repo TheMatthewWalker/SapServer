@@ -3,14 +3,16 @@ namespace SapServer.Models;
 // ── Stock (LQUA) ────────────────────────────────────────────────────────────
 // One row per batch/bin in warehouse 312. AvailableQty feeds the FIFO
 // allocation; TotalQty in a staging bin feeds the "already picked" match.
-public sealed class StockRow
+public sealed class PerformanceStockRow
 {
     public string Material        { get; init; } = ""; // MATNR
     public string Batch           { get; init; } = ""; // CHARG
     public string StorageBin      { get; init; } = ""; // LGPLA
+    public string StorageType      { get; init; } = ""; // LGTYP
     public decimal TotalQty       { get; init; }       // GESME
     public decimal AvailableQty   { get; init; }       // VERME
     public string StorageLocation { get; init; } = ""; // LGORT
+    public string PackagingMaterial { get; init; } = ""; // PALL_MATNR — from ZPRODBATCH join
 }
 
 // ── Agreements (Z_STOCK_REQ_LIST) ──────────────────────────────────────────
@@ -50,6 +52,7 @@ public sealed class AgreementRow
     public decimal OrderQty         { get; init; }       // QTY
     public decimal Amount           { get; init; }       // QTY * (NETPR / KPEIN), document currency
     public string Currency          { get; init; } = ""; // WAERK
+    public decimal LocalAmount      { get; set; }       // QTY * (NETPR / KPEIN), document currency
 
     // Filled in by Node after the pull — not part of the raw SAP response
     public decimal DockStockAllocated   { get; set; }
@@ -101,3 +104,4 @@ public sealed class OtifRow
     // Mirrors the workbook's OTIF_basis formula: =IF(W2="D+",0,1)
     public bool OnTime => DateClass != "D+";
 }
+
