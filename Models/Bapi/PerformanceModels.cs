@@ -47,7 +47,7 @@ public sealed class AgreementRow
     public string CustomerMaterial  { get; init; } = ""; // KDMAT
     public string CustomerReference { get; init; } = ""; // KNREF
     public string UnloadingPoint    { get; init; } = ""; // ABLAD
-    public DateTime RequestDate     { get; init; }       // DATUM
+    public DateTime RequestDate     { get; init; }      // DATUM
     public string Week              { get; init; } = "";
     public string Period            { get; init; } = "";
     public decimal OrderQty         { get; init; }       // QTY
