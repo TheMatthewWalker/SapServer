@@ -112,3 +112,144 @@ public sealed class OtifRow
     public bool OnTime => DateClass != "D+";
 }
 
+// ── MM Turns / Valuation Class (mm_turns_valclass.xlsm) ─────────────────────
+// Direct port of the workbook's "get_all" report: material master + valuation
+// (Get_marc_mara_makt_mbew), a 13-month rolling demand forecast built from
+// Z_STOCK_REQ_LIST in summary mode (main_get_data), a 13-month rolling
+// consumption history from MVER (Get_mver), last movement dates from S032
+// (Get_s032), and the derived stock-turns / book-value / warning columns
+// (recalc_turns / calc_book_value / make_warnings).
+//
+// Design deviation from the workbook: the VBA drives the final material list
+// from the intersection of the demand-forecast call (Z_STOCK_REQ_LIST, which
+// only ever returns FERT/HALB unless told otherwise) and the master-data call,
+// deleting rows that don't match. This API instead treats the master-data
+// call as authoritative (it's the one the plant/profit-centre/valuation-class
+// filters apply to most naturally) and left-joins forecast/history/movement
+// onto it — a material with stock but zero forecast still shows up with
+// "No requirement" rather than being silently dropped, which is more useful
+// for the review this report exists to support.
+
+/// <summary>Query filters for GET /api/performance/turns-valclass. All list filters are optional (empty = no filter, matching the workbook's blank dialog defaults).</summary>
+public sealed class TurnsValClassQuery
+{
+    public string?   Plant           { get; init; }              // defaults to PerformanceHelpers.Plant
+    public string[]? ProfitCentres   { get; init; }               // PID
+    public string[]? Materials       { get; init; }
+    public string[]? MrpControllers  { get; init; }               // DISPO
+    public string[]? MaterialTypes   { get; init; }               // MTART — blank in the workbook means "all types"
+    public string[]? ValuationClasses{ get; init; }               // BKLAS — only applies to the master-data call; Z_STOCK_REQ_LIST has no BKLAS selection
+
+    /// <summary>Number of months used to calculate turns/days-in-stock (workbook "turn_months", 1–12, default 4).</summary>
+    public int TurnMonths { get; init; } = 4;
+
+    /// <summary>
+    /// false (default) = forward-looking: turns are based on the demand forecast for the next TurnMonths months.
+    /// true = backward-looking: turns are based on actual consumption for the last TurnMonths months.
+    /// Mirrors the workbook's history_on/history_off toggle.
+    /// </summary>
+    public bool HistoryMode { get; init; }
+}
+
+/// <summary>One row per material — the flat report row. Forecast/history are 13-entry arrays,
+/// index 0 = 12 months out (oldest for history, furthest-out for forecast), index 12 = the current
+/// (partial) calendar month — both series share that terminal month, mirroring the workbook's own
+/// column layout where "Hist P{n}" and "Req P{n}" for the current month sit adjacent to each other.</summary>
+public sealed class TurnsValClassRow
+{
+    public string   Material               { get; init; } = ""; // MATNR
+    public string   MaterialText           { get; init; } = ""; // MAKTX
+    public DateTime? CreatedDate           { get; init; }       // ERSDA
+    public string   MaterialType           { get; init; } = ""; // MTART
+    public string   Uom                    { get; init; } = ""; // MEINS
+    public string   Plant                  { get; init; } = ""; // WERKS
+    public string   ProfitCentre           { get; init; } = ""; // PRCTR
+    public bool     DeletionFlag           { get; init; }       // LVORM
+    public string   AbcIndicator           { get; init; } = ""; // MAABC
+    public string   PurchasingGroup        { get; init; } = ""; // EKGRP
+    public string   MrpController          { get; init; } = ""; // DISPO
+    public string   ValuationClass         { get; init; } = ""; // BKLAS
+    public string   LotSizeProcedure       { get; init; } = ""; // DISLS
+    public decimal  PlanningTimeFence       { get; init; }       // FXHOR
+    public decimal  GrProcessingTime        { get; init; }       // WEBAZ
+    public decimal  TotalReplenishmentTime  { get; init; }       // DZEIT
+    public decimal  SafetyStock             { get; init; }       // EISBE
+    public decimal  MinLotSize              { get; init; }       // BSTMI
+    public decimal  MaxLotSize              { get; init; }       // BSTMA
+    public decimal  FixedLotSize            { get; init; }       // BSTFE
+    public decimal  RoundingValue           { get; init; }       // BSTRF
+    public string   SpecialProcurementType  { get; init; } = ""; // SOBSL
+    public decimal  PlannedDeliveryTime     { get; init; }       // PLIFZ
+
+    public decimal  StockQty               { get; init; }       // MBEW-LBKUM
+    public decimal  StockValue             { get; init; }       // MBEW-SALK3
+    public decimal  UnitPrice              { get; init; }       // MBEW-STPRS / MBEW-PEINH
+    public decimal  BookValue              { get; init; }       // StockValue * factor(ValuationClass) — calc_book_value
+
+    public decimal[] DemandForecast        { get; init; } = new decimal[13]; // Z_STOCK_REQ_LIST summary, 13 rolling months
+    public decimal[] ConsumptionHistory    { get; init; } = new decimal[13]; // MVER GSV01-12, 13 rolling months
+
+    public DateTime? LastReceiptDate       { get; init; } // S032 LETZTZUG
+    public DateTime? LastGoodsIssueDate    { get; init; } // S032 LETZTABG
+    public DateTime? LastConsumptionDate   { get; init; } // S032 LETZTVER
+    public DateTime? LastGoodsMovementDate { get; init; } // S032 LETZTBEW
+
+    public decimal? StockTurns             { get; init; } // null when TurnoverCategory is a non-numeric state (No stock, Neg. stock, No req. ...)
+    public decimal? DaysInStock            { get; init; }
+    public decimal  DailyRequirementValue  { get; init; } // "Daily req. value"
+    public string   TurnoverCategory       { get; init; } = ""; // bucketed days-in-stock, or a non-numeric state
+    public string   Warning                { get; init; } = ""; // make_warnings comment
+}
+
+/// <summary>Valid valuation classes for material types ROH/HALB/FERT/HIBE/VERP — T025/T025T/T134 join (Get_T025_T025T_T134).</summary>
+public sealed class ValClassRow
+{
+    public string ValuationClass { get; init; } = ""; // BKLAS
+    public string AccountRef     { get; init; } = ""; // KKREF
+    public string MaterialType   { get; init; } = ""; // MTART
+    public string Description    { get; init; } = ""; // BKBEZ
+}
+
+// ── Valuation class change (update_val_class) ───────────────────────────────
+// Executes real SAP transactions: moves stock out to `Order` (MB1A 291/292),
+// changes the valuation class via MM02, then moves stock back. This mutates
+// SAP data — unlike the rest of PerformanceController it is not a read-only
+// gateway. See PerformanceHelpers for the step-by-step port of update_val_class.
+
+public sealed class ValClassChangeItem
+{
+    public string Material          { get; init; } = "";
+    public string NewValuationClass { get; init; } = "";
+}
+
+public sealed class ChangeValuationClassRequest
+{
+    /// <summary>Production/CO order that stock is temporarily moved in and out of while MM02 runs.</summary>
+    public string Order { get; init; } = "";
+    public string? Plant { get; init; }
+    public List<ValClassChangeItem> Changes { get; init; } = [];
+}
+
+public sealed class ValClassChangeResult
+{
+    public string  Material          { get; init; } = "";
+    public string  MaterialText      { get; init; } = "";
+    public string  Plant             { get; init; } = "";
+    public decimal StockQty          { get; init; }
+    public string  OldValuationClass { get; init; } = "";
+    public string  NewValuationClass { get; init; } = "";
+    public decimal OldBookValue      { get; init; }
+    public decimal NewBookValue      { get; init; }
+    public decimal ValueChange       { get; init; }
+    public bool    Success           { get; init; }
+    public string  Message           { get; init; } = ""; // MM02 BDC message (parsed)
+}
+
+public sealed class ChangeValuationClassResponse
+{
+    public bool    Success           { get; init; }
+    public string? ErrorMessage      { get; init; } // set when the batch was aborted before any SAP writes happened
+    public decimal TotalValueChange  { get; init; }
+    public List<ValClassChangeResult> Results { get; init; } = [];
+}
+
