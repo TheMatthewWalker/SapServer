@@ -43,7 +43,7 @@ internal static class PerformanceHelpers
         return builder.Build();
     }
 
-    internal static PerformanceStockRow[] ParseStockRows(RfcResponse response)
+    internal static PerformanceStockRow[] ParseStockRows(RfcResponse response, Dictionary<string, string>pcList)
     {
         if (!response.Tables.TryGetValue("data_display", out var sapRows))
             return [];
@@ -60,7 +60,9 @@ internal static class PerformanceHelpers
                 TotalQty        = decimal.TryParse(cols[4], out var gesme) ? gesme : 0m,
                 AvailableQty    = decimal.TryParse(cols[5], out var verme) ? verme : 0m,
                 StorageLocation = cols[6],
-                PackagingMaterial = cols[7]
+                PackagingMaterial = cols[7],
+                ProfitCentre = pcList.GetValueOrDefault(
+                                    NormaliseMaterial(cols[0]), "")
             })
             .ToArray();
     }
@@ -198,7 +200,7 @@ internal static class PerformanceHelpers
                 "WAERK", "PRCTR", "PERIOD")
             .Build();
 
-    internal static InvoiceRow[] ParseInvoiceRows(RfcResponse response) =>
+    internal static InvoiceRow[] ParseInvoiceRows(RfcResponse response, Dictionary<string, string>pcList) =>
         GetRows(response, "SALE_HIST_T")
             .Select(r => new InvoiceRow
             {
@@ -220,10 +222,62 @@ internal static class PerformanceHelpers
                 DocumentAmount = Dec(r, "FNETWR"),
                 LocalAmount    = Dec(r, "LNETWR"),
                 Currency       = Str(r, "WAERK"),
-                ProfitCentre   = Str(r, "PRCTR"),
+                ProfitCentre   = pcList.GetValueOrDefault(
+                                    NormaliseMaterial(Str(r, "MATNR")), 
+                                    Str(r, "PRCTR")),
                 Period         = Str(r, "PERIOD")
             })
             .ToArray();
+
+
+    private static string NormaliseMaterial(string material)
+    {
+        material = material?.Trim() ?? "";
+
+        // Only strip leading zeros if the entire string is numeric
+        return material.All(char.IsDigit)
+            ? material.TrimStart('0')
+            : material;
+    }
+
+
+
+    // ── Stock ─────────────────────────────────────────────────────────────────
+
+    internal static RfcRequest BuildMaterialProfitCentre()
+    {
+        var builder = new RfcRequestBuilder(FnReadTables)
+            .Import("DELIMITER", "|")
+            .Import("ROWCOUNT",  "")
+            .Import("NO_DATA",   " ")
+            .TableRow("QUERY_TABLES", new { TABNAME = "MARC" })
+            .TableItemRow("query_FIELDS", new { TABNAME = "MARC", FIELDNAME = "MATNR" })
+            .TableItemRow("query_FIELDS", new { TABNAME = "MARC", FIELDNAME = "PRCTR" })
+            .WhereCondition($"MARC~WERKS EQ '{Plant}'");
+
+        builder.ReadTable("data_display"); // no fields → WA column only
+
+        return builder.Build();
+    }
+
+    internal static Dictionary<string, string> ParseMaterialProfitCentre(RfcResponse response)
+    {
+        if (!response.Tables.TryGetValue("data_display", out var sapRows))
+            return [];
+
+        return SapDelimitedParser
+            .ParseRows(sapRows, '|')
+            .Where(cols => cols.Length >= 2)
+            .GroupBy(cols => cols[0].Trim())
+            .ToDictionary(
+                g => g.Key,
+                g => g.First()[1].Trim()
+            );
+
+    }
+
+
+
 
     // ── OTIF (Z_CUST_INDEX_ANALYSE) ──────────────────────────────────────────
 

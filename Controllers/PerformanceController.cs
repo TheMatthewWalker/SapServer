@@ -31,7 +31,9 @@ public sealed class PerformanceController : SapControllerBase
         _logger.LogInformation("User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "performance/stock");
 
         var response = await _pool.ExecuteAsync(PerformanceHelpers.BuildStockRequest(), ct);
-        var rows = PerformanceHelpers.ParseStockRows(response);
+        var pc = await _pool.ExecuteAsync(PerformanceHelpers.BuildMaterialProfitCentre(), ct);
+        var pcList = PerformanceHelpers.ParseMaterialProfitCentre(pc);
+        var rows = PerformanceHelpers.ParseStockRows(response, pcList);
 
         return Ok(ApiResponse<PerformanceStockRow[]>.Ok(rows));
     }
@@ -47,7 +49,7 @@ public sealed class PerformanceController : SapControllerBase
 
         _logger.LogInformation("User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "performance/agreements");
 
-        var horizonEnd = DateTime.Today.AddDays(horizonDays ?? 365); // 365 matches the VBA's Now()+365
+        var horizonEnd = DateTime.Today.AddDays(horizonDays ?? 365); // All orders in a 1 year horizon
         var response = await _pool.ExecuteAsync(PerformanceHelpers.BuildAgreementsRequest(horizonEnd), ct);
 
         var rc = ReturnTableHelper.GetParam(response, "RC");
@@ -82,10 +84,12 @@ public sealed class PerformanceController : SapControllerBase
 
         _logger.LogInformation("User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "performance/invoicing");
 
-        var fromDate = from ?? DateTime.Today.AddDays(-30); // 1000 days matches the VBA's Now()-1000
+        var fromDate = from ?? DateTime.Today.AddDays(-31); // ensures all dates in a given month are downloaded.
         var toDate   = to ?? DateTime.Today;
         var response = await _pool.ExecuteAsync(PerformanceHelpers.BuildInvoicingRequest(fromDate, toDate), ct);
-        var rows = PerformanceHelpers.ParseInvoiceRows(response);
+        var pc = await _pool.ExecuteAsync(PerformanceHelpers.BuildMaterialProfitCentre(), ct);
+        var pcList = PerformanceHelpers.ParseMaterialProfitCentre(pc);
+        var rows = PerformanceHelpers.ParseInvoiceRows(response, pcList);
 
         return Ok(ApiResponse<InvoiceRow[]>.Ok(rows));
     }
@@ -101,7 +105,7 @@ public sealed class PerformanceController : SapControllerBase
 
         _logger.LogInformation("User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "performance/otif");
 
-        var fromDate = from ?? DateTime.Today.AddDays(-365); // 365 matches the VBA's DateValue(Now())-365
+        var fromDate = from ?? DateTime.Today.AddDays(-31); // ensures all dates in a given month are downloaded.
         var toDate   = to ?? DateTime.Today;
         var response = await _pool.ExecuteAsync(PerformanceHelpers.BuildOtifRequest(fromDate, toDate), ct);
         var rows = PerformanceHelpers.ParseOtifRows(response);

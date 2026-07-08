@@ -13,6 +13,7 @@ public sealed class PerformanceStockRow
     public decimal AvailableQty   { get; init; }       // VERME
     public string StorageLocation { get; init; } = ""; // LGORT
     public string PackagingMaterial { get; init; } = ""; // PALL_MATNR — from ZPRODBATCH join
+    public string ProfitCentre { get; set; } = ""; //PRCTR gained from MARC lookup.
 }
 
 // ── Agreements (Z_STOCK_REQ_LIST) ──────────────────────────────────────────
@@ -81,6 +82,12 @@ public sealed class InvoiceRow
     public string Currency        { get; init; } = "";  // WAERK
     public string ProfitCentre    { get; init; } = "";  // PRCTR
     public string Period          { get; init; } = "";
+}
+
+public sealed class ProfitCentreRow
+{
+    public string Material      { get; init; } = ""; // MATNR
+    public string ProfitCentre             { get; init; } = ""; // PRCTR
 }
 
 // ── OTIF (Z_CUST_INDEX_ANALYSE) ─────────────────────────────────────────────
