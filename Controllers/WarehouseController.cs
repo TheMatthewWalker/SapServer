@@ -150,7 +150,7 @@ public sealed class WarehouseController : SapControllerBase
         CancellationToken ct)
     {
         StagePicksheetBatchResponse Failed(string error, List<SapReturnMessage>? messages = null) =>
-            new(false, "", 0m, "", "", false, error, messages ?? []);
+            new(false, "", 0m, "", "", false, "", "", error, messages ?? []);
 
         // 1. Fresh batch snapshot
         var snapshotResponse = await _pool.ExecuteAsync(
@@ -217,6 +217,58 @@ public sealed class WarehouseController : SapControllerBase
             DestinationBin:      destinationBin,
             DestinationType:     PicksheetHelpers.StagingStorageType,
             BinWasCreated:       binWasCreated,
+            SourceType:          snapshot.StorageType,
+            SourceBin:           snapshot.Bin,
+            Error:               null,
+            Messages:            toResult.Messages)));
+    }
+
+    // ── POST /api/warehouse/picksheet-unstage-batch ───────────────────────────
+    //
+    // Reverses a picksheet-stage-batch transfer order — called when a staged
+    // package is deleted from a pallet, so the batch's stock is freed up for
+    // other deliveries again. See PicksheetHelpers.ShouldReverse for the
+    // "nothing to reverse" handling (batch already picked/moved elsewhere).
+    // No CheckPermissionAsync gate, same as the other picksheet-* endpoints.
+
+    [HttpPost("picksheet-unstage-batch")]
+    [ProducesResponseType(typeof(ApiResponse<PicksheetUnstageBatchResponse>), 200)]
+    [ProducesResponseType(typeof(ApiResponse<object>), 422)]
+    public async Task<IActionResult> PicksheetUnstageBatch(
+        [FromBody] PicksheetUnstageBatchRequest request,
+        CancellationToken ct)
+    {
+        PicksheetUnstageBatchResponse Failed(string error, List<SapReturnMessage>? messages = null) =>
+            new(false, "", 0m, false, error, messages ?? []);
+
+        var snapshotResponse = await _pool.ExecuteAsync(
+            PicksheetHelpers.BuildBatchSnapshotRequest(request.Material, request.Batch), ct);
+        var snapshot = PicksheetHelpers.ParseBatchSnapshot(snapshotResponse);
+
+        if (!PicksheetHelpers.ShouldReverse(snapshot, request.StagedBin))
+        {
+            // Not sitting in the picksheet bin anymore (already picked, or
+            // moved by something else since) — nothing to undo, but that's
+            // not a failure; the caller (palletpackages delete) can proceed.
+            return Ok(ApiResponse<PicksheetUnstageBatchResponse>.Ok(
+                new PicksheetUnstageBatchResponse(true, "", 0m, true, null, [])));
+        }
+
+        var body     = PicksheetHelpers.BuildUnstageTransferOrderBody(snapshot!, request.OriginalSourceType, request.OriginalSourceBin);
+        var toResponse = await _pool.ExecuteAsync(WarehouseHelpers.BuildTransferOrderRequest(body), ct);
+        var toResult    = WarehouseHelpers.ParseTransferOrderResponse(toResponse);
+
+        if (ReturnTableHelper.HasBlockingError(toResult.Messages.Select(m => new ReturnTableHelper.SapMessage(m.Type, m.Message))))
+        {
+            const string msg = "SAP rejected the reversing transfer order.";
+            return UnprocessableEntity(ApiResponse<PicksheetUnstageBatchResponse>.Fail("422", msg, Failed(msg, toResult.Messages)));
+        }
+
+        return Ok(ApiResponse<PicksheetUnstageBatchResponse>.Ok(new PicksheetUnstageBatchResponse(
+            Success:             true,
+            TransferOrderNumber: toResult.TransferOrderNumber,
+            QuantityMoved:       snapshot!.TotalQty,
+            NothingToReverse:    false,
             Error:               null,
             Messages:            toResult.Messages)));
     }

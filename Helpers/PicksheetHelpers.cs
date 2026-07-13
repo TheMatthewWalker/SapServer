@@ -44,6 +44,25 @@ public sealed record StagePicksheetBatchResponse(
     string DestinationBin,
     string DestinationType,
     bool BinWasCreated,
+    string SourceType,
+    string SourceBin,
+    string? Error,
+    List<SapReturnMessage> Messages);
+
+// ── Unstage batch (reverse a staging transfer order) ───────────────────────
+//
+// See PicksheetHelpers' "Unstaging" region below. Called when a staged
+// package is deleted from a pallet, to move the batch back out of the
+// picksheet bin and free it up for other deliveries again.
+
+public sealed record PicksheetUnstageBatchRequest(
+    string Material, string Batch, string StagedBin, string OriginalSourceType, string OriginalSourceBin);
+
+public sealed record PicksheetUnstageBatchResponse(
+    bool Success,
+    string TransferOrderNumber,
+    decimal QuantityMoved,
+    bool NothingToReverse,
     string? Error,
     List<SapReturnMessage> Messages);
 
@@ -279,6 +298,36 @@ internal static class PicksheetHelpers
                 .Field("BDC_OKCODE", "=BU")
                 .Field("LAGP-LGBER", StagingBinSection)
             .Build();
+
+    // ── Unstaging (reverse a staging transfer order) ────────────────────────────
+    //
+    // Called when a staged package is deleted from a pallet. Re-queries the
+    // batch fresh rather than trusting the quantity recorded at staging time
+    // (some of it may have been picked/consumed since) — if it's still
+    // sitting in the picksheet's 916 bin, moves whatever's actually there
+    // now back to the originally recorded source type/bin. If it's not
+    // there anymore (already picked, or moved by something else since),
+    // there's nothing to reverse — that's reported back as success with
+    // NothingToReverse=true rather than an error, so a stale/already-
+    // resolved package can still be deleted from the app.
+
+    internal static bool ShouldReverse(BatchSnapshotRow? snapshot, string stagedBin) =>
+        snapshot is not null
+        && snapshot.StorageType == StagingStorageType
+        && snapshot.Bin == stagedBin;
+
+    internal static CreateTransferOrderRequest BuildUnstageTransferOrderBody(
+        BatchSnapshotRow snapshot, string originalSourceType, string originalSourceBin) => new()
+    {
+        StorageLocation = snapshot.StorageLocation,
+        Material        = snapshot.Material,
+        Quantity        = snapshot.TotalQty,
+        SourceType      = snapshot.StorageType,      // currently 916 (where it's staged now)
+        SourceBin       = snapshot.Bin,
+        DestinationType = originalSourceType,        // back to where it came from
+        DestinationBin  = originalSourceBin,
+        Batch           = snapshot.Batch
+    };
 
     // SAP decimals often come back "1.234,56" (German/European display format)
     // from ZRFC_READ_TABLES — same normalization as RfcRowExtensions.GetDecimal,
