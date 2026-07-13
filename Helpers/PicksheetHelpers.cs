@@ -22,6 +22,13 @@ public sealed record PicksheetBatchRow(
     string PackagingMaterial,
     string AllocatedDelivery);
 
+public sealed record PicksheetLipsRequest
+{
+    public List<string> Deliveries { get; init; } = [];
+}
+
+public sealed record PicksheetLipsRow(string DeliveryNumber, string ItemNumber, string MaterialNumber, string Quantity);
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 //
 // Backs the warehouse picksheet's "what stock is available for this material"
@@ -40,6 +47,18 @@ internal static class PicksheetHelpers
     // Column order must exactly match query_FIELDS registration order below.
     private static readonly string[] LquaColumns =
         ["MATNR", "CHARG", "LGTYP", "LGPLA", "GESME", "VERME", "BESTQ", "SOBKZ", "SONUM"];
+
+    // LFIMG (delivery quantity) not KCMENG (confirmed quantity) — the customs
+    // feature's LIPS query (CustomsHelpers.BuildLipsRequest) filters on
+    // KCMENG > 0, which is only populated once a delivery has actually been
+    // picked/confirmed. A picksheet is precisely a delivery that HASN'T been
+    // picked yet, so KCMENG is always 0 at this stage — that's why the
+    // picksheet builder was coming back with zero material lines for every
+    // delivery. LFIMG is the quantity documented on the delivery itself,
+    // populated as soon as the delivery exists, regardless of pick status.
+    // Also no WERKS (plant) restriction here, unlike the customs query —
+    // a picksheet should show whatever the delivery actually needs.
+    private static readonly string[] LipsColumns = ["VBELN", "POSNR", "MATNR", "LFIMG"];
 
     internal static RfcRequest BuildStockRequest(PicksheetStockRequest request)
     {
@@ -96,6 +115,42 @@ internal static class PicksheetHelpers
                 SpecialStockNum:   cols[8],
                 PackagingMaterial: cols[9],
                 AllocatedDelivery: cols[10]))
+            .ToArray();
+    }
+
+    internal static RfcRequest BuildLipsRequest(PicksheetLipsRequest request)
+    {
+        var builder = new RfcRequestBuilder(FnReadTables)
+            .Import("DELIMITER", "|")
+            .Import("NO_DATA",   " ")
+            .TableRow("QUERY_TABLES", new { TABNAME = "LIPS" });
+
+        foreach (var field in LipsColumns)
+            builder.TableItemRow("query_FIELDS", new { TABNAME = "LIPS", FIELDNAME = field });
+
+        builder
+            .WhereCondition("LIPS~LFIMG > 0")
+            .WhereCondition("LIPS~VBELN IN opt");
+
+        foreach (var delivery in request.Deliveries)
+            builder.TableItemRow("value_list", new
+            {
+                TABNAME = "LIPS", FIELDNAME = "VBELN",
+                SIGN = "I", OPTION = "EQ", LOW = SapPad.Pad(delivery, 10), HIGH = ""
+            });
+
+        return builder.ReadTable("data_display").Build();
+    }
+
+    internal static PicksheetLipsRow[] ParseLipsRows(RfcResponse response)
+    {
+        if (!response.Tables.TryGetValue("data_display", out var sapRows))
+            return [];
+
+        return SapDelimitedParser
+            .ParseRows(sapRows, '|', skipHeader: true)
+            .Where(cols => cols.Length >= LipsColumns.Length)
+            .Select(cols => new PicksheetLipsRow(cols[0], cols[1], cols[2], cols[3]))
             .ToArray();
     }
 }

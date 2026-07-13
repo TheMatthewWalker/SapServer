@@ -106,6 +106,25 @@ public sealed class WarehouseController : SapControllerBase
         return Ok(ApiResponse<PicksheetBatchRow[]>.Ok(PicksheetHelpers.ParseStockRows(response)));
     }
 
+    // ── POST /api/warehouse/picksheet-materials ────────────────────────────────
+    //
+    // LIPS filtered on LFIMG (delivery quantity, populated as soon as the
+    // delivery exists) rather than KCMENG (confirmed quantity, only populated
+    // once picked) — see PicksheetHelpers.LipsColumns for the full reasoning.
+    // No CheckPermissionAsync gate, same as picksheet-stock above.
+
+    [HttpPost("picksheet-materials")]
+    [ProducesResponseType(typeof(ApiResponse<PicksheetLipsRow[]>), 200)]
+    public async Task<IActionResult> PicksheetMaterials([FromBody] PicksheetLipsRequest request, CancellationToken ct)
+    {
+        if (request.Deliveries.Count == 0)
+            return Ok(ApiResponse<PicksheetLipsRow[]>.Ok([]));
+
+        var rfcRequest = PicksheetHelpers.BuildLipsRequest(request);
+        var response    = await _pool.ExecuteAsync(rfcRequest, ct);
+        return Ok(ApiResponse<PicksheetLipsRow[]>.Ok(PicksheetHelpers.ParseLipsRows(response)));
+    }
+
     // ── POST /api/warehouse/consignment-mb1b ──────────────────────────────────
 
     [HttpPost("consignment-mb1b")]
