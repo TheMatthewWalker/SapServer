@@ -253,129 +253,154 @@ internal sealed class SapStaWorker : IDisposable
                 ex);
         }
 
-        // Scalar import parameters — func.exports("KEY").Value pattern (lowercase, indexer call)
-        foreach (var (key, value) in request.ImportParameters)
+        // Every call above us adds one entry to _sapFunctions.Functions via .Add() with no
+        // matching .Remove() — that collection was growing for the entire lifetime of the
+        // process. Wrapping the rest of this method in try/finally and calling RemoveAll()
+        // on the way out (success OR failure) keeps it from accumulating. Safe to do
+        // unconditionally: this worker's STA thread processes the queue strictly one item
+        // at a time (see WorkerLoop), so nothing else can be using _sapFunctions concurrently
+        // — by the time the next call starts, the collection is already back to empty.
+        try
         {
-            if (value is not null)
-                try
-                { func.exports(key).Value = UnwrapJson(value);  }
-                catch (Exception ex)
-                { Console.WriteLine($"SCALAR IMPORT ERROR: {key} -> {ex.Message}");
-                    throw; }
-        }
-
-
-        // Structured import parameters — func.exports("STRUCT").Field(n) pattern (lowercase, indexer call)
-        foreach (var (structName, fields) in request.StructImportParameters)
-        {
-            dynamic sapStruct = func.exports(structName);
-
-            foreach (var (field, value) in fields)
+            // Scalar import parameters — func.exports("KEY").Value pattern (lowercase, indexer call)
+            foreach (var (key, value) in request.ImportParameters)
             {
                 if (value is not null)
                     try
-                    { sapStruct[field] = UnwrapJson(value); }
+                    { func.exports(key).Value = UnwrapJson(value);  }
                     catch (Exception ex)
-                    { Console.WriteLine($"STRUCT FIELD ERROR: {structName}.{field} -> {ex.Message}");
+                    { Console.WriteLine($"SCALAR IMPORT ERROR: {key} -> {ex.Message}");
                         throw; }
             }
-        }
 
 
-        // Input tables — clear with Freetable() then populate rows
-        try
-        {
-            foreach (var (tableName, rows) in request.InputTables)
+            // Structured import parameters — func.exports("STRUCT").Field(n) pattern (lowercase, indexer call)
+            foreach (var (structName, fields) in request.StructImportParameters)
             {
-                dynamic table = func.Tables(tableName);
-                table.Freetable();
-                foreach (var row in rows)
+                dynamic sapStruct = func.exports(structName);
+
+                foreach (var (field, value) in fields)
                 {
-                    dynamic sapRow = table.Rows.Add();
-                    foreach (var (col, val) in row)
-                    {
-                        if (val is not null)
-                            try
-                            { sapRow[col] = UnwrapJson(val); }
-                            catch (Exception ex)
-                            { Console.WriteLine($"INPUT TABLE ERROR: {tableName}.{col} -> {ex.Message}");
-                                throw; }
-                    }
+                    if (value is not null)
+                        try
+                        { sapStruct[field] = UnwrapJson(value); }
+                        catch (Exception ex)
+                        { Console.WriteLine($"STRUCT FIELD ERROR: {structName}.{field} -> {ex.Message}");
+                            throw; }
                 }
             }
 
-            // Input table Items — clear with Freetable() then populate rows
-            foreach (var (tableName, rows) in request.InputTablesItems)
+
+            // Input tables — clear with Freetable() then populate rows
+            try
             {
-                dynamic table = func.Tables.Item(tableName);
-                table.Freetable();
-                foreach (var row in rows)
+                foreach (var (tableName, rows) in request.InputTables)
                 {
-                    dynamic sapRow = table.Rows.Add();
-                    foreach (var (col, val) in row)
+                    dynamic table = func.Tables(tableName);
+                    table.Freetable();
+                    foreach (var row in rows)
                     {
-                        if (val is not null)
-                            try
-                            { sapRow[col] = UnwrapJson(val); }
-                            catch (Exception ex)
-                            { Console.WriteLine($"INPUT TABLE ERROR: {tableName}.{col} -> {ex.Message}");
-                                throw; }
+                        dynamic sapRow = table.Rows.Add();
+                        foreach (var (col, val) in row)
+                        {
+                            if (val is not null)
+                                try
+                                { sapRow[col] = UnwrapJson(val); }
+                                catch (Exception ex)
+                                { Console.WriteLine($"INPUT TABLE ERROR: {tableName}.{col} -> {ex.Message}");
+                                    throw; }
+                        }
+                    }
+                }
+
+                // Input table Items — clear with Freetable() then populate rows
+                foreach (var (tableName, rows) in request.InputTablesItems)
+                {
+                    dynamic table = func.Tables.Item(tableName);
+                    table.Freetable();
+                    foreach (var row in rows)
+                    {
+                        dynamic sapRow = table.Rows.Add();
+                        foreach (var (col, val) in row)
+                        {
+                            if (val is not null)
+                                try
+                                { sapRow[col] = UnwrapJson(val); }
+                                catch (Exception ex)
+                                { Console.WriteLine($"INPUT TABLE ERROR: {tableName}.{col} -> {ex.Message}");
+                                    throw; }
+                        }
                     }
                 }
             }
+            catch (System.Runtime.InteropServices.COMException ex)
+            {
+                throw new SapExecutionException(request.FunctionName,
+                    $"Failed to populate input tables for '{request.FunctionName}' (HRESULT 0x{ex.ErrorCode:X8}).",
+                    ex.Message);
+            }
+
+            // Cast to the typed IFunction interface so Call() is invoked via FUNC dispatch
+            // (not PROPERTYGET), which is required for the COM server to populate Exception.
+            var typedFunc = (SAPFunctions64.IFunction)func;
+
+            bool success;
+            try
+            {
+                //success = typedFunc.Call();
+                success = func.Call;
+            }
+            catch (System.Runtime.InteropServices.COMException ex)
+            {
+                throw new SapExecutionException(request.FunctionName,
+                    $"SAP call failed (HRESULT 0x{ex.ErrorCode:X8}).", ex.Message);
+            }
+
+            if (!success)
+            {
+                string exceptionCode = typedFunc.Exception ?? "";
+
+                string? sapMsg = TryReadReturnMessage(func, out string returnTableDiag);
+
+                _logger.LogWarning(
+                    "RFC '{Function}' failed — Exception: '{ExCode}', ReturnTable: {RetDiag}, ReturnMsg: '{RetMsg}'",
+                    request.FunctionName, exceptionCode, returnTableDiag, sapMsg ?? "(none)");
+
+                // The SAP OCX drops the connection after any failed call — always mark disconnected
+                // so EnsureConnected() reconnects before the next request.
+                _isConnected = false;
+
+                if (IsCommunicationError(exceptionCode))
+                    throw new SapConnectionException(SlotId,
+                        $"SAP communication failure during '{request.FunctionName}': {exceptionCode}.");
+
+                string detail = !string.IsNullOrEmpty(sapMsg)
+                    ? (string.IsNullOrEmpty(exceptionCode) ? sapMsg : $"{exceptionCode}: {sapMsg}")
+                    : (!string.IsNullOrEmpty(exceptionCode) ? exceptionCode : $"RFC call to '{request.FunctionName}' failed (no detail available).");
+
+                throw new SapExecutionException(
+                    request.FunctionName,
+                    $"RFC call to '{request.FunctionName}' returned {exceptionCode}.",
+                    detail);
+            }
+
+            return BuildResponse(func, request);
         }
-        catch (System.Runtime.InteropServices.COMException ex)
+        finally
         {
-            throw new SapExecutionException(request.FunctionName,
-                $"Failed to populate input tables for '{request.FunctionName}' (HRESULT 0x{ex.ErrorCode:X8}).",
-                ex.Message);
+            // Best-effort cleanup — must never mask whatever exception is already propagating
+            // out of the try block above, so this failure only ever gets logged, not thrown.
+            try
+            {
+                _sapFunctions?.RemoveAll();
+            }
+            catch (Exception cleanupEx)
+            {
+                _logger.LogWarning(cleanupEx,
+                    "RemoveAll() cleanup failed on slot {SlotId} after '{Function}'.",
+                    SlotId, request.FunctionName);
+            }
         }
-
-        // Cast to the typed IFunction interface so Call() is invoked via FUNC dispatch
-        // (not PROPERTYGET), which is required for the COM server to populate Exception.
-        var typedFunc = (SAPFunctions64.IFunction)func;
-
-        bool success;
-        try
-        {
-            //success = typedFunc.Call();
-            success = func.Call;
-        }
-        catch (System.Runtime.InteropServices.COMException ex)
-        {
-            throw new SapExecutionException(request.FunctionName,
-                $"SAP call failed (HRESULT 0x{ex.ErrorCode:X8}).", ex.Message);
-        }
-
-        if (!success)
-        {
-            string exceptionCode = typedFunc.Exception ?? "";
-
-            string? sapMsg = TryReadReturnMessage(func, out string returnTableDiag);
-
-            _logger.LogWarning(
-                "RFC '{Function}' failed — Exception: '{ExCode}', ReturnTable: {RetDiag}, ReturnMsg: '{RetMsg}'",
-                request.FunctionName, exceptionCode, returnTableDiag, sapMsg ?? "(none)");
-
-            // The SAP OCX drops the connection after any failed call — always mark disconnected
-            // so EnsureConnected() reconnects before the next request.
-            _isConnected = false;
-
-            if (IsCommunicationError(exceptionCode))
-                throw new SapConnectionException(SlotId,
-                    $"SAP communication failure during '{request.FunctionName}': {exceptionCode}.");
-
-            string detail = !string.IsNullOrEmpty(sapMsg)
-                ? (string.IsNullOrEmpty(exceptionCode) ? sapMsg : $"{exceptionCode}: {sapMsg}")
-                : (!string.IsNullOrEmpty(exceptionCode) ? exceptionCode : $"RFC call to '{request.FunctionName}' failed (no detail available).");
-
-            throw new SapExecutionException(
-                request.FunctionName,
-                $"RFC call to '{request.FunctionName}' returned {exceptionCode}.",
-                detail);
-        }
-
-        return BuildResponse(func, request);
     }
 
     /// <summary>
@@ -490,44 +515,4 @@ internal sealed class SapStaWorker : IDisposable
                     }
                     else
                     {
-                        // No fields specified — read the WA (work area) column
-                        try { row["WA"] = sapRow["WA"]?.ToString(); }
-                        catch { /* WA column does not exist on this table */ }
-                    }
-
-                    resultRows.Add(row);
-                }
-            }
-            catch { /* Table does not exist or has no rows — return empty list */ }
-
-            tables[tableName] = resultRows;
-        }
-
-        return new RfcResponse { Parameters = parameters, Tables = tables };
-    }
-
-    // RFC_INVALID_HANDLE means the session/connection handle itself is no longer valid
-    // (backend closed it, GUI scripting session timed out, etc.) — the same class of
-    // problem as a communication failure, just reported differently. Treating it as one
-    // here means a call that hits it gets reconnected-and-retried immediately within
-    // ProcessItem, instead of only being marked for reconnect on the *next* call while
-    // this one fails outright — which is exactly the "Could not create RFC function
-    // object" / "RFC_INVALID_HANDLE" pattern reported after the daily cron refresh.
-    private static bool IsCommunicationError(string exceptionCode) =>
-        exceptionCode is "RFC_COMMUNICATION_FAILURE"
-                      or "RFC_SYSTEM_FAILURE"
-                      or "RFC_ABAP_RUNTIME_FAILURE"
-                      or "RFC_INVALID_HANDLE";
-
-    // -------------------------------------------------------------------------
-
-
-    public void Dispose()
-    {
-        _cts.Cancel();
-        _queue.CompleteAdding();
-        _staThread.Join(TimeSpan.FromSeconds(5));
-        _cts.Dispose();
-        _queue.Dispose();
-    }
-}
+                        // No fields specified — read the WA
