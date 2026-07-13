@@ -42,7 +42,7 @@ public sealed class WarehouseController : SapControllerBase
 
         //_logger.LogInformation(
         //"User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "stock/totals");
-        
+
         var response = await _pool.ExecuteAsync(WarehouseHelpers.BuildStockRequest(query), ct);
         return Ok(ApiResponse<MaterialTotalRow[]>.Ok(
             WarehouseHelpers.AggregateByMaterial(WarehouseHelpers.ParseStockRows(response))));
@@ -56,10 +56,10 @@ public sealed class WarehouseController : SapControllerBase
     public async Task<IActionResult> GetStockBins([FromQuery] StockQuery query, CancellationToken ct)
     {
         await CheckPermissionAsync(GetUserId(), WarehouseHelpers.FnReadTables, ct);
-        
+
         //_logger.LogInformation(
         //"User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "stock/bins");
-        
+
         var response = await _pool.ExecuteAsync(WarehouseHelpers.BuildStockRequest(query), ct);
         return Ok(ApiResponse<BinSummaryRow[]>.Ok(
             WarehouseHelpers.AggregateByBin(WarehouseHelpers.ParseStockRows(response))));
@@ -85,6 +85,27 @@ public sealed class WarehouseController : SapControllerBase
             WarehouseHelpers.ParseTransferOrderResponse(response)));
     }
 
+    // ── POST /api/warehouse/picksheet-stock ───────────────────────────────────
+    //
+    // LQUA + ZPRODBATCH joined on batch, filtered to a specific material list —
+    // backs the picksheet builder's "what stock is available" panel. No
+    // CheckPermissionAsync gate, matching CustomsController's endpoints: this
+    // is called from Node via the shared service token (userId 0), same as
+    // /api/sap/lips, /api/sap/likp etc., not the per-user token that
+    // CheckPermissionAsync expects.
+
+    [HttpPost("picksheet-stock")]
+    [ProducesResponseType(typeof(ApiResponse<PicksheetBatchRow[]>), 200)]
+    public async Task<IActionResult> PicksheetStock([FromBody] PicksheetStockRequest request, CancellationToken ct)
+    {
+        if (request.Materials.Count == 0)
+            return Ok(ApiResponse<PicksheetBatchRow[]>.Ok([]));
+
+        var rfcRequest = PicksheetHelpers.BuildStockRequest(request);
+        var response    = await _pool.ExecuteAsync(rfcRequest, ct);
+        return Ok(ApiResponse<PicksheetBatchRow[]>.Ok(PicksheetHelpers.ParseStockRows(response)));
+    }
+
     // ── POST /api/warehouse/consignment-mb1b ──────────────────────────────────
 
     [HttpPost("consignment-mb1b")]
@@ -94,7 +115,7 @@ public sealed class WarehouseController : SapControllerBase
         [FromBody] ConsignmentMb1bRequest body,
         CancellationToken ct)
     {
-        await CheckPermissionAsync(GetUserId(), WarehouseHelpers.FnConsignment, ct);    
+        await CheckPermissionAsync(GetUserId(), WarehouseHelpers.FnConsignment, ct);
 
         //_logger.LogInformation(
         //"User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "consignment-mb1b");
