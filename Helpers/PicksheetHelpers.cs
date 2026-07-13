@@ -1,4 +1,5 @@
 using SapServer.Models;
+using SapServer.Models.Bapi;
 
 namespace SapServer.Helpers;
 
@@ -28,6 +29,23 @@ public sealed record PicksheetLipsRequest
 }
 
 public sealed record PicksheetLipsRow(string DeliveryNumber, string ItemNumber, string MaterialNumber, string Quantity);
+
+// ── Stage batch (persist qty + transfer order to picksheet bin) ───────────────
+//
+// See PicksheetHelpers' "Staging" region below for the full explanation. This
+// is what /api/warehouse/picksheet-stage-batch accepts/returns.
+
+public sealed record StagePicksheetBatchRequest(string Material, string Batch, string DeliveryNumber);
+
+public sealed record StagePicksheetBatchResponse(
+    bool Success,
+    string TransferOrderNumber,
+    decimal QuantityMoved,
+    string DestinationBin,
+    string DestinationType,
+    bool BinWasCreated,
+    string? Error,
+    List<SapReturnMessage> Messages);
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 //
@@ -152,5 +170,125 @@ internal static class PicksheetHelpers
             .Where(cols => cols.Length >= LipsColumns.Length)
             .Select(cols => new PicksheetLipsRow(cols[0], cols[1], cols[2], cols[3]))
             .ToArray();
+    }
+
+    // ── Staging (bin check/create + transfer order into the picksheet bin) ──────
+    //
+    // Ported from the uploaded wm_lt01.xltm Excel macro (staging_code module):
+    //   - Destination storage type is hardcoded to "916" everywhere the macro
+    //     stages a batch to a delivery's bin (create_LS01's LAGP-LGTYP, and
+    //     f2_To_loc_changed's ".to_type = 916"). There is no SAP default for
+    //     this — 916 IS the picksheet-staging storage type at this site.
+    //   - The destination bin is the delivery/picksheet number, zero-padded to
+    //     10 digits (macro: n2c(Range("vbeln"), 10)) — SapPad.Pad(x, 10) here.
+    //   - Before staging, the macro checks get_lagp(VBELN, lgtyp) (LAGP WHERE
+    //     LGNUM + LGPLA) and, if the bin doesn't exist yet, runs create_LS01
+    //     (BDC on transaction LS01, screens SAPML01S 0100/0101) to create it —
+    //     "sometimes the picksheet BIN will not have been created yet".
+    //   - The quantity staged is the batch's full on-hand quantity (macro:
+    //     res(res_row,9) = CDbl(x(7))/1000, i.e. GESME/total-on-hand, not just
+    //     what's required for the line) — staging moves the whole batch.
+
+    internal const string StagingStorageType = "916";
+    private const string StagingBinSection   = "001"; // LAGP-LGBER, from create_LS01
+
+    // Fresh single material+batch lookup, re-queried at the moment of staging
+    // rather than trusting whatever the frontend cached from the earlier
+    // picksheet-stock call (stock can move between when the picksheet was
+    // opened and when the operator clicks "add"). Includes LGORT, which the
+    // display query above doesn't expose, since L_TO_CREATE_SINGLE needs it
+    // as I_LGORT.
+    private static readonly string[] BatchSnapshotColumns =
+        ["MATNR", "CHARG", "LGTYP", "LGPLA", "LGORT", "GESME"];
+
+    internal sealed record BatchSnapshotRow(
+        string Material, string Batch, string StorageType, string Bin, string StorageLocation, decimal TotalQty);
+
+    internal static RfcRequest BuildBatchSnapshotRequest(string material, string batch)
+    {
+        var builder = new RfcRequestBuilder(FnReadTables)
+            .Import("DELIMITER", "|")
+            .Import("NO_DATA",   " ")
+            .TableRow("QUERY_TABLES", new { TABNAME = "LQUA" });
+
+        foreach (var field in BatchSnapshotColumns)
+            builder.TableItemRow("query_FIELDS", new { TABNAME = "LQUA", FIELDNAME = field });
+
+        builder
+            .WhereCondition($"LQUA~LGNUM EQ '{Warehouse}'")
+            .WhereCondition($"LQUA~MATNR EQ '{SapPad.Pad(material, 18)}'")
+            .WhereCondition($"LQUA~CHARG EQ '{SapPad.Pad(batch, 10)}'");
+
+        return builder.ReadTable("data_display").Build();
+    }
+
+    internal static BatchSnapshotRow? ParseBatchSnapshot(RfcResponse response)
+    {
+        if (!response.Tables.TryGetValue("data_display", out var sapRows))
+            return null;
+
+        return SapDelimitedParser
+            .ParseRows(sapRows, '|', skipHeader: true)
+            .Where(cols => cols.Length >= BatchSnapshotColumns.Length)
+            .Select(cols => new BatchSnapshotRow(
+                Material:        cols[0],
+                Batch:           cols[1],
+                StorageType:     cols[2],
+                Bin:             cols[3],
+                StorageLocation: cols[4],
+                TotalQty:        ParseSapDecimal(cols[5])))
+            .FirstOrDefault();
+    }
+
+    // Mirrors the macro's get_lagp(lgpla, lgtyp): WHERE LGNUM = warehouse AND
+    // LGPLA = bin, reading back LGTYP. No row back → bin doesn't exist yet.
+    internal static RfcRequest BuildBinCheckRequest(string bin)
+    {
+        var builder = new RfcRequestBuilder(FnReadTables)
+            .Import("DELIMITER", "|")
+            .Import("NO_DATA",   " ")
+            .TableRow("QUERY_TABLES", new { TABNAME = "LAGP" })
+            .TableItemRow("query_FIELDS", new { TABNAME = "LAGP", FIELDNAME = "LGTYP" });
+
+        builder
+            .WhereCondition($"LAGP~LGNUM EQ '{Warehouse}'")
+            .WhereCondition($"LAGP~LGPLA EQ '{bin}'");
+
+        return builder.ReadTable("data_display").Build();
+    }
+
+    internal static bool BinExists(RfcResponse response)
+    {
+        if (!response.Tables.TryGetValue("data_display", out var sapRows))
+            return false;
+
+        return SapDelimitedParser.ParseRows(sapRows, '|', skipHeader: true).Count > 0;
+    }
+
+    // Direct port of the macro's create_LS01: BDC on transaction LS01,
+    // storage type hardcoded to StagingStorageType ("916"), storage section
+    // ("LGBER") "001". Caller must pass an already zero-padded (10-digit) bin.
+    internal static RfcRequest BuildCreateBinRequest(string bin) =>
+        BdcBuilder.For("LS01")
+            .Screen("SAPML01S", "0100")
+                .Field("BDC_OKCODE", "/00")
+                .Field("LAGP-LGNUM", Warehouse)
+                .Field("LAGP-LGTYP", StagingStorageType)
+                .Field("LAGP-LGPLA", bin)
+            .Screen("SAPML01S", "0101")
+                .Field("BDC_OKCODE", "=BU")
+                .Field("LAGP-LGBER", StagingBinSection)
+            .Build();
+
+    // SAP decimals often come back "1.234,56" (German/European display format)
+    // from ZRFC_READ_TABLES — same normalization as RfcRowExtensions.GetDecimal,
+    // duplicated here since this parses a plain delimited string column rather
+    // than a raw table row dictionary.
+    private static decimal ParseSapDecimal(string s)
+    {
+        if (string.IsNullOrWhiteSpace(s)) return 0m;
+        var normalized = s.Replace(".", "").Replace(',', '.');
+        return decimal.TryParse(normalized, System.Globalization.NumberStyles.Any,
+            System.Globalization.CultureInfo.InvariantCulture, out var d) ? d : 0m;
     }
 }
