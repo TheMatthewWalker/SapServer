@@ -236,10 +236,21 @@ internal sealed class SapStaWorker : IDisposable
         }
         catch (Exception ex)
         {
-            throw new SapExecutionException(
-                request.FunctionName,
-                $"Could not create RFC function object for '{request.FunctionName}'.",
-                ex.Message);
+            // Failing to even create the function object (as opposed to the call itself
+            // failing) almost always means the persistent COM session is stale/dead —
+            // e.g. the backend closed it, or it's been idle since the last cron run —
+            // not that this particular function module is somehow broken. Previously this
+            // threw a plain SapExecutionException, which ProcessItem's catch blocks treat
+            // as a normal per-call failure with no reconnect: the worker just kept being
+            // marked "connected" and failed the exact same way on every subsequent request
+            // until the app was restarted. Marking disconnected + throwing
+            // SapConnectionException here routes this into ProcessItem's existing
+            // reconnect-and-retry-once path instead, the same way a failed Call() already does.
+            _isConnected = false;
+
+            throw new SapConnectionException(SlotId,
+                $"Could not create RFC function object for '{request.FunctionName}' — SAP session likely stale.",
+                ex);
         }
 
         // Scalar import parameters — func.exports("KEY").Value pattern (lowercase, indexer call)
@@ -495,10 +506,18 @@ internal sealed class SapStaWorker : IDisposable
         return new RfcResponse { Parameters = parameters, Tables = tables };
     }
 
+    // RFC_INVALID_HANDLE means the session/connection handle itself is no longer valid
+    // (backend closed it, GUI scripting session timed out, etc.) — the same class of
+    // problem as a communication failure, just reported differently. Treating it as one
+    // here means a call that hits it gets reconnected-and-retried immediately within
+    // ProcessItem, instead of only being marked for reconnect on the *next* call while
+    // this one fails outright — which is exactly the "Could not create RFC function
+    // object" / "RFC_INVALID_HANDLE" pattern reported after the daily cron refresh.
     private static bool IsCommunicationError(string exceptionCode) =>
         exceptionCode is "RFC_COMMUNICATION_FAILURE"
                       or "RFC_SYSTEM_FAILURE"
-                      or "RFC_ABAP_RUNTIME_FAILURE";
+                      or "RFC_ABAP_RUNTIME_FAILURE"
+                      or "RFC_INVALID_HANDLE";
 
     // -------------------------------------------------------------------------
 

@@ -29,7 +29,7 @@ public sealed class PerformanceController : SapControllerBase
     {
         await CheckPermissionAsync(GetUserId(), ProductionHelpers.FnReadTables, ct);
 
-        _logger.LogInformation("User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "performance/stock");
+        //_logger.LogInformation("User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "performance/stock");
 
         var response = await _pool.ExecuteAsync(PerformanceHelpers.BuildStockRequest(), ct);
         var pc = await _pool.ExecuteAsync(PerformanceHelpers.BuildMaterialProfitCentre(), ct);
@@ -48,7 +48,7 @@ public sealed class PerformanceController : SapControllerBase
     {
         await CheckPermissionAsync(GetUserId(), PerformanceHelpers.FnStockReqList, ct);
 
-        _logger.LogInformation("User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "performance/agreements");
+        //_logger.LogInformation("User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "performance/agreements");
 
         var horizonEnd = DateTime.Today.AddDays(horizonDays ?? 365); // All orders in a 1 year horizon
         var response = await _pool.ExecuteAsync(PerformanceHelpers.BuildAgreementsRequest(horizonEnd), ct);
@@ -83,7 +83,7 @@ public sealed class PerformanceController : SapControllerBase
     {
         await CheckPermissionAsync(GetUserId(), PerformanceHelpers.FnSaleAnalHist, ct);
 
-        _logger.LogInformation("User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "performance/invoicing");
+        //_logger.LogInformation("User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "performance/invoicing");
 
         var fromDate = from ?? DateTime.Today.AddDays(-31); // ensures all dates in a given month are downloaded.
         var toDate   = to ?? DateTime.Today;
@@ -104,7 +104,7 @@ public sealed class PerformanceController : SapControllerBase
     {
         await CheckPermissionAsync(GetUserId(), PerformanceHelpers.FnCustIndexAnal, ct);
 
-        _logger.LogInformation("User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "performance/otif");
+        //_logger.LogInformation("User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "performance/otif");
 
         var fromDate = from ?? DateTime.Today.AddDays(-31); // ensures all dates in a given month are downloaded.
         var toDate   = to ?? DateTime.Today;
@@ -127,7 +127,7 @@ public sealed class PerformanceController : SapControllerBase
         await CheckPermissionAsync(GetUserId(), PerformanceHelpers.FnReadTables, ct);
         await CheckPermissionAsync(GetUserId(), PerformanceHelpers.FnStockReqList, ct);
 
-        _logger.LogInformation("User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "turns-valclass");
+        //_logger.LogInformation("User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "turns-valclass");
 
         var plant = string.IsNullOrWhiteSpace(query.Plant) ? PerformanceHelpers.Plant : query.Plant;
 
@@ -148,11 +148,26 @@ public sealed class PerformanceController : SapControllerBase
 
         if (materials.Length > 0)
         {
-            var historyResp = await _pool.ExecuteAsync(PerformanceHelpers.BuildConsumptionHistoryRequest(materials, plant), ct);
+            // No MATNR filter passed to either call — see the comments on
+            // BuildConsumptionHistoryRequest/BuildLastMovementRequest in PerformanceHelpers.cs.
+            // A batched-calls version of this was tried and reverted: looping dozens of
+            // rapid sequential RFC calls here disturbed *other* concurrent requests sharing
+            // the same SAP connection-pool worker (SapStaWorker unconditionally marks itself
+            // disconnected on any single failed call, forcing an unrelated queued request to
+            // reconnect mid-flight). Pulling MVER/S032 unfiltered in one call each avoids that
+            // entirely and matches materials in memory instead.
+            var historyResp = await _pool.ExecuteAsync(PerformanceHelpers.BuildConsumptionHistoryRequest(plant), ct);
             history = PerformanceHelpers.ParseConsumptionHistoryRows(historyResp);
 
-            var movementResp = await _pool.ExecuteAsync(PerformanceHelpers.BuildLastMovementRequest(materials, plant), ct);
+            var movementResp = await _pool.ExecuteAsync(PerformanceHelpers.BuildLastMovementRequest(plant), ct);
             movement = PerformanceHelpers.ParseLastMovementRows(movementResp);
+
+            // TEMP DIAGNOSTIC — remove once consumption-history-is-zero is confirmed fixed.
+            var nonZeroMaterials = history.Count(kv => kv.Value.Any(v => v != 0));
+            _logger.LogInformation(
+                "ConsumptionHistory diagnostic: requestedMaterials={RequestedCount} " +
+                "parsedMaterials={ParsedCount} materialsWithNonZeroHistory={NonZeroCount}",
+                materials.Length, history.Count, nonZeroMaterials);
         }
 
         var rows = PerformanceHelpers.ComputeTurnsRows(masterRows, forecast, history, movement, query.TurnMonths, query.HistoryMode);
@@ -170,7 +185,7 @@ public sealed class PerformanceController : SapControllerBase
     {
         await CheckPermissionAsync(GetUserId(), PerformanceHelpers.FnReadTables, ct);
 
-        _logger.LogInformation("User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "turns-valclass/valuation-classes");
+        //_logger.LogInformation("User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "turns-valclass/valuation-classes");
 
         var response = await _pool.ExecuteAsync(PerformanceHelpers.BuildValuationClassCatalogRequest(), ct);
         return Ok(ApiResponse<ValClassRow[]>.Ok(PerformanceHelpers.ParseValuationClassCatalogRows(response)));
@@ -190,7 +205,7 @@ public sealed class PerformanceController : SapControllerBase
     {
         await CheckPermissionAsync(GetUserId(), PerformanceHelpers.FnCreate, ct);
 
-        _logger.LogInformation("User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "turns-valclass/change-valuation-class");
+        //_logger.LogInformation("User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "turns-valclass/change-valuation-class");
 
         if (string.IsNullOrWhiteSpace(body.Order) || body.Changes.Count == 0)
         {

@@ -187,7 +187,12 @@ public sealed class TurnsValClassRow
     public decimal  BookValue              { get; init; }       // StockValue * factor(ValuationClass) — calc_book_value
 
     public decimal[] DemandForecast        { get; init; } = new decimal[13]; // Z_STOCK_REQ_LIST summary, 13 rolling months
-    public decimal[] ConsumptionHistory    { get; init; } = new decimal[13]; // MVER GSV01-12, 13 rolling months
+    public decimal[] ConsumptionHistory    { get; init; } = new decimal[13]; // MVER GSV01-12, 13 rolling months (M-12..Current)
+
+    // 36 rolling months (M-35..Current) of the same MVER data — not rendered directly, used
+    // server-side (Node) to compute a seasonal-index weighted predicted-usage forecast, which
+    // needs multiple years of same-calendar-month history to build a seasonal index from.
+    public decimal[] ConsumptionHistory36  { get; init; } = new decimal[36];
 
     public DateTime? LastReceiptDate       { get; init; } // S032 LETZTZUG
     public DateTime? LastGoodsIssueDate    { get; init; } // S032 LETZTABG

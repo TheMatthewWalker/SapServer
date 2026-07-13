@@ -656,13 +656,30 @@ internal static class PerformanceHelpers
     }
 
     // ── Consumption History (MVER) ───────────────────────────────────────────────
-    // Direct port of Get_mver. Reads GSV01-12 (monthly goods-issue quantity) for
-    // the current and previous fiscal year and folds them into the same 13-slot
-    // rolling window as the forecast, just running backward instead of forward.
+    // Direct port of Get_mver. Reads GSV01-12 (monthly goods-issue quantity) and folds
+    // them into a 36-slot rolling window (3 years) — wider than the 13-slot window the
+    // display chart and turns/days-in-stock calcs use, so the Node-side seasonal-index
+    // predicted-usage calculation (see performanceforecast.js) has enough same-calendar-
+    // month observations across multiple years to weight a seasonal index. ComputeTurnsRows
+    // below derives the original 13-month slice from the tail of this array for every
+    // existing calculation, so nothing that already worked changes behaviour.
 
+    private const int HistoryMonths = 36;
     private static readonly string[] MverMonthColumns = [.. Enumerable.Range(1, 12).Select(i => $"GSV{i:00}")];
 
-    internal static RfcRequest BuildConsumptionHistoryRequest(IEnumerable<string> materials, string? plant = null)
+    // Deliberately NO MATNR filter here. RFC_READ_TABLE builds its WHERE clause from one
+    // OPTIONS-table row per IN-list value, and for an unfiltered plant pull that's 15,000+
+    // materials — a filter that large made SAP silently return zero rows (no exception),
+    // which is what made consumption history always show empty. A batched-calls workaround
+    // was tried and reverted: it hammered the shared SAP connection pool (SapStaWorker) with
+    // dozens of rapid sequential RFC calls per request, which turned out to disturb *other*
+    // concurrent/queued requests on the same worker (confirmed: an unrelated request's
+    // material-master row count collapsed from ~16,700 to 1 on the very next test). Simplest
+    // and safest fix: pull all of MVER for the plant/year-range in one call — same scale as
+    // the unfiltered material-master pull, which already handles ~16,700 rows fine — and let
+    // ComputeTurnsRows' NormaliseMaterial(key) dictionary lookup match it in memory, exactly
+    // how BuildDemandForecastRequest already works (it doesn't filter by material either).
+    internal static RfcRequest BuildConsumptionHistoryRequest(string? plant = null)
     {
         var effectivePlant = string.IsNullOrWhiteSpace(plant) ? Plant : plant;
         var today = DateTime.Today;
@@ -676,8 +693,20 @@ internal static class PerformanceHelpers
             builder.TableItemRow("query_FIELDS", new { TABNAME = "MVER", FIELDNAME = f });
 
         builder.WhereCondition($"MVER~WERKS EQ '{effectivePlant}'");
-        AddInFilter(builder, "MVER", "GJAHR", new[] { (today.Year - 1).ToString(), today.Year.ToString() });
-        AddInFilter(builder, "MVER", "MATNR", materials.Select(m => SapPad.Pad(m, 18)).ToArray());
+
+        // GJAHR is SAP's fiscal year, not necessarily the calendar year — a company on
+        // an April-March (or any non-calendar-aligned) fiscal variant would have consumption
+        // for "this year" posted under a GJAHR that doesn't match DateTime.Today.Year, and a
+        // tight filter would silently return zero MVER rows even though real data exists
+        // (unlike BuildDemandForecastRequest, which filters Z_STOCK_REQ_LIST by literal
+        // calendar dates and has no such dependency). 36 months back from today can span up
+        // to 3 calendar years before this one (e.g. today=Jan 2026 -> 35 months ago=Feb 2023),
+        // so cast a net of today.Year-4..today.Year+1 — one extra year of slack on each side
+        // for fiscal-year misalignment. The offset check in ParseConsumptionHistoryRows
+        // already discards anything outside the real 36-month window, so over-fetching here
+        // is harmless.
+        AddInFilter(builder, "MVER", "GJAHR",
+            Enumerable.Range(today.Year - 4, 6).Select(y => y.ToString()).ToArray());
 
         builder.ReadTable("data_display");
         return builder.Build();
@@ -700,14 +729,14 @@ internal static class PerformanceHelpers
             if (!int.TryParse(cols[2].Trim(), out var year)) continue;
 
             if (!result.TryGetValue(material, out var arr))
-                result[material] = arr = new decimal[13];
+                result[material] = arr = new decimal[HistoryMonths];
 
             for (var m = 1; m <= 12; m++)
             {
                 var offset = (year - today.Year) * 12 + (m - today.Month);
-                if (offset < -12 || offset > 0) continue;
+                if (offset < -(HistoryMonths - 1) || offset > 0) continue;
 
-                arr[offset + 12] += decimal.TryParse(cols[2 + m].Trim(), out var qty) ? qty : 0m;
+                arr[offset + HistoryMonths - 1] += decimal.TryParse(cols[2 + m].Trim(), out var qty) ? qty : 0m;
             }
         }
 
@@ -723,7 +752,9 @@ internal static class PerformanceHelpers
 
     internal sealed record LastMovementInfo(DateTime? LastReceipt, DateTime? LastGoodsIssue, DateTime? LastConsumption, DateTime? LastGoodsMovement);
 
-    internal static RfcRequest BuildLastMovementRequest(IEnumerable<string> materials, string? plant = null)
+    // Same reasoning as BuildConsumptionHistoryRequest above — no MATNR filter, pull the
+    // whole plant's S032 movement rows in one call and match in memory via NormaliseMaterial(key).
+    internal static RfcRequest BuildLastMovementRequest(string? plant = null)
     {
         var effectivePlant = string.IsNullOrWhiteSpace(plant) ? Plant : plant;
 
@@ -736,7 +767,6 @@ internal static class PerformanceHelpers
             builder.TableItemRow("query_FIELDS", new { TABNAME = "S032", FIELDNAME = f });
 
         builder.WhereCondition($"S032~WERKS EQ '{effectivePlant}'");
-        AddInFilter(builder, "S032", "MATNR", materials.Select(m => SapPad.Pad(m, 18)).ToArray());
 
         builder.ReadTable("data_display");
         return builder.Build();
@@ -846,7 +876,17 @@ internal static class PerformanceHelpers
             var rawMaterial = Str(row, "MATNR").Trim();
             var key         = NormaliseMaterial(rawMaterial);
             var forecast    = demandForecast.GetValueOrDefault(key)     ?? new decimal[13];
-            var history     = consumptionHistory.GetValueOrDefault(key) ?? new decimal[13];
+
+            // consumptionHistory now carries HistoryMonths (36) slots so the Node-side
+            // seasonal-index predicted-usage calc has multiple years of same-calendar-month
+            // data to weight. Everything below this point (turns/days-in-stock, the Warning
+            // text, and the ConsumptionHistory field itself) only ever needs the same trailing
+            // 13-month window (M-12..Current) it always did, so slice that off the tail here
+            // once and use it exactly as before — behaviour for anything already relying on
+            // this endpoint is unchanged. The full 36-month array is exposed separately below
+            // via ConsumptionHistory36 for the forecasting calc to consume.
+            var history36   = consumptionHistory.GetValueOrDefault(key) ?? new decimal[HistoryMonths];
+            var history     = history36.Skip(HistoryMonths - 13).ToArray();
             lastMovement.TryGetValue(key, out var movement);
 
             var stockQty    = Dec(row, "LBKUM");
@@ -929,6 +969,7 @@ internal static class PerformanceHelpers
                 BookValue              = bookValue,
                 DemandForecast         = forecast,
                 ConsumptionHistory     = history,
+                ConsumptionHistory36   = history36,
                 LastReceiptDate        = movement?.LastReceipt,
                 LastGoodsIssueDate     = movement?.LastGoodsIssue,
                 LastConsumptionDate    = movement?.LastConsumption,
