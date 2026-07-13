@@ -37,7 +37,7 @@ public sealed record LipsRow(string DeliveryNumber, string ItemNumber, string Ma
 public sealed record LikpRow(string DeliveryNumber, string Incoterms, string ConsigneeCode);
 public sealed record VbfaRow(string DeliveryNumber, string ItemNumber, string InvoiceNumber, string InvoiceItem, string StatisticalValue);
 public sealed record MarcRow(string MaterialNumber, string CommodityCode, string CountryOfOrigin);
-public sealed record Kna1Row(string CustomerCode, string DestinationCountry);
+public sealed record Kna1Row(string CustomerCode, string Name, string Street, string City, string PostCode, string DestinationCountry, string TransportZone);
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -51,7 +51,12 @@ internal static class CustomsHelpers
     // VBELV/POSNV are included for client-side filtering and echoed back in the response
     private static readonly string[] VbfaColumns = ["VBELV", "POSNV", "VBELN", "POSNN", "RFWRT"];
     private static readonly string[] MarcColumns  = ["MATNR", "STAWN", "HERKL"];
-    private static readonly string[] Kna1Columns  = ["KUNNR", "LAND1"];
+    // KUNNR/LAND1 were the original fields (customer number + country); NAME1/STRAS/
+    // ORT01/PSTLZ/LZONE were added to auto-fill the local Destinations table when a
+    // picksheet references a customer we don't have on file yet — see the Node-side
+    // /sap-sync route in deliverymain.js. LZONE (SAP transportation zone) maps to
+    // our destinationZone field.
+    private static readonly string[] Kna1Columns  = ["KUNNR", "NAME1", "STRAS", "ORT01", "PSTLZ", "LAND1", "LZONE"];
 
     // ── LIPS ──────────────────────────────────────────────────────────────────
 
@@ -73,11 +78,11 @@ internal static class CustomsHelpers
         foreach (var d in req.Deliveries)
             builder.TableItemRow("value_list", new
             {
-                TABNAME = "LIPS", 
+                TABNAME = "LIPS",
                 FIELDNAME = "VBELN",
-                SIGN = "I", 
-                OPTION = "", 
-                LOW = SapPad.Pad(d, 10), 
+                SIGN = "I",
+                OPTION = "",
+                LOW = SapPad.Pad(d, 10),
                 HIGH = ""
             });
 
@@ -247,7 +252,14 @@ internal static class CustomsHelpers
         return SapDelimitedParser
             .ParseRows(rows, '|', skipHeader: true)
             .Where(cols => cols.Length >= Kna1Columns.Length)
-            .Select(cols => new Kna1Row(cols[0], cols[1]))
+            .Select(cols => new Kna1Row(
+                CustomerCode:       cols[0],
+                Name:               cols[1],
+                Street:             cols[2],
+                City:               cols[3],
+                PostCode:           cols[4],
+                DestinationCountry: cols[5],
+                TransportZone:      cols[6]))
             .ToArray();
     }
 }
