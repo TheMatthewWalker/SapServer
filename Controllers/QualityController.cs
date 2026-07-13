@@ -24,8 +24,8 @@ public sealed class QualityController : SapControllerBase
     {
         await CheckPermissionAsync(GetUserId(), QualityHelpers.FnReadTables, ct);
 
-        _logger.LogInformation(
-        "User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "display");
+        //_logger.LogInformation(
+        //"User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "display");
 
         var response = await _pool.ExecuteAsync(QualityHelpers.BuildBlockedStockRequest(query), ct);
         return Ok(ApiResponse<StockRow[]>.Ok(QualityHelpers.ParseBlockedStockRows(response)));
@@ -43,8 +43,8 @@ public sealed class QualityController : SapControllerBase
     {
         await CheckPermissionAsync(GetUserId(), QualityHelpers.FnBlockStock, ct);
 
-        _logger.LogInformation(
-        "User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "block");
+        //_logger.LogInformation(
+        //"User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "block");
 
         var mb1b   = await _pool.ExecuteAsync(QualityHelpers.BuildMb1bBlockedRequest(body, "BLOCK"),          ct);
 
@@ -77,8 +77,8 @@ public sealed class QualityController : SapControllerBase
     {
         await CheckPermissionAsync(GetUserId(), QualityHelpers.FnBlockStock, ct);
 
-        _logger.LogInformation(
-        "User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "unblock");
+        //_logger.LogInformation(
+        //"User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "unblock");
 
         var mb1b   = await _pool.ExecuteAsync(QualityHelpers.BuildMb1bBlockedRequest(body, "UNBLOCK"),          ct);
 

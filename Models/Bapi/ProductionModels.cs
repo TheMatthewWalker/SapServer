@@ -28,6 +28,12 @@ public sealed class BomRow
 }
 
 
+public sealed class ProfitCentreRequest
+{
+    [ Required ] public string Material    { get; init; } = "";
+
+}
+
 
 public sealed class KgToUnitQuery
 {
@@ -78,6 +84,7 @@ public sealed class Mf41Request
 public sealed class BomScrapRequest
 {
     [Required, Length(1, 18)] public string  Material        { get; init; } = string.Empty; 
+                             public string  ComponentUnit        { get; init; } = string.Empty; 
     [Range(0.001, double.MaxValue, ErrorMessage = "Quantity must be greater than zero.")]
                              public decimal Quantity        { get; init; }                 
     [Required, MinLength(1)] public string  Header          { get; init; } = string.Empty; 

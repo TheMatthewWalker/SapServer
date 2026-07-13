@@ -26,8 +26,8 @@ public sealed class CustomsController : SapControllerBase
         if (request.Deliveries.Count == 0)
             return Ok(ApiResponse<LipsRow[]>.Ok([]));
 
-        _logger.LogInformation(
-        "User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "lips");
+        //_logger.LogInformation(
+        //"User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "lips");
 
         var rfcRequest = CustomsHelpers.BuildLipsRequest(request);
 
@@ -42,8 +42,8 @@ public sealed class CustomsController : SapControllerBase
         if (request.Deliveries.Count == 0)
             return Ok(ApiResponse<LikpRow[]>.Ok([]));
 
-        _logger.LogInformation(
-        "User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "likp");
+        //_logger.LogInformation(
+        //"User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "likp");
 
         var rfcRequest = CustomsHelpers.BuildLikpRequest(request);
 
@@ -58,8 +58,8 @@ public sealed class CustomsController : SapControllerBase
         if (request.Lines.Count == 0)
             return Ok(ApiResponse<VbfaRow[]>.Ok([]));
             
-        _logger.LogInformation(
-        "User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "vbfa");
+        //_logger.LogInformation(
+        //"User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "vbfa");
 
         var rfcRequest = CustomsHelpers.BuildVbfaRequest(request);
 
@@ -74,8 +74,8 @@ public sealed class CustomsController : SapControllerBase
         if (request.Materials.Count == 0)
             return Ok(ApiResponse<MarcRow[]>.Ok([]));
 
-        _logger.LogInformation(
-        "User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "marc");
+        //_logger.LogInformation(
+        //"User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "marc");
 
         var rfcRequest = CustomsHelpers.BuildMarcRequest(request);
 
@@ -90,8 +90,8 @@ public sealed class CustomsController : SapControllerBase
         if (request.Customers.Count == 0)
             return Ok(ApiResponse<Kna1Row[]>.Ok([]));
 
-        _logger.LogInformation(
-        "User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "kna1");
+        //_logger.LogInformation(
+        //"User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "kna1");
 
         var rfcRequest = CustomsHelpers.BuildKna1Request(request);
 

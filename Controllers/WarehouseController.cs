@@ -24,8 +24,8 @@ public sealed class WarehouseController : SapControllerBase
     {
         await CheckPermissionAsync(GetUserId(), WarehouseHelpers.FnReadTables, ct);
 
-        _logger.LogInformation(
-        "User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "stock");
+        //_logger.LogInformation(
+        //"User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "stock");
 
         var response = await _pool.ExecuteAsync(WarehouseHelpers.BuildStockRequest(query), ct);
         return Ok(ApiResponse<StockRow[]>.Ok(WarehouseHelpers.ParseStockRows(response)));
@@ -40,8 +40,8 @@ public sealed class WarehouseController : SapControllerBase
     {
         await CheckPermissionAsync(GetUserId(), WarehouseHelpers.FnReadTables, ct);
 
-        _logger.LogInformation(
-        "User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "stock/totals");
+        //_logger.LogInformation(
+        //"User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "stock/totals");
         
         var response = await _pool.ExecuteAsync(WarehouseHelpers.BuildStockRequest(query), ct);
         return Ok(ApiResponse<MaterialTotalRow[]>.Ok(
@@ -57,8 +57,8 @@ public sealed class WarehouseController : SapControllerBase
     {
         await CheckPermissionAsync(GetUserId(), WarehouseHelpers.FnReadTables, ct);
         
-        _logger.LogInformation(
-        "User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "stock/bins");
+        //_logger.LogInformation(
+        //"User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "stock/bins");
         
         var response = await _pool.ExecuteAsync(WarehouseHelpers.BuildStockRequest(query), ct);
         return Ok(ApiResponse<BinSummaryRow[]>.Ok(
@@ -77,8 +77,8 @@ public sealed class WarehouseController : SapControllerBase
     {
         await CheckPermissionAsync(GetUserId(), WarehouseHelpers.FnCreateTo, ct);
 
-        _logger.LogInformation(
-        "User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "transfer-order");
+        //_logger.LogInformation(
+        //"User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "transfer-order");
 
         var response = await _pool.ExecuteAsync(WarehouseHelpers.BuildTransferOrderRequest(body), ct);
         return Ok(ApiResponse<CreateTransferOrderResponse>.Ok(
@@ -96,8 +96,8 @@ public sealed class WarehouseController : SapControllerBase
     {
         await CheckPermissionAsync(GetUserId(), WarehouseHelpers.FnConsignment, ct);    
 
-        _logger.LogInformation(
-        "User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "consignment-mb1b");
+        //_logger.LogInformation(
+        //"User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "consignment-mb1b");
 
         var mb1b   = await _pool.ExecuteAsync(WarehouseHelpers.BuildMb1bRequest(body),          ct);
         var toNonC = await _pool.ExecuteAsync(WarehouseHelpers.BuildToNonConsignRequest(body),   ct);

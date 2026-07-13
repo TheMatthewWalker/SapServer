@@ -1,6 +1,5 @@
 @baseUrl = http://127.0.0.1:5200
-@token = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzcWwyMDA1LWJyaWRnZSIsImF1ZCI6InNhcC1zZXJ2ZXIiLCJzdWIiOiJkZXYiLCJ1c2VySWQiOjEsInJvbGUiOiJhZG1pbiIsImlhdCI6MTc4MjgzMTI2MiwiZXhwIjoxNzgyODM0ODYyfQ.NyXgHoP1OdCwLg8o8LJ_VD4SwdhdRLU75fWxOb4CU0o
-
+@token = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzcWwyMDA1LWJyaWRnZSIsImF1ZCI6InNhcC1zZXJ2ZXIiLCJzdWIiOiJkZXYiLCJ1c2VySWQiOjEsInJvbGUiOiJhZG1pbiIsImlhdCI6MTc4MzU5MDAzNiwiZXhwIjoxNzgzNTkzNjM2fQ.cMvOzYzIWIm5vQbw3sEFTc7uQxnp9J5VfBJSDPurTVU
 
 
 ### Test KN API connectivity and token validity
@@ -368,5 +367,16 @@ Authorization: Bearer {{token}}
 
 {
 
+}
+###
+
+
+### GET /api/performance/stock
+GET {{baseUrl}}/api/production/check-profit-centre
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "Material": "TCEV9-5B01/S"
 }
 ###

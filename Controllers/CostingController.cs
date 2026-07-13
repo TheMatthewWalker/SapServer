@@ -26,8 +26,8 @@ public sealed class CostingController : SapControllerBase
     {
         await CheckPermissionAsync(GetUserId(), CostingHelper.FnReadTables, ct);
 
-        _logger.LogInformation(
-        "User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "cost-sheet");
+        //_logger.LogInformation(
+        //"User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "cost-sheet");
 
         var request = CostingHelper.BuildCostSheetRequest(body);
 
@@ -48,8 +48,8 @@ public sealed class CostingController : SapControllerBase
     {
         await CheckPermissionAsync(GetUserId(), CostingHelper.FnPeriodBalances, ct);
 
-        _logger.LogInformation(
-        "User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "period-balance");
+        //_logger.LogInformation(
+        //"User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "period-balance");
 
         var tasks = body.GlAccounts.Select(async acct =>
         {
@@ -80,8 +80,8 @@ public sealed class CostingController : SapControllerBase
     {
         await CheckPermissionAsync(GetUserId(), CostingHelper.FnReadTables, ct);
 
-        _logger.LogInformation(
-        "User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "profit-center");
+        //_logger.LogInformation(
+        //"User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "profit-center");
 
         var request = CostingHelper.BuildProfitCenterRequest(body);
         var data = await _pool.ExecuteAsync(request, ct);
@@ -100,8 +100,8 @@ public sealed class CostingController : SapControllerBase
     {
         await CheckPermissionAsync(GetUserId(), CostingHelper.FnReadTables, ct);
 
-        _logger.LogInformation(
-        "User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "freight-posting");
+        //_logger.LogInformation(
+        //"User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "freight-posting");
 
         var worker = _pool.AcquireWorker();
 
@@ -128,8 +128,8 @@ public sealed class CostingController : SapControllerBase
     {
         await CheckPermissionAsync(GetUserId(), CostingHelper.FnReadTables, ct);
 
-        _logger.LogInformation(
-            "User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "freight-posting-batch");
+        //_logger.LogInformation(
+        //    "User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "freight-posting-batch");
 
         var results = new List<FreightPostingRow>();
 

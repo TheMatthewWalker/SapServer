@@ -1,5 +1,6 @@
 using System.Data;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Identity.Client.NativeInterop;
 using SapServer.Helpers;
 using SapServer.Models;
 using SapServer.Models.Bapi;
@@ -28,8 +29,8 @@ public sealed class ProductionController : SapControllerBase
     {
         await CheckPermissionAsync(GetUserId(), ProductionHelpers.FnCreate, ct);
 
-        _logger.LogInformation(
-        "User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "backflush");
+        //_logger.LogInformation(
+        //"User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "backflush");
 
         var charge = await _pool.ExecuteAsync(ProductionHelpers.BuildRequiresCharge(body.Material), ct);
         var zf40n    = await _pool.ExecuteAsync(
@@ -42,6 +43,28 @@ public sealed class ProductionController : SapControllerBase
 
         return Ok(ApiResponse<BdcResponse>.Ok(response));
     }
+
+// ── POST /api/production/scrap/post ──────────────────────────────────
+
+    [HttpGet("check-profit-centre")]
+    [ProducesResponseType(typeof(ApiResponse<BdcWrapper>), 200)]
+    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
+    public async Task<IActionResult> CheckProfitCentre(
+
+        [FromBody] ProfitCentreRequest body,
+        CancellationToken ct)
+    {
+        await CheckPermissionAsync(GetUserId(), ProductionHelpers.FnCreate, ct);
+
+        //_logger.LogInformation(
+        //"User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "scrap/post");
+
+        var profitCentreArray = await _pool.ExecuteAsync(ProductionHelpers.BuildProfitCentre(body.Material), ct);
+        var profitCentre = ProductionHelpers.ParseSingleSapResult(profitCentreArray);
+
+        return Ok(ApiResponse<String>.Ok(profitCentre));
+    }
+
 
 
 // ── POST /api/production/reverse-backflush ──────────────────────────────────
@@ -56,8 +79,8 @@ public sealed class ProductionController : SapControllerBase
     {
         await CheckPermissionAsync(GetUserId(), ProductionHelpers.FnCreate, ct);
 
-        _logger.LogInformation(
-        "User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "reverse-backflush");
+        //_logger.LogInformation(
+        //"User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "reverse-backflush");
 
         var mf41    = await _pool.ExecuteAsync( ProductionHelpers.BuildMf41Request( body ), ct );
         var response = ProductionHelpers.ParseBdcResponse(mf41);
@@ -80,8 +103,8 @@ public sealed class ProductionController : SapControllerBase
     {
         await CheckPermissionAsync(GetUserId(), ProductionHelpers.FnCreate, ct);
 
-        _logger.LogInformation(
-        "User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "scrap/post");
+        //_logger.LogInformation(
+        //"User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "scrap/post");
 
         var scrapResponses = new BdcWrapper();
         var whmResponses = new TransferOrderWrapper();
@@ -91,11 +114,19 @@ public sealed class ProductionController : SapControllerBase
 
         var bom    = await _pool.ExecuteAsync(ProductionHelpers.BuildBomRequest(new BomQuery { Material = body.Material }), ct);
         var bomResponse = ProductionHelpers.ParseBomRows(bom);
-        _logger.LogInformation($"Scrapping {body.Quantity} x {body.Material} - found {bomResponse.Length} components in BOM");
+
+        if (bomResponse.Length > 0)
+            { _logger.LogInformation($"Scrapping {body.Quantity} x {body.Material} - found {bomResponse.Length} components in BOM");  }
+        else
+            { return BadRequest(ApiResponse<RfcResponse>.Fail("403","No Components in BOM - Unable to Scrap", bom)); }
  
         var kgToUnit = await _pool.ExecuteAsync(ProductionHelpers.BuildKgToUnitRequest(new KgToUnitQuery { Material = body.Material }), ct);
         var kgToUnitResponse = ProductionHelpers.ParseKgToUnit(kgToUnit).FirstOrDefault();
-        var units = Math.Round(body.Quantity / kgToUnitResponse.KgConversion, 3);
+
+        decimal units = 0;
+
+        try { units = Math.Round(body.Quantity / kgToUnitResponse.KgConversion, 3); }
+        catch { return BadRequest(ApiResponse<RfcResponse>.Fail("403","Missing Weight", kgToUnit)); }
 
         foreach (var row in bomResponse)
         {
@@ -103,8 +134,10 @@ public sealed class ProductionController : SapControllerBase
             var sloc = ProductionHelpers.ParseSingleSapResult(slocArray);
 
             var mb11    = await _pool.ExecuteAsync( ProductionHelpers.BuildBomScrapRequest(
-                            new BomScrapRequest { Material = row.Component, Quantity = Math.Round(row.ComponentQty * units, 3), Header = body.Header,
-                                MovementType = "551", ScrapReason = body.ScrapReason, StorageLocation = sloc, ProfitCentre = profitCentre } ), ct );
+                            new BomScrapRequest { Material = row.Component, Quantity = Math.Round(row.ComponentQty * units, 3), 
+                                                  Header = body.Header, MovementType = "551", ScrapReason = body.ScrapReason, 
+                                                  StorageLocation = sloc, ProfitCentre = profitCentre, ComponentUnit = row.ComponentUnit 
+                                                } ), ct );
 
             var scrapResponse = ProductionHelpers.ParseBdcResponse(mb11);
             scrapResponses.Responses.Add(scrapResponse);
@@ -135,8 +168,8 @@ public sealed class ProductionController : SapControllerBase
     {
         await CheckPermissionAsync(GetUserId(), ProductionHelpers.FnCreate, ct);
 
-        _logger.LogInformation(
-        "User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "scrap/reverse");
+        //_logger.LogInformation(
+        //"User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "scrap/reverse");
 
         var whmResponses = new TransferOrderWrapper();
 

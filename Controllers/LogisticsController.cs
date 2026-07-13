@@ -24,8 +24,8 @@ public sealed class LogisticsController : SapControllerBase
     {
         await CheckPermissionAsync(GetUserId(), LogisticsHelpers.FnReadTables, ct);
 
-        _logger.LogInformation(
-        "User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "picksheets/open");
+        //_logger.LogInformation(
+        //"User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "picksheets/open");
 
         var picksheetRequest = await _pool.ExecuteAsync(LogisticsHelpers.BuildVBUKRequest(), ct);
         var picksheetResponse = LogisticsHelpers.ParseVBUKRows(picksheetRequest);

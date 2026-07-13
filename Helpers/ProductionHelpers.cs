@@ -171,6 +171,7 @@ internal static class ProductionHelpers
             .Screen("SAPMM07M", "0421")
                 .Field("MSEG-MATNR(01)", (SapPad.Pad(body.Material, 18) ?? "").ToUpperInvariant())
                 .Field("MSEG-ERFMG(01)", body.Quantity)
+                .Field("MSEG-ERFME(01)", body.ComponentUnit)
                 //.Field("DKACB-FMORE", "X")
                 .Field("BDC_OKCODE", "=BU")
             .Screen("SAPLKACB", "0002")
