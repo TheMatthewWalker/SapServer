@@ -515,4 +515,44 @@ internal sealed class SapStaWorker : IDisposable
                     }
                     else
                     {
-                        // No fields specified — read the WA
+                        // No fields specified — read the WA (work area) column
+                        try { row["WA"] = sapRow["WA"]?.ToString(); }
+                        catch { /* WA column does not exist on this table */ }
+                    }
+
+                    resultRows.Add(row);
+                }
+            }
+            catch { /* Table does not exist or has no rows — return empty list */ }
+
+            tables[tableName] = resultRows;
+        }
+
+        return new RfcResponse { Parameters = parameters, Tables = tables };
+    }
+
+    // RFC_INVALID_HANDLE means the session/connection handle itself is no longer valid
+    // (backend closed it, GUI scripting session timed out, etc.) — the same class of
+    // problem as a communication failure, just reported differently. Treating it as one
+    // here means a call that hits it gets reconnected-and-retried immediately within
+    // ProcessItem, instead of only being marked for reconnect on the *next* call while
+    // this one fails outright — which is exactly the "Could not create RFC function
+    // object" / "RFC_INVALID_HANDLE" pattern reported after the daily cron refresh.
+    private static bool IsCommunicationError(string exceptionCode) =>
+        exceptionCode is "RFC_COMMUNICATION_FAILURE"
+                      or "RFC_SYSTEM_FAILURE"
+                      or "RFC_ABAP_RUNTIME_FAILURE"
+                      or "RFC_INVALID_HANDLE";
+
+    // -------------------------------------------------------------------------
+
+
+    public void Dispose()
+    {
+        _cts.Cancel();
+        _queue.CompleteAdding();
+        _staThread.Join(TimeSpan.FromSeconds(5));
+        _cts.Dispose();
+        _queue.Dispose();
+    }
+}

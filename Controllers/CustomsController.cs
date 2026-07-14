@@ -96,7 +96,28 @@ public sealed class CustomsController : SapControllerBase
         var rfcRequest = CustomsHelpers.BuildKna1Request(request);
 
         var response = await _pool.ExecuteAsync(rfcRequest, ct);
-        return Ok(ApiResponse<Kna1Row[]>.Ok(CustomsHelpers.ParseKna1Rows(response)));
+        var kna1Rows  = CustomsHelpers.ParseKna1Rows(response);
+
+        // Also pull KNVV (customer master sales data) for Incoterms — best-effort:
+        // if this call fails for any reason, still return the KNA1 rows rather than
+        // failing the whole customer auto-create flow over a field that's always
+        // been manually editable anyway.
+        try
+        {
+            var knvvRequest  = CustomsHelpers.BuildKnvvRequest(request);
+            var knvvResponse = await _pool.ExecuteAsync(knvvRequest, ct);
+            var incoterms    = CustomsHelpers.ParseKnvvIncoterms(knvvResponse);
+
+            kna1Rows = kna1Rows
+                .Select(r => r with { Incoterms = incoterms.GetValueOrDefault(r.CustomerCode, "") })
+                .ToArray();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "KNVV Incoterms lookup failed for KNA1 customer batch — returning KNA1 rows without Incoterms.");
+        }
+
+        return Ok(ApiResponse<Kna1Row[]>.Ok(kna1Rows));
     }
 
 

@@ -1,4 +1,5 @@
 using System.Data;
+using System.Globalization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.OpenApi.Services;
 using SapServer.Helpers;
@@ -70,6 +71,36 @@ public sealed class PerformanceController : SapControllerBase
         }
 
         var rowsWithCur = PerformanceHelpers.ApplyCurrencyConversion(rows, rateDict);
+
+        // Anomaly check: LocalAmount should always equal Amount * rateDict[Currency]
+        // (that's literally what ApplyCurrencyConversion just computed), so the
+        // implied ratio below should match the dict rate for every row. If it
+        // doesn't, something diverged between the rate this row actually used and
+        // the rate sitting in rateDict right now — e.g. a different SAP connection-
+        // pool worker/session returned UKURS in a different raw format for this
+        // row's currency than the one reflected in the log above. Logs only the
+        // rows that disagree, with every value in invariant culture, so the next
+        // reproduction gives us the exact bad row instead of another data point
+        // that looks fine in isolation.
+        foreach (var row in rowsWithCur)
+        {
+            if (row.Amount == 0 || string.IsNullOrEmpty(row.Currency)) continue;
+
+            var expectedRate = rateDict.GetValueOrDefault(row.Currency, 1m);
+            var impliedRate  = row.LocalAmount / row.Amount;
+
+            if (Math.Abs(impliedRate - expectedRate) > 0.01m)
+            {
+                _logger.LogWarning(
+                    "LocalAmount anomaly: RefDoc={RefDoc} Currency={Currency} Amount={Amount} " +
+                    "expectedRate(dict)={ExpectedRate} impliedRate(LocalAmount/Amount)={ImpliedRate} LocalAmount={LocalAmount}",
+                    row.ReferenceDocument, row.Currency,
+                    row.Amount.ToString(CultureInfo.InvariantCulture),
+                    expectedRate.ToString(CultureInfo.InvariantCulture),
+                    impliedRate.ToString(CultureInfo.InvariantCulture),
+                    row.LocalAmount.ToString(CultureInfo.InvariantCulture));
+            }
+        }
 
         return Ok(ApiResponse<AgreementRow[]>.Ok(rowsWithCur));
     }

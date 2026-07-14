@@ -37,7 +37,7 @@ public sealed record LipsRow(string DeliveryNumber, string ItemNumber, string Ma
 public sealed record LikpRow(string DeliveryNumber, string Incoterms, string ConsigneeCode);
 public sealed record VbfaRow(string DeliveryNumber, string ItemNumber, string InvoiceNumber, string InvoiceItem, string StatisticalValue);
 public sealed record MarcRow(string MaterialNumber, string CommodityCode, string CountryOfOrigin);
-public sealed record Kna1Row(string CustomerCode, string Name, string Street, string City, string PostCode, string DestinationCountry, string TransportZone);
+public sealed record Kna1Row(string CustomerCode, string Name, string Street, string City, string PostCode, string DestinationCountry, string TransportZone, string Incoterms = "");
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -57,6 +57,14 @@ internal static class CustomsHelpers
     // /sap-sync route in deliverymain.js. LZONE (SAP transportation zone) maps to
     // our destinationZone field.
     private static readonly string[] Kna1Columns  = ["KUNNR", "NAME1", "STRAS", "ORT01", "PSTLZ", "LAND1", "LZONE"];
+    // KNVV (customer master sales data) — INCO1 is the customer's default Incoterms
+    // code for this sales org, used to pre-fill Destinations.defaultIncoterms on
+    // auto-create alongside the KNA1 fields above. Scoped to our one sales org
+    // (Plant, reused as VKORG — same convention as LogisticsHelpers.BuildPicksheetRequest)
+    // since KNVV is keyed by KUNNR+VKORG+VTWEG+SPART and a customer can have several
+    // sales-area rows; VTWEG/SPART aren't filtered, so ParseKnvvIncoterms just keeps
+    // the first INCO1 it sees per customer.
+    private static readonly string[] KnvvColumns  = ["KUNNR", "VKORG", "INCO1"];
 
     // ── LIPS ──────────────────────────────────────────────────────────────────
 
@@ -261,5 +269,56 @@ internal static class CustomsHelpers
                 DestinationCountry: cols[5],
                 TransportZone:      cols[6]))
             .ToArray();
+    }
+
+    // ── KNVV ──────────────────────────────────────────────────────────────────
+
+    internal static RfcRequest BuildKnvvRequest(Kna1Request req)
+    {
+        var builder = new RfcRequestBuilder(FnReadTables)
+            .Import("DELIMITER", "|")
+            .Import("NO_DATA",   " ")
+            .TableRow("QUERY_TABLES", new { TABNAME = "KNVV" });
+
+        foreach (var f in KnvvColumns)
+            builder.TableItemRow("query_FIELDS", new { TABNAME = "KNVV", FIELDNAME = f });
+
+        builder.WhereCondition($"KNVV~VKORG EQ '{Plant}'");
+        builder.WhereCondition("KNVV~KUNNR IN opt");
+
+        foreach (var c in req.Customers)
+            builder.TableItemRow("value_list", new
+            {
+                TABNAME = "KNVV", FIELDNAME = "KUNNR",
+                SIGN = "I", OPTION = "EQ", LOW = SapPad.Pad(c, 10), HIGH = ""
+            });
+
+        return builder.ReadTable("data_display").Build();
+    }
+
+    // Keyed by customer code -> Incoterms (INCO1). A customer can have several
+    // KNVV rows (one per distribution channel/division within our sales org) —
+    // this keeps the first INCO1 seen per customer rather than trying to pick a
+    // "right" one, since Destinations.defaultIncoterms is a single best-effort
+    // default the user can always correct manually.
+    internal static Dictionary<string, string> ParseKnvvIncoterms(RfcResponse response)
+    {
+        var dict = new Dictionary<string, string>();
+
+        if (!response.Tables.TryGetValue("data_display", out var rows))
+            return dict;
+
+        foreach (var cols in SapDelimitedParser.ParseRows(rows, '|', skipHeader: true))
+        {
+            if (cols.Length < KnvvColumns.Length) continue;
+
+            var customerCode = cols[0];
+            var incoterms    = cols[2];
+            if (string.IsNullOrWhiteSpace(customerCode)) continue;
+
+            dict.TryAdd(customerCode, incoterms);
+        }
+
+        return dict;
     }
 }

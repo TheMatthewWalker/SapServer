@@ -1,0 +1,20 @@
+
+**** Log file opened at 2026-07-14 11:19:39.166416 UTC+01:00 (GMT Standard Time), Encoding UTF-8
+NW RFC Library: Kernel variant, Release 750 Patch Level 11
+Compilation date          : Jan 25 2023 01:21:13
+CPIC library              : 753.2022.12.23 version 3
+NI library                : 40
+Kernel Release            : 753 Patch Level 1116
+Current working directory : C:\Nexus\SapServer
+Program                   : SapServer
+Process ID                : 15680
+User                      : Matthew.walker
+Hardware                  : PC with Windows NT 6x AMD64 Level 6 (Mod 158 Step 10)
+Operating_system          : Windows NT 10.0
+Hostname                  : ENORW108
+IP address                : 10.1.152.39
+IPv6 address              : fe80::279f:7dcc:ac5e:9239
+Global trace level        : 0
+
+2026-07-14 11:19:39.139175 [19928] >> Info entry
+	Did not find config file C:\Nexus\SapServer\sapnwrfc.ini.

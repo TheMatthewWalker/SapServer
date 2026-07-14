@@ -134,7 +134,14 @@ internal static class PerformanceHelpers
             var qty   = Dec(req, "QTY");
             var netpr = reqInfo is null ? 0m : Dec(reqInfo, "NETPR");
             var kpein = reqInfo is null ? 1m : Dec(reqInfo, "KPEIN", 1m);
-            var cur   = reqInfo is null ? "" : Str(reqInfo, "WAERK");
+            // Trimmed: WAERK is a fixed-width SAP CHAR field and can come back
+            // padded (e.g. "EUR  "). Untrimmed, this currency code is later used
+            // both as a Dictionary<string, decimal> key (rateDict) and matched
+            // against FCURR from a completely different RFC call/table — if the
+            // two sides pad differently, a row can silently miss its rate-dict
+            // entry (or hit a different, independently-fetched entry for what's
+            // logically the same currency) without ever looking wrong here.
+            var cur   = reqInfo is null ? "" : Str(reqInfo, "WAERK").Trim();
             if (cur == "JPY") netpr *= 100; // SAP-side JPY decimal quirk, carried over from the VBA
 
             rows.Add(new AgreementRow
@@ -149,7 +156,7 @@ internal static class PerformanceHelpers
                 OnHandQty         = onHandByKey.GetValueOrDefault(matKey),
                 Uom               = Str(req, "MEINS"),
                 StandardPrice     = Dec(mat, "STPRS"),
-                LocalCurrency     = Str(mat, "WAERS"),
+                LocalCurrency     = Str(mat, "WAERS").Trim(),
                 Customer          = reqInfo is null ? NormaliseMaterial(Str(req, "SRC02")) : NormaliseMaterial(Str(reqInfo, "KUNNR")),
                 CustomerGroup     = reqInfo is null ? "" : Str(reqInfo, "KONZS"),
                 CustomerName      = reqInfo is null ? "" : Str(reqInfo, "NAME1"),
@@ -346,8 +353,17 @@ internal static class PerformanceHelpers
         var rows = GetRows(response, "CURR_RATE_T");
 
         foreach (var r in rows)
-        {   var currency = Str(r, "FCURR");
+        {   // Trimmed for the same reason as AgreementRow.Currency/LocalCurrency
+            // above — FCURR is this call's own fixed-width CHAR field and doesn't
+            // necessarily pad the same way WAERK/WAERS do on the agreements side.
+            // Untrimmed, "EUR" from one call and "EUR " from another end up as
+            // two different dictionary keys, and BuildCurrencyRequests can end up
+            // issuing more than one Z_CURR_RATE_GET for what's really one
+            // currency — each hitting a potentially different pooled SAP session.
+            var currency = Str(r, "FCURR").Trim();
+            var rawUkurs = r.GetValueOrDefault("UKURS")?.ToString();
             var rate     = Dec(r, "UKURS");
+            //Console.WriteLine($"CURR_RATE_T row: FCURR=\"{currency}\" raw UKURS=\"{rawUkurs}\" parsed rate={rate.ToString(CultureInfo.InvariantCulture)}");
             if (!string.IsNullOrEmpty(currency))
                 { dict[currency] = rate; }
         }
@@ -361,8 +377,8 @@ internal static class PerformanceHelpers
     {
         foreach (var row in rows) {
             
-            Console.WriteLine($"Row currency: {row.Currency}");
-            Console.WriteLine($"Rate found: {rates.GetValueOrDefault(row.Currency, -1)}");
+            //Console.WriteLine($"Row currency: {row.Currency}");
+            //Console.WriteLine($"Rate found: {rates.GetValueOrDefault(row.Currency, -1)}");
 
             if (string.IsNullOrEmpty(row.Currency))
             { row.LocalAmount = row.Amount;
@@ -370,6 +386,7 @@ internal static class PerformanceHelpers
 
             decimal rate = rates.GetValueOrDefault(row.Currency, 1m);
             row.LocalAmount = row.Amount * rate;
+
         }
         return rows;
     }
@@ -396,8 +413,24 @@ internal static class PerformanceHelpers
     private static string Str(Dictionary<string, object?> row, string key) =>
         row.GetValueOrDefault(key)?.ToString() ?? "";
 
-    private static decimal Dec(Dictionary<string, object?> row, string key, decimal fallback = 0m) =>
-        decimal.TryParse(row.GetValueOrDefault(key)?.ToString(), out var v) ? v : fallback;
+    // SAP decimals often arrive in European format ("1.234,56", or a rate like
+    // "1,00000") — strip thousands-separator dots and convert the decimal comma
+    // to a point before parsing, same normalization as RfcRowExtensions.GetDecimal.
+    // Without this, decimal.TryParse (culture-dependent, no NumberStyles override)
+    // silently treated the comma as a thousands separator instead of a decimal
+    // point, inflating values by ~100,000x — e.g. a currency rate of "1,00000"
+    // parsed as 100000 instead of 1.0. That corrupted every non-empty-currency
+    // row's LocalAmount via ApplyCurrencyConversion (rate = Dec(r, "UKURS")).
+    private static decimal Dec(Dictionary<string, object?> row, string key, decimal fallback = 0m)
+    {
+        var s = row.GetValueOrDefault(key)?.ToString();
+        if (string.IsNullOrWhiteSpace(s)) return fallback;
+
+        s = s.Replace(".", "").Replace(',', '.');
+        //Console.WriteLine(s);
+
+        return decimal.TryParse(s, NumberStyles.Any, CultureInfo.InvariantCulture, out var v) ? v : fallback;
+    }
 
     private static DateTime? ParseSapDate(object? value) => value switch
     {
