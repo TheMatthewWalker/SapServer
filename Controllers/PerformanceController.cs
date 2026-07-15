@@ -174,8 +174,9 @@ public sealed class PerformanceController : SapControllerBase
         var forecastResp = await _pool.ExecuteAsync(PerformanceHelpers.BuildDemandForecastRequest(query), ct);
         var forecast = PerformanceHelpers.ParseDemandForecastRows(forecastResp);
 
-        var history  = new Dictionary<string, decimal[]>();
-        var movement = new Dictionary<string, PerformanceHelpers.LastMovementInfo>();
+        var history      = new Dictionary<string, decimal[]>();
+        var movement     = new Dictionary<string, PerformanceHelpers.LastMovementInfo>();
+        var consignment  = new Dictionary<string, decimal>();
 
         if (materials.Length > 0)
         {
@@ -193,6 +194,14 @@ public sealed class PerformanceController : SapControllerBase
             var movementResp = await _pool.ExecuteAsync(PerformanceHelpers.BuildLastMovementRequest(plant), ct);
             movement = PerformanceHelpers.ParseLastMovementRows(movementResp);
 
+            // Same unfiltered-by-plant-only pattern as above — see the comment on
+            // BuildConsignmentStockRequest in PerformanceHelpers.cs. This is stock that MBEW
+            // (and therefore masterResp/masterRows above) never sees, since consignment stock
+            // has no value yet — it's summed onto ComputeTurnsRows' StockQty-adjacent
+            // ConsignmentQty field, kept fully separate from anything valuation-facing.
+            var consignmentResp = await _pool.ExecuteAsync(PerformanceHelpers.BuildConsignmentStockRequest(plant), ct);
+            consignment = PerformanceHelpers.ParseConsignmentStockRows(consignmentResp);
+
             // TEMP DIAGNOSTIC — remove once consumption-history-is-zero is confirmed fixed.
             var nonZeroMaterials = history.Count(kv => kv.Value.Any(v => v != 0));
             _logger.LogInformation(
@@ -201,7 +210,7 @@ public sealed class PerformanceController : SapControllerBase
                 materials.Length, history.Count, nonZeroMaterials);
         }
 
-        var rows = PerformanceHelpers.ComputeTurnsRows(masterRows, forecast, history, movement, query.TurnMonths, query.HistoryMode);
+        var rows = PerformanceHelpers.ComputeTurnsRows(masterRows, forecast, history, movement, query.TurnMonths, query.HistoryMode, consignment);
 
         return Ok(ApiResponse<TurnsValClassRow[]>.Ok(rows));
     }

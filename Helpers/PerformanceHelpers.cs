@@ -839,6 +839,68 @@ internal static class PerformanceHelpers
             : DateTime.TryParseExact(raw, "dd.MM.yyyy", CultureInfo.InvariantCulture, DateTimeStyles.None, out var d) ? d : null;
     }
 
+    // ── Consignment Stock (MKOL) ──────────────────────────────────────────────
+    // Vendor consignment stock never appears in MBEW (it has no value yet from our
+    // accounting perspective — ownership hasn't transferred), so the material-master
+    // pull above (Get_marc_mara_makt_mbew) is blind to it entirely, by design. For
+    // MRP planning purposes that's a real gap: physically-available quantity for
+    // planning needs to include consignment stock even though it must never be
+    // treated as valued/owned stock. MKOL (Special Stocks from Vendor, SOBKZ='K')
+    // is SAP's standard quantity-only table for exactly this — same pattern as
+    // BuildConsumptionHistoryRequest/BuildLastMovementRequest just above: filtered
+    // only by plant (no MATNR IN-list), one bulk call, matched to materials in
+    // memory via NormaliseMaterial(key) — the lesson from the reverted MVER/S032
+    // batching attempt applies here too, and this keeps the SAP-side cost of this
+    // feature to exactly one extra unfiltered RFC call per GetTurnsValClass run.
+    //
+    // Only MKOL-SLABS (unrestricted-use consignment stock) is pulled — the
+    // quantity actually usable/available for planning — not SINSM (quality
+    // inspection), SSPEM (blocked), or SEINM (restricted-use), which mirrors how
+    // MRP conventionally only counts unrestricted stock as available supply.
+    // Summed across storage location/batch (MKOL has one row per LGORT/CHARG).
+
+    private static readonly string[] MkolColumns = ["MATNR", "WERKS", "SLABS"];
+
+    internal static RfcRequest BuildConsignmentStockRequest(string? plant = null)
+    {
+        var effectivePlant = string.IsNullOrWhiteSpace(plant) ? Plant : plant;
+
+        var builder = new RfcRequestBuilder(FnReadTables)
+            .Import("DELIMITER", "|")
+            .Import("NO_DATA", " ")
+            .TableRow("QUERY_TABLES", new { TABNAME = "MKOL" });
+
+        foreach (var f in MkolColumns)
+            builder.TableItemRow("query_FIELDS", new { TABNAME = "MKOL", FIELDNAME = f });
+
+        builder
+            .WhereCondition($"MKOL~WERKS EQ '{effectivePlant}'")
+            .WhereCondition("MKOL~SOBKZ EQ 'K'");
+
+        builder.ReadTable("data_display");
+        return builder.Build();
+    }
+
+    internal static Dictionary<string, decimal> ParseConsignmentStockRows(RfcResponse response)
+    {
+        var result = new Dictionary<string, decimal>();
+
+        if (!response.Tables.TryGetValue("data_display", out var sapRows))
+            return result;
+
+        foreach (var cols in SapDelimitedParser.ParseRows(sapRows, '|', skipHeader: true))
+        {
+            if (cols.Length < MkolColumns.Length) continue;
+
+            var material = NormaliseMaterial(cols[0]);
+            var qty      = decimal.TryParse(cols[2].Trim(), out var v) ? v : 0m;
+
+            result[material] = result.GetValueOrDefault(material) + qty;
+        }
+
+        return result;
+    }
+
     // ── Valuation Class Catalog (T025/T025T/T134) ────────────────────────────────
     // Direct port of Get_T025_T025T_T134 — used to populate a "valid new valuation
     // class" dropdown client-side. Restricted to the same material types as the
@@ -898,7 +960,8 @@ internal static class PerformanceHelpers
         Dictionary<string, decimal[]> consumptionHistory,
         Dictionary<string, LastMovementInfo> lastMovement,
         int turnMonths,
-        bool historyMode)
+        bool historyMode,
+        Dictionary<string, decimal>? consignmentStock = null)
     {
         turnMonths = Math.Clamp(turnMonths, 1, 12);
         var today   = DateTime.Today;
@@ -922,7 +985,8 @@ internal static class PerformanceHelpers
             var history     = history36.Skip(HistoryMonths - 13).ToArray();
             lastMovement.TryGetValue(key, out var movement);
 
-            var stockQty    = Dec(row, "LBKUM");
+            var stockQty       = Dec(row, "LBKUM");
+            var consignmentQty = consignmentStock?.GetValueOrDefault(key) ?? 0m;
             var stockValue  = Dec(row, "SALK3");
             var priceUnit   = Dec(row, "PEINH", 1m);
             var unitPrice   = priceUnit == 0 ? 0 : Dec(row, "STPRS") / priceUnit;
@@ -997,6 +1061,7 @@ internal static class PerformanceHelpers
                 SpecialProcurementType = Str(row, "SOBSL"),
                 PlannedDeliveryTime    = Dec(row, "PLIFZ"),
                 StockQty               = stockQty,
+                ConsignmentQty         = consignmentQty,
                 StockValue             = stockValue,
                 UnitPrice              = unitPrice,
                 BookValue              = bookValue,

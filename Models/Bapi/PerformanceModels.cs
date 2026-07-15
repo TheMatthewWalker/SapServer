@@ -186,6 +186,14 @@ public sealed class TurnsValClassRow
     public decimal  UnitPrice              { get; init; }       // MBEW-STPRS / MBEW-PEINH
     public decimal  BookValue              { get; init; }       // StockValue * factor(ValuationClass) — calc_book_value
 
+    // Vendor consignment stock (MKOL, SOBKZ='K', unrestricted-use only — MKOL-SLABS), summed
+    // across storage location/batch. Deliberately NOT part of StockQty/StockValue/BookValue
+    // above: consignment stock has no value yet from our accounting perspective (it's excluded
+    // from MBEW by design), so it must never touch anything valuation-facing. It exists purely
+    // so MRP planning (Node-side buildWeeklyStockForecast) can see the FULL physically-available
+    // quantity — StockQty + ConsignmentQty — when it decides what needs to be ordered.
+    public decimal  ConsignmentQty         { get; init; }       // MKOL-SLABS, SOBKZ='K'
+
     public decimal[] DemandForecast        { get; init; } = new decimal[13]; // Z_STOCK_REQ_LIST summary, 13 rolling months
     public decimal[] ConsumptionHistory    { get; init; } = new decimal[13]; // MVER GSV01-12, 13 rolling months (M-12..Current)
 
