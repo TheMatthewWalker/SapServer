@@ -200,7 +200,7 @@ internal static class QualityHelpers
                 .Field("RM07M-WERKS",   Plant)
                 .Field("RM07M-LGORT",   body.StorageLocation)
                 .Field("XFULL",         "X")
-                .Field("RM07M-XNAPR",   "X")
+                .Field("RM07M-XNAPR",   "")
                 .Field("RM07M-WVERS1",  "X")
             .Screen("SAPMM07M", "0421")
                 .Field("BDC_OKCODE",     "=BU")
