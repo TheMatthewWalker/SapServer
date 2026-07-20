@@ -53,7 +53,7 @@ internal static class WarehouseHelpers
             return [];
 
         return SapDelimitedParser
-            .ParseRows(sapRows, '|')
+            .ParseRows(sapRows, '|', skipHeader: true)
             .Where(cols => cols.Length >= LquaColumns.Length)
             .Select(cols => new StockRow
             {
