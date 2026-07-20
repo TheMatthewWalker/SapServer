@@ -241,6 +241,51 @@ internal static class ProductionHelpers
         return builder.Build();
     }
 
+    // Finds the original backflush (movement 131) document for a batch — the
+    // first step of the re-drum reversal chain: a batch-managed product being
+    // returned to SA/PTFE via Staging Post needs its original consumption
+    // reversed via MF41 before the return means anything in SAP.
+    internal static RfcRequest BuildFindBackflushDocumentRequest(string? batch)
+    {
+        var builder = new RfcRequestBuilder(FnReadTables)
+            .Import("DELIMITER", "|")
+            .Import("ROWCOUNT",  1)
+            .Import("NO_DATA",   " ")
+            .TableRow("QUERY_TABLES", new { TABNAME = "MSEG" });
+
+        builder.TableItemRow("query_FIELDS", new { TABNAME = "MSEG", FIELDNAME = "MBLNR" });
+        builder.TableItemRow("query_FIELDS", new { TABNAME = "MSEG", FIELDNAME = "MATNR" });
+        builder.TableItemRow("query_FIELDS", new { TABNAME = "MSEG", FIELDNAME = "MENGE" });
+        builder.TableItemRow("query_FIELDS", new { TABNAME = "MSEG", FIELDNAME = "LGORT" });
+
+        builder.WhereCondition($"MSEG~CHARG EQ '{(batch ?? "").ToUpperInvariant()}'");
+        builder.WhereCondition($"MSEG~BWART EQ '131'");
+        builder.WhereCondition($"MSEG~WERKS EQ '{Plant}'");
+
+        builder.ReadTable("data_display"); // no fields → WA column only
+
+        return builder.Build();
+    }
+
+    internal static BackflushDocumentRow[] ParseBackflushDocumentRows(RfcResponse response)
+    {
+        if (!response.Tables.TryGetValue("data_display", out var sapRows))
+            return [];
+
+        return SapDelimitedParser
+            .ParseRows(sapRows, '|', skipHeader: true)
+            .Where(cols => cols.Length >= 4)
+            .Select(cols => new BackflushDocumentRow
+            {
+                MaterialDocument = cols[0],
+                Material         = cols[1],
+                Quantity         = decimal.TryParse(cols[2], out var qty) ? qty : 0m,
+                StorageLocation  = cols[3],
+            })
+            .ToArray();
+    }
+
+
     internal static RfcRequest BuildMatDocRequest(string? materialDocument)
     {
         var builder = new RfcRequestBuilder(FnReadTables)

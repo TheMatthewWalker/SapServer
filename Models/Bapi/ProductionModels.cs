@@ -58,6 +58,25 @@ public sealed class MsegRow
 }
 
 
+// ── Find Backflush Document (MSEG, movement 131) ──────────────────────────────
+// Looks up the original backflush material document for a batch — used by the
+// re-drum reversal chain to find what to reverse via MF41 before a
+// batch-managed product is returned into stock.
+public sealed class FindBackflushDocumentRequest
+{
+    [Required, MinLength(1)] public string Batch { get; init; } = string.Empty; // CHARG
+}
+
+/// <summary>The original 131 (backflush) movement for a batch, found via MSEG.</summary>
+public sealed class BackflushDocumentRow
+{
+    public string  MaterialDocument { get; init; } = string.Empty; // MBLNR
+    public string  Material         { get; init; } = string.Empty; // MATNR
+    public decimal Quantity         { get; init; }                  // MENGE
+    public string  StorageLocation  { get; init; } = string.Empty; // LGORT
+}
+
+
 // ── ZF40N Backflush ───────────────────────────────────────────────────
 public sealed class Zf40nRequest
 {

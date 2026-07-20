@@ -91,6 +91,29 @@ public sealed class ProductionController : SapControllerBase
 
 
 
+// ── POST /api/production/find-backflush-document ──────────────────────────
+
+    [HttpPost("find-backflush-document")]
+    [ProducesResponseType(typeof(ApiResponse<BackflushDocumentRow>), 200)]
+    [ProducesResponseType(typeof(ApiResponse<object>), 400)]
+    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
+    public async Task<IActionResult> FindBackflushDocument(
+
+        [FromBody] FindBackflushDocumentRequest body,
+        CancellationToken ct)
+    {
+        await CheckPermissionAsync(GetUserId(), ProductionHelpers.FnCreate, ct);
+
+        var mseg = await _pool.ExecuteAsync(ProductionHelpers.BuildFindBackflushDocumentRequest(body.Batch), ct);
+        var row  = ProductionHelpers.ParseBackflushDocumentRows(mseg).FirstOrDefault();
+
+        if (row == null)
+            return BadRequest(ApiResponse<BackflushDocumentRow>.Fail("400", $"No backflush (movement 131) found for batch '{body.Batch}'.", null!));
+
+        return Ok(ApiResponse<BackflushDocumentRow>.Ok(row));
+    }
+
+
 // ── POST /api/production/scrap/post ──────────────────────────────────
 
     [HttpPost("scrap/post")]
