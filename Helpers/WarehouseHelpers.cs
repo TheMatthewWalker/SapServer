@@ -209,4 +209,33 @@ internal static class WarehouseHelpers
             ToNonConsignMessage = ReturnTableHelper.GetParam(toNonConsign, "MESSG") ?? "",
             ToConsignMessage    = ReturnTableHelper.GetParam(toConsign,    "MESSG") ?? ""
         };
+
+    // ── Set Delivery Weight (ZDEL) ────────────────────────────────────────────
+    //
+    // Two screen-0100 hits on the same dynpro, exactly as recorded: the first
+    // just selects the delivery (BDC_CURSOR on LIKP-VBELN, =SELE), the second
+    // fills in the weight/pallet-count fields (BDC_CURSOR on LIKP-ANZPK,
+    // =SAVE). GEWEI is always "KG" — the portal only ever records weights in
+    // kilograms, so it's hardcoded rather than taking a unit from the caller.
+    internal static RfcRequest BuildZdelRequest(SetDeliveryWeightRequest body) =>
+        BdcBuilder.For("ZDEL")
+            .Screen("SAPMZDEL", "0100")
+                .Field("BDC_CURSOR", "LIKP-VBELN")
+                .Field("BDC_OKCODE", "=SELE")
+                .Field("LIKP-VBELN", SapPad.Pad(body.DeliveryNumber, 10))
+            .Screen("SAPMZDEL", "0100")
+                .Field("BDC_CURSOR", "LIKP-ANZPK")
+                .Field("BDC_OKCODE", "=SAVE")
+                .Field("LIKP-VBELN", SapPad.Pad(body.DeliveryNumber, 10))
+                .Field("LIKP-BTGEW", body.GrossWeight.ToString())
+                .Field("LIKP-NTGEW", body.NetWeight.ToString())
+                .Field("LIKP-GEWEI", "KG")
+                .Field("LIKP-ANZPK", body.PalletCount.ToString())
+            .Build();
+
+    internal static SetDeliveryWeightResponse ParseZdelResponse(RfcResponse response) =>
+        new SetDeliveryWeightResponse
+        {
+            Message = ReturnTableHelper.GetParam(response, "MESSG") ?? ""
+        };
 }

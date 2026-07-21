@@ -102,3 +102,24 @@ public sealed class ConsignmentMb1bResponse
     public string ToNonConsignMessage   { get; init; } = string.Empty;
     public string ToConsignMessage      { get; init; } = string.Empty;
 }
+
+
+// ── SetDeliveryWeight (ZDEL) ─────────────────────────────────────────────────
+//
+// Records the delivery's actual picked/packed figures back onto LIKP once a
+// delivery is marked complete in the pallet builder — the BDC mirrors
+// transaction ZDEL exactly as recorded: select the delivery (=SELE), then
+// enter BTGEW/NTGEW/GEWEI/ANZPK and save (=SAVE).
+
+public sealed class SetDeliveryWeightRequest
+{
+    [Required, MinLength(1)] public string  DeliveryNumber { get; init; } = string.Empty; // VBELN → LIKP-VBELN
+    [Range(0, double.MaxValue)] public decimal GrossWeight  { get; init; }                 // LIKP-BTGEW
+    [Range(0, double.MaxValue)] public decimal NetWeight    { get; init; }                 // LIKP-NTGEW
+    [Range(0, int.MaxValue)]    public int     PalletCount  { get; init; }                 // LIKP-ANZPK
+}
+
+public sealed class SetDeliveryWeightResponse
+{
+    public string Message { get; init; } = string.Empty;
+}

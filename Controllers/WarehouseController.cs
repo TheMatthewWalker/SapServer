@@ -294,6 +294,25 @@ public sealed class WarehouseController : SapControllerBase
             WarehouseHelpers.ParseConsignmentResponse(mb1b, toNonC, toC)));
     }
 
+    // ── POST /api/warehouse/set-delivery-weight ───────────────────────────────
+    //
+    // Transaction ZDEL (program SAPMZDEL, screen 0100) via BDC — records the
+    // delivery's actual picked/packed gross weight, net weight (gross minus
+    // packaging), and pallet count back onto LIKP once a delivery is marked
+    // complete in the pallet builder. Two hits on the same screen exactly as
+    // recorded: select the delivery (=SELE), then fill in the weight/pallet
+    // fields and save (=SAVE). No CheckPermissionAsync gate, same as the
+    // picksheet-* endpoints — called from Node via the shared service token
+    // when a delivery is completed, not directly by a logged-in user.
 
+    [HttpPost("set-delivery-weight")]
+    [ProducesResponseType(typeof(ApiResponse<SetDeliveryWeightResponse>), 200)]
+    public async Task<IActionResult> SetDeliveryWeight(
+        [FromBody] SetDeliveryWeightRequest body,
+        CancellationToken ct)
+    {
+        var response = await _pool.ExecuteAsync(WarehouseHelpers.BuildZdelRequest(body), ct);
+        return Ok(ApiResponse<SetDeliveryWeightResponse>.Ok(WarehouseHelpers.ParseZdelResponse(response)));
+    }
 
 }
