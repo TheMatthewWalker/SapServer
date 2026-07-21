@@ -274,7 +274,15 @@ internal static class ZdelflagHelpers
                 PALLET     = r.Pallet,
                 VHART      = r.Vhart,
                 DONE       = r.Done,
-                SMBX_MATNR = string.IsNullOrWhiteSpace(r.SmbxMatnr) ? "" : SapPad.Pad(r.SmbxMatnr, 18),
+                // SMBX_MATNR holds the packaging instruction string (e.g.
+                // "IB_363660_MB", ZPRODBATCH~PALL_MATNR) — the exact same kind
+                // of value as ZBOM_INFO~MATNR above, which is deliberately left
+                // un-padded since it's a lookup key, not a real material
+                // number. SapPad.Pad happens to no-op for mixed alphanumeric
+                // strings like the example, but would incorrectly zero-pad a
+                // purely numeric instruction value, breaking any SAP-side
+                // match against ZBOM_INFO~MATNR — trim only, never pad.
+                SMBX_MATNR = (r.SmbxMatnr ?? "").Trim(),
                 PALL_MATNR = string.IsNullOrWhiteSpace(r.PallMatnr) ? "" : SapPad.Pad(r.PallMatnr, 18),
                 MTART      = r.Mtart,
                 SMBXHU     = r.Smbxhu,
