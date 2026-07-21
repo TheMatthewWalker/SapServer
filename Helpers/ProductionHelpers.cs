@@ -307,6 +307,32 @@ internal static class ProductionHelpers
     }
 
 
+    // Finds the cost collector (repetitive manufacturing production order)
+    // for a material — AFKO~PLNBEZ is the material a cost collector order
+    // exists for, AUFNR is the order number itself. Used by the re-drum
+    // reversal chain's WM tidy-up step: stock moved outside Warehouse
+    // Management (e.g. by MF41) lands in bin type 901, bin = that order
+    // number, zero-padded/truncated to 10 characters — mirrors the
+    // existing get_CC() VB helper (table AFKO, filter PLNBEZ, column
+    // AUFNR, Right(...,10)) exactly.
+    internal static RfcRequest BuildCostCollector(string? material)
+    {
+        var builder = new RfcRequestBuilder(FnReadTables)
+            .Import("DELIMITER", "|")
+            .Import("ROWCOUNT",  1)
+            .Import("NO_DATA",   " ")
+            .TableRow("QUERY_TABLES", new { TABNAME = "AFKO" });
+
+        builder.TableItemRow("query_FIELDS", new { TABNAME = "AFKO", FIELDNAME = "AUFNR" });
+
+        builder.WhereCondition($"AFKO~PLNBEZ EQ '{(SapPad.Pad(material, 18) ?? "").ToUpperInvariant()}'");
+
+        builder.ReadTable("data_display"); // no fields → WA column only
+
+        return builder.Build();
+    }
+
+
     internal static RfcRequest BuildProfitCentre(string? material)
     {
         var builder = new RfcRequestBuilder(FnReadTables)

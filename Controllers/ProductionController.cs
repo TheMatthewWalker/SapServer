@@ -67,6 +67,29 @@ public sealed class ProductionController : SapControllerBase
 
 
 
+// ── GET /api/production/find-cost-collector ──────────────────────────
+
+    [HttpGet("find-cost-collector")]
+    [ProducesResponseType(typeof(ApiResponse<string>), 200)]
+    [ProducesResponseType(typeof(ApiResponse<object>), 400)]
+    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
+    public async Task<IActionResult> FindCostCollector(
+
+        [FromBody] ProfitCentreRequest body,
+        CancellationToken ct)
+    {
+        await CheckPermissionAsync(GetUserId(), ProductionHelpers.FnCreate, ct);
+
+        var costCollectorArray = await _pool.ExecuteAsync(ProductionHelpers.BuildCostCollector(body.Material), ct);
+        var costCollector = ProductionHelpers.ParseSingleSapResult(costCollectorArray);
+
+        if (string.IsNullOrWhiteSpace(costCollector))
+            return BadRequest(ApiResponse<string>.Fail("400", $"No cost collector (AFKO) found for material '{body.Material}'.", null!));
+
+        return Ok(ApiResponse<string>.Ok(costCollector));
+    }
+
+
 // ── POST /api/production/reverse-backflush ──────────────────────────────────
 
     [HttpPost("reverse-backflush")]
