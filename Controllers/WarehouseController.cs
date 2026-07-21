@@ -315,4 +315,63 @@ public sealed class WarehouseController : SapControllerBase
         return Ok(ApiResponse<SetDeliveryWeightResponse>.Ok(WarehouseHelpers.ParseZdelResponse(response)));
     }
 
+    // ── ZDELFLAG/ZDELPACK maintenance (transaction ZPIL9) ─────────────────────
+    //
+    // Fired after set-delivery-weight when a delivery is marked complete —
+    // confirms all materials/packaging assigned to the delivery in SAP's own
+    // ZDELFLAG/ZDELPACK tables via the custom BAPI Z_MAINT_ZDELFLAG_ZDELPACK.
+    // Node orchestrates: it calls the small lookups below (LIKP~ABLAD,
+    // LIPS item detail, KNVV~EIKTO, ZBOM_INFO) to fill in the T_DELFLAG/
+    // T_DELPACK rows itself from PalletMain/PalletPackages, then posts the
+    // assembled rows to zdelflag/maintain. See ZdelflagHelpers.cs for the
+    // full mapping rationale. No CheckPermissionAsync gate, same as the
+    // picksheet-*/set-delivery-weight endpoints — called from Node via the
+    // shared service token, not directly by a logged-in user.
+
+    [HttpGet("zdelflag/likp-ablad/{delivery}")]
+    [ProducesResponseType(typeof(ApiResponse<string>), 200)]
+    public async Task<IActionResult> GetZdelflagLikpAblad(string delivery, CancellationToken ct)
+    {
+        var response = await _pool.ExecuteAsync(ZdelflagHelpers.BuildLikpAbladRequest(delivery), ct);
+        return Ok(ApiResponse<string>.Ok(ZdelflagHelpers.ParseLikpAblad(response)));
+    }
+
+    [HttpGet("zdelflag/lips-items/{delivery}")]
+    [ProducesResponseType(typeof(ApiResponse<ZdelflagLipsItemRow[]>), 200)]
+    public async Task<IActionResult> GetZdelflagLipsItems(string delivery, CancellationToken ct)
+    {
+        var response = await _pool.ExecuteAsync(ZdelflagHelpers.BuildLipsItemDetailRequest(delivery), ct);
+        return Ok(ApiResponse<ZdelflagLipsItemRow[]>.Ok(ZdelflagHelpers.ParseLipsItemDetail(response)));
+    }
+
+    [HttpGet("zdelflag/eikto/{customer}")]
+    [ProducesResponseType(typeof(ApiResponse<string>), 200)]
+    public async Task<IActionResult> GetZdelflagEikto(string customer, CancellationToken ct)
+    {
+        var response = await _pool.ExecuteAsync(ZdelflagHelpers.BuildKnvvEiktoRequest(customer), ct);
+        return Ok(ApiResponse<string>.Ok(ZdelflagHelpers.ParseKnvvEikto(response)));
+    }
+
+    [HttpPost("zdelflag/zbom-info")]
+    [ProducesResponseType(typeof(ApiResponse<ZbomInfoRow[]>), 200)]
+    public async Task<IActionResult> PostZdelflagZbomInfo([FromBody] ZbomInfoRequest body, CancellationToken ct)
+    {
+        if (body.PackagingInstructions.Count == 0)
+            return Ok(ApiResponse<ZbomInfoRow[]>.Ok([]));
+
+        var response = await _pool.ExecuteAsync(ZdelflagHelpers.BuildZbomInfoRequest(body.PackagingInstructions), ct);
+        return Ok(ApiResponse<ZbomInfoRow[]>.Ok(ZdelflagHelpers.ParseZbomInfoRows(response)));
+    }
+
+    [HttpPost("zdelflag/maintain")]
+    [ProducesResponseType(typeof(ApiResponse<MaintainZdelflagResponse>), 200)]
+    public async Task<IActionResult> PostZdelflagMaintain([FromBody] MaintainZdelflagRequest body, CancellationToken ct)
+    {
+        if (body.DelflagRows.Count == 0)
+            return Ok(ApiResponse<MaintainZdelflagResponse>.Ok(new MaintainZdelflagResponse("", [])));
+
+        var response = await _pool.ExecuteAsync(ZdelflagHelpers.BuildMaintainRequest(body), ct);
+        return Ok(ApiResponse<MaintainZdelflagResponse>.Ok(ZdelflagHelpers.ParseMaintainResponse(response)));
+    }
+
 }
