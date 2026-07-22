@@ -12,6 +12,17 @@ internal static class ProductionHelpers
     internal const string Warehouse     = "312";
     internal const string Plant         = "3012";
 
+    // Real named RFC (not the generic ZRFC_READ_TABLES wrapper every other
+    // lookup in this file goes through) — order/item special-instruction text
+    // is process-critical per the user's explicit instruction, so this reads
+    // it live from SAP on every ticket print rather than via a cached table.
+    internal const string FnReadText = "RFC_READ_TEXT";
+
+    // Text ID for the "special instructions" text saved against a sales item
+    // (STXH-TDID). Matches the counter value used by the existing Excel VBA
+    // READ_TEXT() macro this replaces.
+    internal const string SpecialInstructionsTextId = "004";
+
     // Column order must exactly match query_FIELDS registration order below
     internal static readonly string[] BomColumns =
         ["MATNR", "WERKS", "IDNRK", "POSNR", "MENGE", "MEINS", "LGORT", "PRVBE"];
@@ -368,6 +379,42 @@ internal static class ProductionHelpers
         builder.ReadTable("data_display"); // no fields → WA column only
 
         return builder.Build();
+    }
+
+
+// ── Text (RFC_READ_TEXT) ─────────────────────────────────────────────────
+//
+// Live lookup of SAP long-text (STXH/STXL) — used for the Drumming Ticket's
+// "Special Instructions" section. TDNAME is the sales-item text key: a
+// 10-char sales document number immediately followed by a 6-char item
+// number (no separator), exactly matching the existing Excel VBA macro:
+//   objData(objData.RowCount, "TDNAME") = Right("0000" & salesdoc, 10) & Right("0000" & item, 6)
+// TDID defaults to "004" (special instructions) but is parameterised since
+// other text IDs against the same object could be useful later.
+
+    internal static RfcRequest BuildOrderTextRequest(string salesDocument, string item, string textId = SpecialInstructionsTextId)
+    {
+        var name = SapPad.Pad(salesDocument, 10) + SapPad.Pad(item, 6);
+
+        return new RfcRequestBuilder(FnReadText)
+            .Import("OBJECT",   "VBBP")
+            .Import("NAME",     name)
+            .Import("ID",       textId)
+            .Import("LANGUAGE", "E")
+            .ReadTable("LINES", "TDFORMAT", "TDLINE")
+            .Build();
+    }
+
+    // A text can span several 132-char TLINE rows — join them all (trimmed)
+    // rather than returning only the first, so nothing is silently truncated.
+    internal static string ParseOrderText(RfcResponse response)
+    {
+        if (!response.Tables.TryGetValue("LINES", out var rows) || rows.Count == 0)
+            return "";
+
+        return string.Join("\n", rows
+            .Select(r => r.TryGetValue("TDLINE", out var v) ? v?.ToString()?.TrimEnd() ?? "" : "")
+            .Where(s => s.Length > 0));
     }
 
 

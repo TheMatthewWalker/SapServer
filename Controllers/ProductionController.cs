@@ -245,5 +245,31 @@ public sealed class ProductionController : SapControllerBase
     }
 
 
+// ── GET /api/production/order-text/{salesDocument}/{item} ────────────────
+//
+// Live RFC_READ_TEXT lookup for the Drumming Ticket's Special Instructions
+// section — process-critical, so this always hits SAP directly rather than
+// reading a cached/synced table. textId defaults to "004" (special
+// instructions) via a query string override (?textId=) if ever needed.
+
+    [HttpGet("order-text/{salesDocument}/{item}")]
+    [ProducesResponseType(typeof(ApiResponse<string>), 200)]
+    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
+    public async Task<IActionResult> GetOrderText(
+        string salesDocument,
+        string item,
+        [FromQuery] string? textId,
+        CancellationToken ct)
+    {
+        await CheckPermissionAsync(GetUserId(), ProductionHelpers.FnCreate, ct);
+
+        var response = await _pool.ExecuteAsync(
+            ProductionHelpers.BuildOrderTextRequest(
+                salesDocument, item,
+                string.IsNullOrWhiteSpace(textId) ? ProductionHelpers.SpecialInstructionsTextId : textId),
+            ct);
+
+        return Ok(ApiResponse<string>.Ok(ProductionHelpers.ParseOrderText(response)));
+    }
 
 }
