@@ -391,25 +391,47 @@ internal static class ProductionHelpers
 //   objData(objData.RowCount, "TDNAME") = Right("0000" & salesdoc, 10) & Right("0000" & item, 6)
 // TDID defaults to "004" (special instructions) but is parameterised since
 // other text IDs against the same object could be useful later.
+//
+// NOT the standard scalar-import RFC_READ_TEXT interface (OBJECT/NAME/ID/
+// LANGUAGE as exports + output table LINES) — this SAP system's RFC_READ_TEXT
+// as exposed via SAPFunctions64 instead takes a single INPUT table called
+// TEXT_LINES (fields TDOBJECT/TDNAME/TDID/TDSPRAS on one row), and the same
+// table doubles as the result — the OCX overwrites/fills it in place after
+// Call(). Confirmed directly against SAP_Lookup_Mod.bas's READ_TEXT():
+//   Set objData = objRfcFunc.Tables("TEXT_LINES")
+//   objData.Rows.Add
+//   objData(objData.RowCount, "TDOBJECT") = "VBBP"
+//   objData(objData.RowCount, "TDNAME")   = <name>
+//   objData(objData.RowCount, "TDID")     = counter
+//   objData(objData.RowCount, "TDSPRAS")  = "E"
+//   objRfcFunc.Call
+//   arr = objData.Data : READ_TEXT = arr(1, 8)   ' column 8 = TDLINE
+// Same dual-purpose-table pattern already used by BuildInvoicingRequest's
+// SALE_HIST_T (see its comment) — TableRow(...) populates it as an input via
+// func.Tables(name), ReadTable(...) reads the same table back afterward via
+// func.tables.Item(name); both resolve to the same underlying COM collection.
+// Using the previous OBJECT/NAME/ID/LANGUAGE scalar-export approach failed
+// outright — those exports don't exist on this system's RFC_READ_TEXT, so
+// func.exports("OBJECT") returned null and threw on the very first import.
 
     internal static RfcRequest BuildOrderTextRequest(string salesDocument, string item, string textId = SpecialInstructionsTextId)
     {
         var name = SapPad.Pad(salesDocument, 10) + SapPad.Pad(item, 6);
 
         return new RfcRequestBuilder(FnReadText)
-            .Import("OBJECT",   "VBBP")
-            .Import("NAME",     name)
-            .Import("ID",       textId)
-            .Import("LANGUAGE", "E")
-            .ReadTable("LINES", "TDFORMAT", "TDLINE")
+            .TableRow("TEXT_LINES", new { TDOBJECT = "VBBP", TDNAME = name, TDID = textId, TDSPRAS = "E" })
+            .ReadTable("TEXT_LINES", "TDLINE")
             .Build();
     }
 
     // A text can span several 132-char TLINE rows — join them all (trimmed)
     // rather than returning only the first, so nothing is silently truncated.
+    // (The VBA only ever reads row 1; joining every row returned is a superset
+    // of that behaviour, not a divergence — if SAP only ever echoes one row
+    // back, this produces the exact same single-line result.)
     internal static string ParseOrderText(RfcResponse response)
     {
-        if (!response.Tables.TryGetValue("LINES", out var rows) || rows.Count == 0)
+        if (!response.Tables.TryGetValue("TEXT_LINES", out var rows) || rows.Count == 0)
             return "";
 
         return string.Join("\n", rows
