@@ -1,11 +1,16 @@
 @baseUrl = http://127.0.0.1:5200
-@token = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzcWwyMDA1LWJyaWRnZSIsImF1ZCI6InNhcC1zZXJ2ZXIiLCJzdWIiOiJkZXYiLCJ1c2VySWQiOjEsInJvbGUiOiJhZG1pbiIsImlhdCI6MTc4MzU5MDAzNiwiZXhwIjoxNzgzNTkzNjM2fQ.cMvOzYzIWIm5vQbw3sEFTc7uQxnp9J5VfBJSDPurTVU
+@token = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzcWwyMDA1LWJyaWRnZSIsImF1ZCI6InNhcC1zZXJ2ZXIiLCJzdWIiOiJkZXYiLCJ1c2VySWQiOjEsInJvbGUiOiJhZG1pbiIsImlhdCI6MTc4NDYzMTk2NSwiZXhwIjoxNzg0NjM1NTY1fQ.ytlJbaWnvQqfNTdFfmeNkcf1fGGkgJHfS_3g4cVBNGk
 
 
-### Test KN API connectivity and token validity
+### GET /api/function/params
+GET {{baseUrl}}/api/function/params
+Content-Type: application/json
+Authorization: Bearer {{token}}
 
-POST http://localhost:4000/api/freight-booking/shipment/1
-Accept: application/json
+{
+    "FunctionName": "BAPI_GL_GETGLACCPERIODBALANCES"
+}
+###
 
 
 
@@ -313,15 +318,68 @@ Authorization: Bearer {{token}}
 ###
 
 
-### GET /api/function/params
-GET {{baseUrl}}/api/function/params
+### POST /api/purchasing/create-po  (dry run — echoes the built RFC request, no SAP call)
+# BAPI_PO_CREATE1, ported field-for-field from AT_Dashboard.xlsm (module
+# BAPI_PO, sub CreateSAPPurchaseOrder). PO creation only — no goods
+# receipt/GRNI booking yet (that's the separate, not-yet-built MIGO step).
+#
+# Example below is one PO with one cost-center-assigned (K) item, matching
+# the intended Inbound Log MIGO use case: freight cost -> cost center 2012
+# (PTFE Raw Material), GL 602200. AcctAssCat/MaterialGroup/GlAccount/
+# CostCenterOrOrder can be left null for a standard stock line instead
+# (see the VBA's own "PO" sheet example row: Material 50065, no Acc. Ass).
+POST {{baseUrl}}/api/purchasing/create-po?dryRun=true
 Content-Type: application/json
 Authorization: Bearer {{token}}
 
 {
-    "FunctionName": "Z_CURR_RATE_GET"
+    "Vendor": "19609",
+    "Currency": "GBP",
+    "DocDate": "21.07.2026",
+    "Items": [
+        {
+            "ShortText": "Freight - Inbound shipment 000123",
+            "Quantity": 1,
+            "Unit": "EA",
+            "NetPrice": 450.00,
+            "DeliveryDate": "21.07.2026",
+            "AcctAssCat": "K",
+            "MaterialGroup": "ROAD",
+            "GlAccount": "602200",
+            "CostCenterOrOrder": "2012"
+        }
+    ]
 }
 ###
+
+
+### POST /api/purchasing/create-po  (real call — creates the PO in SAP)
+POST {{baseUrl}}/api/purchasing/create-po
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+    "Vendor": "19609",
+    "Currency": "GBP",
+    "DocDate": "21.07.2026",
+    "Items": [
+        {
+            "ShortText": "Freight - Inbound shipment 000123",
+            "Quantity": 1,
+            "Unit": "EA",
+            "NetPrice": 450.00,
+            "DeliveryDate": "21.07.2026",
+            "AcctAssCat": "K",
+            "MaterialGroup": "ROAD",
+            "GlAccount": "602200",
+            "CostCenterOrOrder": "2012"
+        }
+    ]
+}
+###
+
+
+
 
 
 
