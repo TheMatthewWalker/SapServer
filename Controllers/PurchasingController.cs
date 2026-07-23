@@ -56,4 +56,36 @@ public sealed class PurchasingController : SapControllerBase
         await _pool.ExecuteOnWorkerAsync(worker, CommitHelper.BuildBapiCommit(), ct);
         return Ok(ApiResponse<PoCreateRow>.Ok(response));
     }
+
+    /// <summary>
+    /// Posts a goods receipt against a purchase order via transaction MB01
+    /// (BDC recording) — see GoodsReceiptHelper for the exact recording
+    /// this was built from. BAPI_GOODSMVT_CREATE was tried first but
+    /// doesn't work against this SAP system, per the user, hence the BDC
+    /// approach instead. A plain BDC call via Z_RFC_CALL_TRANSACTION
+    /// commits itself within the transaction it drives, so unlike
+    /// CreatePurchaseOrder this doesn't need a pinned worker or an
+    /// explicit BAPI_TRANSACTION_COMMIT/ROLLBACK — same as the existing
+    /// set-delivery-weight (ZDEL) and consignment (MB1B) BDC endpoints.
+    /// </summary>
+    [HttpPost("post-goods-receipt")]
+    [ProducesResponseType(typeof(ApiResponse<GoodsReceiptResponse>), 200)]
+    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
+    public async Task<IActionResult> PostGoodsReceipt(
+        [FromBody] GoodsReceiptRequest body,
+        [FromQuery] bool dryRun,
+        CancellationToken ct)
+    {
+        await CheckPermissionAsync(GetUserId(), GoodsReceiptHelper.TransactionCode, ct);
+
+        var request = GoodsReceiptHelper.BuildGoodsReceiptRequest(body);
+
+        if (dryRun)
+            return Ok(ApiResponse<RfcRequest>.Ok(request));
+
+        var data = await _pool.ExecuteAsync(request, ct);
+        var response = GoodsReceiptHelper.ParseGoodsReceiptResponse(data);
+
+        return Ok(ApiResponse<GoodsReceiptResponse>.Ok(response));
+    }
 }

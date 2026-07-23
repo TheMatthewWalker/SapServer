@@ -1,5 +1,6 @@
 @baseUrl = http://127.0.0.1:5200
-@token = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzcWwyMDA1LWJyaWRnZSIsImF1ZCI6InNhcC1zZXJ2ZXIiLCJzdWIiOiJkZXYiLCJ1c2VySWQiOjEsInJvbGUiOiJhZG1pbiIsImlhdCI6MTc4NDYzMTk2NSwiZXhwIjoxNzg0NjM1NTY1fQ.ytlJbaWnvQqfNTdFfmeNkcf1fGGkgJHfS_3g4cVBNGk
+@token = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzcWwyMDA1LWJyaWRnZSIsImF1ZCI6InNhcC1zZXJ2ZXIiLCJzdWIiOiJkZXYiLCJ1c2VySWQiOjEsInJvbGUiOiJhZG1pbiIsImlhdCI6MTc4NDc5MDE2OSwiZXhwIjoxNzg0NzkzNzY5fQ.wvUdtIkUQUaTlMFEKtAQcwD0gO_ABVILqbTVRk3-Ew4
+
 
 
 ### GET /api/function/params
@@ -308,7 +309,7 @@ Authorization: Bearer {{token}}
 {
     "Shipment": "00014541",
     "DocDate": "21.04.2026",
-    "Vendor": "19609",
+    "Vendor": "78712",
     "GlAccount": "601200",
     "ProfitCenter": "2004",
     "Currency": "EUR",
@@ -333,7 +334,7 @@ Content-Type: application/json
 Authorization: Bearer {{token}}
 
 {
-    "Vendor": "19609",
+    "Vendor": "78712",
     "Currency": "GBP",
     "DocDate": "21.07.2026",
     "Items": [
@@ -344,7 +345,7 @@ Authorization: Bearer {{token}}
             "NetPrice": 450.00,
             "DeliveryDate": "21.07.2026",
             "AcctAssCat": "K",
-            "MaterialGroup": "ROAD",
+            "MaterialGroup": "Road Freight",
             "GlAccount": "602200",
             "CostCenterOrOrder": "2012"
         }
@@ -359,7 +360,7 @@ Content-Type: application/json
 Authorization: Bearer {{token}}
 
 {
-    "Vendor": "19609",
+    "Vendor": "78712",
     "Currency": "GBP",
     "DocDate": "21.07.2026",
     "Items": [
@@ -370,11 +371,49 @@ Authorization: Bearer {{token}}
             "NetPrice": 450.00,
             "DeliveryDate": "21.07.2026",
             "AcctAssCat": "K",
-            "MaterialGroup": "ROAD",
+            "MaterialGroup": "Road Freight",
             "GlAccount": "602200",
             "CostCenterOrOrder": "2012"
         }
     ]
+}
+###
+
+
+### POST /api/purchasing/post-goods-receipt  (dry run — echoes the built BDC table, no SAP call)
+# Transaction MB01 via BDC (Z_RFC_CALL_TRANSACTION) — BAPI_GOODSMVT_CREATE
+# doesn't work against this SAP system, so this replicates the user's own
+# BDC recording exactly. ItemCount must match how many items were sent to
+# create-po above (one MSEG-ERFMG(nn)/=SELE screen per item).
+POST {{baseUrl}}/api/purchasing/post-goods-receipt?dryRun=true
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+    "PurchaseOrder": "4500434758",
+    "ItemCount": 1,
+    "Reference": "INB-000014",
+    "TrackingNumber": "TBC",
+    "AddressCode": "US28",
+    "ShipmentCompletionDate": "23.07.2026",
+    "PostingDate": "23.07.2026"
+}
+###
+
+
+### POST /api/purchasing/post-goods-receipt  (real call — posts the goods receipt in SAP)
+POST {{baseUrl}}/api/purchasing/post-goods-receipt
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+    "PurchaseOrder": "4500434758",
+    "ItemCount": 1,
+    "Reference": "INB-000014",
+    "TrackingNumber": "TBC",
+    "AddressCode": "US28",
+    "ShipmentCompletionDate": "23.07.2026",
+    "PostingDate": "23.07.2026"
 }
 ###
 
