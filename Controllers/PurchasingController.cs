@@ -58,18 +58,25 @@ public sealed class PurchasingController : SapControllerBase
     }
 
     /// <summary>
-    /// Posts a goods receipt against a purchase order via transaction MB01
-    /// (BDC recording) — see GoodsReceiptHelper for the exact recording
-    /// this was built from. BAPI_GOODSMVT_CREATE was tried first but
-    /// doesn't work against this SAP system, per the user, hence the BDC
-    /// approach instead. A plain BDC call via Z_RFC_CALL_TRANSACTION
+    /// Posts a goods receipt against a single purchase order item via
+    /// transaction MB01 (BDC recording) — see GoodsReceiptHelper for the
+    /// exact recording this was built from. BAPI_GOODSMVT_CREATE was tried
+    /// first but doesn't work against this SAP system, per the user, hence
+    /// the BDC approach instead. A plain BDC call via Z_RFC_CALL_TRANSACTION
     /// commits itself within the transaction it drives, so unlike
     /// CreatePurchaseOrder this doesn't need a pinned worker or an
     /// explicit BAPI_TRANSACTION_COMMIT/ROLLBACK — same as the existing
     /// set-delivery-weight (ZDEL) and consignment (MB1B) BDC endpoints.
+    ///
+    /// One call per PO item/cost line, per the user — the caller loops this
+    /// once per cost line on the shipment's PO, incrementing LineNumber each
+    /// time. Reuses ProductionHelpers.ParseBdcResponse (already built for
+    /// the MF41/MBST BDC endpoints) rather than a bespoke parser — its
+    /// DocumentNumber field is exactly what's needed to store the material
+    /// document per cost line for later individual reversal.
     /// </summary>
     [HttpPost("post-goods-receipt")]
-    [ProducesResponseType(typeof(ApiResponse<GoodsReceiptResponse>), 200)]
+    [ProducesResponseType(typeof(ApiResponse<BdcResponse>), 200)]
     [ProducesResponseType(typeof(ApiResponse<object>), 403)]
     public async Task<IActionResult> PostGoodsReceipt(
         [FromBody] GoodsReceiptRequest body,
@@ -84,8 +91,42 @@ public sealed class PurchasingController : SapControllerBase
             return Ok(ApiResponse<RfcRequest>.Ok(request));
 
         var data = await _pool.ExecuteAsync(request, ct);
-        var response = GoodsReceiptHelper.ParseGoodsReceiptResponse(data);
+        var response = ProductionHelpers.ParseBdcResponse(data);
 
-        return Ok(ApiResponse<GoodsReceiptResponse>.Ok(response));
+        return Ok(ApiResponse<BdcResponse>.Ok(response));
+    }
+
+    /// <summary>
+    /// Reverses a single goods receipt material document via transaction
+    /// MBST — reuses the existing MBST BDC already built for scrap
+    /// reversal (ProductionHelpers.BuildMbstRequest / POST
+    /// /api/production/scrap/reverse) unchanged. That BDC's account-
+    /// assignment confirmation screens (SAPLKACB 0002, plain =ENTE with no
+    /// re-entered cost object) already match our scenario: our PO items are
+    /// cost-center-assigned exactly like the scrap postings it was built
+    /// for, and on a reversal SAP already knows the account assignment from
+    /// the original document, so no new fields are needed here — just the
+    /// material document number of the one cost line's GR being reversed
+    /// (see PostGoodsReceipt/BdcResponse.DocumentNumber).
+    /// </summary>
+    [HttpPost("reverse-goods-receipt")]
+    [ProducesResponseType(typeof(ApiResponse<BdcResponse>), 200)]
+    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
+    public async Task<IActionResult> ReverseGoodsReceipt(
+        [FromBody] Mf41Request body,
+        [FromQuery] bool dryRun,
+        CancellationToken ct)
+    {
+        await CheckPermissionAsync(GetUserId(), ProductionHelpers.FnCreate, ct);
+
+        var request = ProductionHelpers.BuildMbstRequest(body);
+
+        if (dryRun)
+            return Ok(ApiResponse<RfcRequest>.Ok(request));
+
+        var data = await _pool.ExecuteAsync(request, ct);
+        var response = ProductionHelpers.ParseBdcResponse(data);
+
+        return Ok(ApiResponse<BdcResponse>.Ok(response));
     }
 }

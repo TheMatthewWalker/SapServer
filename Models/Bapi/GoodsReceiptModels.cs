@@ -1,19 +1,28 @@
 namespace SapServer.Models.Bapi;
 
 /// <summary>
-/// Request to post a goods receipt against a purchase order via transaction
-/// MB01 (BDC recording), not a BAPI — BAPI_GOODSMVT_CREATE was tried first
-/// but doesn't work against this SAP system, per the user. This mirrors
-/// their own BDC recording exactly:
+/// Request to post a goods receipt against a single purchase order item via
+/// transaction MB01 (BDC recording), not a BAPI — BAPI_GOODSMVT_CREATE
+/// doesn't work against this SAP system, per the user, who supplied the
+/// working BDC recording this is built from.
 ///
-///   SAPMM07M 0200: BDC_OKCODE=/00, MKPF-BLDAT, MKPF-BUDAT, RM07M-LFSNR,
-///                  MKPF-FRBNR, MKPF-BKTXT, RM07M-BWARTWE=101,
-///                  RM07M-EBELN, RM07M-WERKS=3012, XFULL=X,
-///                  RM07M-XNAPR=X, RM07M-WVERS1=X
-///   SAPMM07M 0221 (once per PO item): BDC_CURSOR=MSEG-ERFMG(nn), BDC_OKCODE==SELE
-///   SAPMM07M 0221 (final): BDC_OKCODE==BU
+/// One request = one PO item = one MB01 transaction. Per the user: even
+/// though a shipment's costs all sit on one PO, each cost line/PO item gets
+/// its own separate MB01 posting (not one BDC selecting multiple lines) —
+/// this avoids the "select every line" complication when a PO spans more
+/// than one page in the SAP GUI, and makes it possible to reverse a single
+/// cost line later without touching the others. RM07M-EBELP identifies
+/// which PO item is being received; RM07M-EBELN + RM07M-EBELP together
+/// mean only that one line's quantity appears on the entry screen, so the
+/// BDC only ever needs to select "line 1 of 1" (BDC_CURSOR=MSEG-ERFMG(01)),
+/// never a variable-length loop.
 ///
-/// See GoodsReceiptHelper for the field-by-field build.
+/// See GoodsReceiptHelper for the field-by-field build. The response is
+/// SapServer.Models.Bapi.BdcResponse (shared with the existing MF41/MBST
+/// BDC endpoints in ProductionHelpers/ProductionController) — its
+/// DocumentNumber field captures the posted material document number,
+/// which the caller should store against this cost line so it can be
+/// reversed individually later via POST /api/purchasing/reverse-goods-receipt.
 /// </summary>
 public sealed class GoodsReceiptRequest
 {
@@ -21,11 +30,14 @@ public sealed class GoodsReceiptRequest
     public string PurchaseOrder { get; init; } = string.Empty;
 
     /// <summary>
-    /// Number of PO items to select (one MSEG-ERFMG(nn)/=SELE screen per
-    /// item, nn = 01, 02, 03...). Must match how many PoCreateItem rows
-    /// were sent when the PO was created.
+    /// 1-based position of this cost line on the PO (1st item, 2nd item...).
+    /// SAP renumbers PO items in 10s regardless of what was sent at
+    /// creation (confirmed against a real test PO — BAPI_PO_CREATE1 ignores
+    /// the sequential 00001/00002 values PurchasingHelper sends and assigns
+    /// 10/20/30... itself), so GoodsReceiptHelper converts this to the
+    /// actual SAP item number: LineNumber 1 -> EBELP "00010", 2 -> "00020", etc.
     /// </summary>
-    public int ItemCount { get; init; }
+    public int LineNumber { get; init; }
 
     /// <summary>Reference of the cost (e.g. the Inbound Log shipment reference, "INB-000014"). Maps to RM07M-LFSNR.</summary>
     public string Reference { get; init; } = string.Empty;
@@ -45,10 +57,4 @@ public sealed class GoodsReceiptRequest
 
     /// <summary>Posting date (dd.MM.yyyy or yyyyMMdd) — always the date of posting. Defaults to today. Maps to MKPF-BUDAT.</summary>
     public string? PostingDate { get; init; }
-}
-
-public sealed class GoodsReceiptResponse
-{
-    /// <summary>Raw SAP BDC result message (Z_RFC_CALL_TRANSACTION's MESSG).</summary>
-    public string Message { get; init; } = string.Empty;
 }

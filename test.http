@@ -383,15 +383,18 @@ Authorization: Bearer {{token}}
 ### POST /api/purchasing/post-goods-receipt  (dry run — echoes the built BDC table, no SAP call)
 # Transaction MB01 via BDC (Z_RFC_CALL_TRANSACTION) — BAPI_GOODSMVT_CREATE
 # doesn't work against this SAP system, so this replicates the user's own
-# BDC recording exactly. ItemCount must match how many items were sent to
-# create-po above (one MSEG-ERFMG(nn)/=SELE screen per item).
+# BDC recording exactly. One call per PO item/cost line — LineNumber 1
+# posts against EBELP "00010", 2 against "00020", etc. (SAP renumbers PO
+# items in 10s regardless of what was sent at creation). If the PO from the
+# create-po example above had 2 cost lines, call this twice: LineNumber 1,
+# then LineNumber 2 — each is its own material document, reversible on its own.
 POST {{baseUrl}}/api/purchasing/post-goods-receipt?dryRun=true
 Content-Type: application/json
 Authorization: Bearer {{token}}
 
 {
     "PurchaseOrder": "4500434758",
-    "ItemCount": 1,
+    "LineNumber": 1,
     "Reference": "INB-000014",
     "TrackingNumber": "TBC",
     "AddressCode": "US28",
@@ -402,18 +405,53 @@ Authorization: Bearer {{token}}
 
 
 ### POST /api/purchasing/post-goods-receipt  (real call — posts the goods receipt in SAP)
+# Response is BdcResponse — DocumentNumber holds the material document
+# number if SAP's message included the word "document" followed by digits
+# (e.g. "Material document 5000012345 posted"). Store it against this cost
+# line; it's needed to reverse just this line later.
 POST {{baseUrl}}/api/purchasing/post-goods-receipt
 Content-Type: application/json
 Authorization: Bearer {{token}}
 
 {
     "PurchaseOrder": "4500434758",
-    "ItemCount": 1,
+    "LineNumber": 1,
     "Reference": "INB-000014",
     "TrackingNumber": "TBC",
     "AddressCode": "US28",
     "ShipmentCompletionDate": "23.07.2026",
     "PostingDate": "23.07.2026"
+}
+###
+
+
+### POST /api/purchasing/post-goods-receipt  (second cost line on the same PO)
+POST {{baseUrl}}/api/purchasing/post-goods-receipt
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+    "PurchaseOrder": "4500434758",
+    "LineNumber": 2,
+    "Reference": "INB-000014",
+    "TrackingNumber": "TBC",
+    "AddressCode": "US28",
+    "ShipmentCompletionDate": "23.07.2026",
+    "PostingDate": "23.07.2026"
+}
+###
+
+
+### POST /api/purchasing/reverse-goods-receipt  (reverse a single cost line's GR via MBST)
+# Reuses the same MBST BDC already built for scrap reversal
+# (ProductionHelpers.BuildMbstRequest) — see PurchasingController for why
+# it applies unchanged to our cost-center-assigned GR postings too.
+POST {{baseUrl}}/api/purchasing/reverse-goods-receipt
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+    "MaterialDocument": "5000012345"
 }
 ###
 
