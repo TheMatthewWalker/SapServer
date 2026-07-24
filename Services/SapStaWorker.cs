@@ -555,7 +555,20 @@ internal sealed class SapStaWorker : IDisposable
     {
         try
         {
-            dynamic ret      = func.tables.Item("RETURN");
+            // When the call failed because the RFC connection was already closed
+            // (RFC_CLOSED etc.), func.tables itself can come back null — indexing
+            // into it with .Item("RETURN") then throws a RuntimeBinderException
+            // ("Cannot perform runtime binding on a null reference") that says
+            // nothing about the actual SAP condition. Guard it explicitly so the
+            // log gets a diagnostic that actually explains what happened.
+            dynamic? tables = func.tables;
+            if (tables is null)
+            {
+                diag = "RETURN table unavailable — SAP connection was already closed when the call failed";
+                return null;
+            }
+
+            dynamic ret      = tables.Item("RETURN");
             int     rowCount = 0;
             var     messages = new List<string>();
 
@@ -664,11 +677,23 @@ internal sealed class SapStaWorker : IDisposable
     // ProcessItem, instead of only being marked for reconnect on the *next* call while
     // this one fails outright — which is exactly the "Could not create RFC function
     // object" / "RFC_INVALID_HANDLE" pattern reported after the daily cron refresh.
+    //
+    // RFC_CLOSED is the same class of problem again: the backend (or an idle-timeout)
+    // has closed the RFC connection out from under us, but the call itself still
+    // returns success=false with this exception code rather than throwing on Add()/Call().
+    // Before this was added here, a call that hit RFC_CLOSED fell through to the
+    // generic branch below, threw a plain SapExecutionException, and failed outright
+    // for the caller — see the repeated "RFC 'ZRFC_READ_TABLES' failed — Exception:
+    // 'RFC_CLOSED'" / "RFC call ... failed on slot N" log pairs with no reconnect
+    // attempt in between. Folding it in here routes it through ProcessItem's existing
+    // reconnect-and-retry-once path instead, so a stale connection is transparent to
+    // the caller instead of a hard failure.
     private static bool IsCommunicationError(string exceptionCode) =>
         exceptionCode is "RFC_COMMUNICATION_FAILURE"
                       or "RFC_SYSTEM_FAILURE"
                       or "RFC_ABAP_RUNTIME_FAILURE"
-                      or "RFC_INVALID_HANDLE";
+                      or "RFC_INVALID_HANDLE"
+                      or "RFC_CLOSED";
 
     // -------------------------------------------------------------------------
 
