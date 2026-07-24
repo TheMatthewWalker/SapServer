@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Options;
 using SapServer.Configuration;
 using SapServer.Services.Interfaces;
+using System.Linq;
 
 namespace SapServer.Services;
 
@@ -25,6 +26,13 @@ public sealed class SapSessionMonitor : BackgroundService
     private readonly ISapConnectionPool _pool;
     private readonly SapPoolOptions _options;
     private readonly ILogger<SapSessionMonitor> _logger;
+
+    // Per-slot bookkeeping so a slot that stays disconnected across many health-check
+    // ticks (reconnection is deferred to the next real request, not forced here — see
+    // RunHealthCheck below) doesn't re-log the same WARN every single tick and bury
+    // real errors in the log. Keyed by SlotId; only ever touched from RunHealthCheck,
+    // which BackgroundService guarantees runs on one thread at a time.
+    private readonly Dictionary<int, DateTime> _lastDisconnectedWarningAt = new();
 
     public SapSessionMonitor(
         ISapConnectionPool pool,
@@ -68,11 +76,29 @@ public sealed class SapSessionMonitor : BackgroundService
             else
             {
                 disconnected++;
-                _logger.LogWarning(
-                    "SAP slot {SlotId} is DISCONNECTED (last seen {LastActivity:u}). " +
-                    "It will reconnect automatically on the next incoming request.",
-                    s.SlotId, s.LastActivity);
+
+                var now = DateTime.UtcNow;
+                var repeatEvery = TimeSpan.FromSeconds(_options.DisconnectedWarningRepeatSeconds);
+                bool alreadyWarned = _lastDisconnectedWarningAt.TryGetValue(s.SlotId, out var lastWarnedAt);
+
+                if (!alreadyWarned || now - lastWarnedAt >= repeatEvery)
+                {
+                    _logger.LogWarning(
+                        "SAP slot {SlotId} is DISCONNECTED (last seen {LastActivity:u}). " +
+                        "It will reconnect automatically on the next incoming request.",
+                        s.SlotId, s.LastActivity);
+                    _lastDisconnectedWarningAt[s.SlotId] = now;
+                }
             }
+        }
+
+        // Slot reconnected since the last tick — drop its throttle state so the next
+        // disconnect (whenever it happens) is logged immediately again, not suppressed
+        // by a stale timestamp from this earlier outage.
+        foreach (var slotId in _lastDisconnectedWarningAt.Keys.ToList())
+        {
+            if (statuses.Any(s => s.SlotId == slotId && s.IsConnected))
+                _lastDisconnectedWarningAt.Remove(slotId);
         }
 
         _logger.LogDebug(

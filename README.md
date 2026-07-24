@@ -74,7 +74,7 @@ Each worker holds its own STA thread; a service worker also holds one persistent
 
 SAP GUI sessions disconnect after a configurable idle period (typically 10–15 minutes). `SapSessionMonitor` runs every `HealthCheckIntervalSeconds` and sends an `RFC_PING` to any worker whose `LastActivity` exceeds `IdleTimeoutSeconds`. This resets the SAP idle timer without any user-visible delay.
 
-If a worker is found disconnected, it logs a warning and defers reconnection to the next real request via `EnsureConnected()` — the monitor itself does not block.
+If a worker is found disconnected, it logs a warning and defers reconnection to the next real request via `EnsureConnected()` — the monitor itself does not block. That warning repeats at most once per `DisconnectedWarningRepeatSeconds` while the same slot stays down, instead of on every health-check tick, so a slot with no traffic for a while doesn't bury real errors in the log.
 
 ---
 

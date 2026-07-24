@@ -45,6 +45,17 @@ public sealed class SapPoolOptions
     /// <summary>How often (seconds) the background session monitor runs its health check.</summary>
     public int HealthCheckIntervalSeconds { get; init; } = 60;
 
+    /// <summary>
+    /// Minimum seconds between repeated "slot N is DISCONNECTED" warnings for
+    /// the same still-disconnected slot. The health check runs every
+    /// <see cref="HealthCheckIntervalSeconds"/>, so without this a slot that
+    /// simply isn't getting traffic (reconnection is deferred to the next real
+    /// request — see SapSessionMonitor) logs the same warning every tick,
+    /// burying real errors in the log. The first disconnect is always logged
+    /// immediately regardless of this value.
+    /// </summary>
+    public int DisconnectedWarningRepeatSeconds { get; init; } = 600;
+
     /// <summary>Milliseconds to wait before retrying after a failed reconnection attempt.</summary>
     public int ReconnectDelayMs { get; init; } = 5000;
 
