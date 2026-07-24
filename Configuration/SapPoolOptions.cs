@@ -5,10 +5,33 @@ public sealed class SapPoolOptions
     public const string SectionName = "SapPool";
 
     /// <summary>
-    /// Number of STA worker threads / persistent SAP connections in the pool.
-    /// Set to 0 for automatic: defaults to <see cref="Environment.ProcessorCount"/>.
+    /// Number of "service" STA worker threads — always logged in as
+    /// <see cref="ServiceAccount"/> for the lifetime of the process. These
+    /// handle every ordinary RFC call (ExecuteAsync/AcquireWorker), exactly
+    /// as the old single pool did.
     /// </summary>
-    public int PoolSize { get; init; } = 0;
+    public int ServiceWorkerCount { get; init; } = 3;
+
+    /// <summary>
+    /// Number of "elevated" STA worker threads — created logged OUT, and
+    /// only logged in on demand with a specific user's own SAP credentials
+    /// for the duration of one elevated request (e.g. PO creation), then
+    /// logged back out. This is what lets a route run under the calling
+    /// user's real SAP authorization instead of the shared service account.
+    /// See SapStaWorker's elevated-mode constructor and
+    /// SapConnectionPool.AcquireElevatedWorkerAsync/ReleaseElevatedWorkerAsync.
+    /// </summary>
+    public int ElevatedWorkerCount { get; init; } = 3;
+
+    /// <summary>
+    /// How long a caller will queue and wait for a free elevated worker
+    /// before giving up, if all <see cref="ElevatedWorkerCount"/> slots are
+    /// already busy with another user's elevated request.
+    /// </summary>
+    public int ElevatedAcquireTimeoutSeconds { get; init; } = 30;
+
+    /// <summary>Total STA threads started at startup (service + elevated) — the server should be run with at least this many available threads.</summary>
+    public int TotalWorkerCount => ServiceWorkerCount + ElevatedWorkerCount;
 
     /// <summary>Maximum number of queued work items per worker before rejecting new requests.</summary>
     public int MaxQueueDepth { get; init; } = 50;
@@ -25,11 +48,8 @@ public sealed class SapPoolOptions
     /// <summary>Milliseconds to wait before retrying after a failed reconnection attempt.</summary>
     public int ReconnectDelayMs { get; init; } = 5000;
 
-    /// <summary>SAP service-account credentials used by every pool worker.</summary>
+    /// <summary>SAP service-account credentials used by every service (non-elevated) pool worker.</summary>
     public SapConnectionOptions ServiceAccount { get; init; } = new();
-
-    /// <summary>Resolved pool size — substitutes ProcessorCount when PoolSize is 0.</summary>
-    public int ResolvedPoolSize => PoolSize > 0 ? PoolSize : Environment.ProcessorCount;
 }
 
 public sealed class SapConnectionOptions

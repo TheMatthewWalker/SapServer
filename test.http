@@ -456,6 +456,41 @@ Authorization: Bearer {{token}}
 ###
 
 
+### POST /api/purchasing/create-po-and-receipt  (elevated flow — logon as the
+### calling user's own SAP credentials, create PO, commit, one GR per item,
+### logoff. Uses one of the pool's elevated worker slots, not the shared
+### service account — see task #415 / SapConnectionPool.AcquireElevatedWorkerAsync.)
+POST {{baseUrl}}/api/purchasing/create-po-and-receipt
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+    "SapUsername": "J.SMITH",
+    "SapPassword": "REPLACE_ME",
+    "Vendor": "0000100050",
+    "Currency": "GBP",
+    "Items": [
+        {
+            "ShortText": "Freight - INB-000014",
+            "Quantity": 1,
+            "Unit": "EA",
+            "NetPrice": 450.00,
+            "DeliveryDate": "23.07.2026",
+            "AcctAssCat": "K",
+            "MaterialGroup": "FRT01",
+            "GlAccount": "0000400100",
+            "CostCenterOrOrder": "2012",
+            "Reference": "INB-000014",
+            "TrackingNumber": "TRK123456",
+            "AddressCode": "US28",
+            "ShipmentCompletionDate": "22.07.2026",
+            "PostingDate": "23.07.2026"
+        }
+    ]
+}
+###
+
+
 
 
 

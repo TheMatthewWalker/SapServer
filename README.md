@@ -59,14 +59,16 @@ The solution: each `SapStaWorker` owns one dedicated STA thread. HTTP request ha
 
 ### Pool sizing
 
-`SapPool:PoolSize` in `appsettings.json` controls the number of workers:
+The pool is split into two groups of workers, each configured in `appsettings.json` under `SapPool`:
 
-| Value | Behaviour |
-|-------|-----------|
-| `0`   | Automatic — `Environment.ProcessorCount` |
-| `N`   | Exactly N workers |
+| Group | Setting | Behaviour |
+|-------|---------|-----------|
+| Service | `SapPool:ServiceWorkerCount` (default `3`) | Always logged in as `SapPool:ServiceAccount`. Handles every ordinary RFC call. |
+| Elevated | `SapPool:ElevatedWorkerCount` (default `3`) | Created logged **out**. Only logged in on demand with one specific user's own SAP credentials, for the duration of one elevated request (e.g. PO creation), then logged back out. Prevents one user's elevated session ever being reused for another user. |
 
-Each worker holds one persistent SAP COM session. Set this based on your SAP system's concurrent user licence count, not just CPU count.
+`SapPool:ElevatedAcquireTimeoutSeconds` (default `30`) caps how long a caller waits for a free elevated slot if all of them are busy.
+
+Each worker holds its own STA thread; a service worker also holds one persistent SAP COM session for the app's lifetime, while an elevated worker only holds one for the duration of a single elevated request. Set `ServiceWorkerCount`/`ElevatedWorkerCount` based on your SAP system's concurrent user licence count, not just CPU count — total STA threads started is `ServiceWorkerCount + ElevatedWorkerCount`.
 
 ### Session keep-alive
 
@@ -157,7 +159,8 @@ Copy `appsettings.example.json` → `appsettings.json` and fill in all values:
 ```json
 {
   "SapPool": {
-    "PoolSize": 0,
+    "ServiceWorkerCount": 3,
+    "ElevatedWorkerCount": 3,
     "ServiceAccount": {
       "System":   "SAP",
       "Client":   "100",
@@ -306,7 +309,9 @@ All errors use the same envelope:
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `SapPool:PoolSize` | `0` | Workers (0 = ProcessorCount) |
+| `SapPool:ServiceWorkerCount` | `3` | Always-logged-in workers for ordinary RFC calls |
+| `SapPool:ElevatedWorkerCount` | `3` | Logged-out-by-default workers for per-user elevated calls |
+| `SapPool:ElevatedAcquireTimeoutSeconds` | `30` | Max wait for a free elevated slot |
 | `SapPool:MaxQueueDepth` | `50` | Max queued requests per worker |
 | `SapPool:IdleTimeoutSeconds` | `300` | Ping threshold (5 min) |
 | `SapPool:HealthCheckIntervalSeconds` | `60` | Monitor tick interval |

@@ -60,6 +60,11 @@ public sealed class SapSessionMonitor : BackgroundService
         foreach (var s in statuses)
         {
             if (s.IsConnected) connectedCount++;
+            else if (s.IsElevated)
+            {
+                // Expected steady state — elevated slots sit logged out between
+                // elevated requests by design, not because of a fault.
+            }
             else
             {
                 disconnected++;

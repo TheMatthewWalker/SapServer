@@ -47,17 +47,28 @@ internal sealed class SapStaWorker : IDisposable
     public int      QueueDepth   => _queue.Count;
     public DateTime LastActivity => _lastActivity;
 
-    public SapStaWorker(int slotId, SapPoolOptions options, ILogger logger)
+    /// <summary>
+    /// True for one of the pool's elevated worker slots. Elevated workers do
+    /// NOT log in with the service account at startup — they sit logged out
+    /// until SapConnectionPool.AcquireElevatedWorkerAsync logs them in with a
+    /// specific user's own SAP credentials for one request, then logs them
+    /// back out (see ReleaseElevatedWorkerAsync). This is what stops one
+    /// user's elevated session from ever being handed to another user.
+    /// </summary>
+    public bool IsElevated { get; }
+
+    public SapStaWorker(int slotId, SapPoolOptions options, ILogger logger, bool isElevated = false)
     {
-        SlotId   = slotId;
-        _options = options;
-        _logger  = logger;
-        _queue   = new BlockingCollection<SapWorkItem>(options.MaxQueueDepth);
+        SlotId      = slotId;
+        _options    = options;
+        _logger     = logger;
+        IsElevated  = isElevated;
+        _queue      = new BlockingCollection<SapWorkItem>(options.MaxQueueDepth);
 
         _staThread = new Thread(WorkerLoop)
         {
             IsBackground = true,
-            Name         = $"SAP-STA-{slotId}"
+            Name         = $"SAP-STA-{slotId}{(isElevated ? "-ELEVATED" : "")}"
         };
         _staThread.SetApartmentState(ApartmentState.STA);
         _staThread.Start();
@@ -92,19 +103,35 @@ internal sealed class SapStaWorker : IDisposable
 
     private void WorkerLoop()
     {
-        try { Connect(); }
-        catch (Exception ex)
+        if (IsElevated)
         {
-            _logger.LogError(ex, "Slot {SlotId} failed initial SAP connection — will retry on first request.", SlotId);
+            // Elevated slots start logged OUT on purpose — they only ever log in with
+            // a specific caller's own credentials, via AcquireElevatedWorkerAsync,
+            // immediately before an elevated request runs on this thread.
+            _logger.LogInformation("Elevated SAP slot {SlotId} started (logged out, awaiting an elevated request).", SlotId);
+        }
+        else
+        {
+            try { Connect(); }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Slot {SlotId} failed initial SAP connection — will retry on first request.", SlotId);
+            }
         }
 
         try
         {
             foreach (var item in _queue.GetConsumingEnumerable(_cts.Token))
             {
+                if (item.IsControl)
+                {
+                    ProcessControlItem(item);
+                    continue;
+                }
+
                 if (item.CancellationToken.IsCancellationRequested)
                 {
-                    item.Tcs.TrySetCanceled(item.CancellationToken);
+                    item.Tcs!.TrySetCanceled(item.CancellationToken);
                     continue;
                 }
 
@@ -119,38 +146,114 @@ internal sealed class SapStaWorker : IDisposable
         Disconnect();
     }
 
-    private void ProcessItem(SapWorkItem item)
+    /// <summary>
+    /// Runs an elevated logon/logoff control item on this worker's STA thread.
+    /// Deliberately bypasses ProcessItem/ExecuteRfc entirely — this is
+    /// session management, not an RFC call.
+    /// </summary>
+    private void ProcessControlItem(SapWorkItem item)
     {
         try
         {
+            switch (item.ControlKind)
+            {
+                case SapControlKind.ElevatedLogon:
+                    Connect(item.ElevatedCreds);
+                    item.ControlTcs!.TrySetResult(true);
+                    break;
+
+                case SapControlKind.ElevatedLogoff:
+                    Disconnect();
+                    item.ControlTcs!.TrySetResult(true);
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Elevated control item '{Kind}' failed on slot {SlotId}.", item.ControlKind, SlotId);
+            item.ControlTcs!.TrySetException(ex);
+        }
+    }
+
+    /// <summary>
+    /// Logs this elevated worker in with one specific user's own SAP
+    /// credentials. Only valid on a worker created with isElevated: true —
+    /// see SapConnectionPool.AcquireElevatedWorkerAsync, which is the only
+    /// caller. Runs on this worker's STA thread via the same queue ordinary
+    /// RFC work uses, so it can never race with a concurrent RFC call.
+    /// </summary>
+    public Task<bool> LogonElevatedAsync(SapConnectionOptions creds)
+    {
+        var tcs  = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var item = new SapWorkItem(SapControlKind.ElevatedLogon, creds, tcs);
+        if (!_queue.TryAdd(item))
+            throw new PoolExhaustedException($"Elevated SAP worker slot {SlotId} is full.");
+        return tcs.Task;
+    }
+
+    /// <summary>
+    /// Logs this elevated worker back out. Always call this in a finally
+    /// block after an elevated request completes (success OR failure) — see
+    /// SapConnectionPool.ReleaseElevatedWorkerAsync — so the slot never sits
+    /// logged in as one user waiting to be handed to the next caller.
+    /// </summary>
+    public Task<bool> LogoffElevatedAsync()
+    {
+        var tcs  = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var item = new SapWorkItem(SapControlKind.ElevatedLogoff, null, tcs);
+        if (!_queue.TryAdd(item))
+            throw new PoolExhaustedException($"Elevated SAP worker slot {SlotId} is full.");
+        return tcs.Task;
+    }
+
+    private void ProcessItem(SapWorkItem item)
+    {
+        // Only ever called for non-control items (see WorkerLoop), so Request/Tcs
+        // are always populated here — see SapWorkItem's two-constructor split.
+        var request = item.Request!;
+        var tcs      = item.Tcs!;
+
+        try
+        {
             EnsureConnected();
-            var response  = ExecuteRfc(item.Request);
+            var response  = ExecuteRfc(request);
             _lastActivity = DateTime.UtcNow;
-            item.Tcs.TrySetResult(response);
+            tcs.TrySetResult(response);
+        }
+        catch (SapConnectionException ex) when (IsElevated)
+        {
+            // No auto-reconnect on an elevated slot — Connect() here would log
+            // in as the shared service account, exactly what elevated slots
+            // must never do outside AcquireElevatedWorkerAsync's explicit
+            // per-user login. Surface the failure and let the caller decide
+            // whether to retry the whole elevated flow.
+            _logger.LogError(ex, "Elevated SAP slot {SlotId} is not logged in for '{Function}' — not auto-reconnecting.",
+                SlotId, request.FunctionName);
+            tcs.TrySetException(ex);
         }
         catch (SapConnectionException ex)
         {
             _logger.LogWarning(ex, "SAP connection lost on slot {SlotId}; reconnecting and retrying '{Function}'.",
-                SlotId, item.Request.FunctionName);
+                SlotId, request.FunctionName);
             try
             {
                 Connect();
-                var response  = ExecuteRfc(item.Request);
+                var response  = ExecuteRfc(request);
                 _lastActivity = DateTime.UtcNow;
-                item.Tcs.TrySetResult(response);
+                tcs.TrySetResult(response);
             }
             catch (Exception retryEx)
             {
                 _logger.LogError(retryEx, "RFC '{Function}' failed on slot {SlotId} after reconnect.",
-                    item.Request.FunctionName, SlotId);
-                item.Tcs.TrySetException(retryEx);
+                    request.FunctionName, SlotId);
+                tcs.TrySetException(retryEx);
             }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "RFC call '{Function}' failed on slot {SlotId}.",
-                item.Request.FunctionName, SlotId);
-            item.Tcs.TrySetException(ex);
+                request.FunctionName, SlotId);
+            tcs.TrySetException(ex);
         }
     }
 
@@ -158,30 +261,42 @@ internal sealed class SapStaWorker : IDisposable
     // SAP COM connection management (must run on _staThread)
     // -------------------------------------------------------------------------
 
-    private void Connect()
+    /// <summary>
+    /// Logs this worker's SAP session in. Service workers (and any internal
+    /// reconnect/retry path) always call this with no argument, which logs in
+    /// as the shared <see cref="SapPoolOptions.ServiceAccount"/> — the original
+    /// behavior. Elevated workers are logged in ONLY via <paramref name="overrideCreds"/>,
+    /// supplied by <see cref="LogonElevatedAsync"/> with one specific user's own
+    /// SAP credentials, decrypted just-in-time by the caller (Node) — see
+    /// lib/sapCredentials.js in the sql2005-bridge app for why decryption
+    /// happens there rather than here.
+    /// </summary>
+    private void Connect(SapConnectionOptions? overrideCreds = null)
     {
+        var creds = overrideCreds ?? _options.ServiceAccount;
+
         _connectLock.Wait();
         try
         {
             _sapFunctions = new SAPFunctions64.SAPFunctions();
 
             dynamic conn  = _sapFunctions!.Connection;
-            conn.System   = _options.ServiceAccount.System;
-            conn.Client   = _options.ServiceAccount.Client;
-            conn.SystemID = _options.ServiceAccount.SystemId;
-            conn.User     = _options.ServiceAccount.User;
-            conn.Password = _options.ServiceAccount.Password;
-            conn.Language = _options.ServiceAccount.Language;
+            conn.System   = creds.System;
+            conn.Client   = creds.Client;
+            conn.SystemID = creds.SystemId;
+            conn.User     = creds.User;
+            conn.Password = creds.Password;
+            conn.Language = creds.Language;
 
             bool loggedOn = conn.Logon(0, true);
             if (!loggedOn)
                 throw new SapConnectionException(SlotId,
-                    "SAP Logon() returned false. Check service-account credentials.");
+                    $"SAP Logon() returned false for user '{creds.User}'. Check credentials.");
 
             _isConnected  = true;
             _lastActivity = DateTime.UtcNow;
             _logger.LogInformation("SAP slot {SlotId} connected as '{User}'.",
-                SlotId, _options.ServiceAccount.User);
+                SlotId, creds.User);
         }
         catch (Exception ex) when (ex is not SapConnectionException)
         {
@@ -196,6 +311,17 @@ internal sealed class SapStaWorker : IDisposable
     private void EnsureConnected()
     {
         if (_isConnected) return;
+
+        if (IsElevated)
+            // Elevated slots must never silently log in as the shared service
+            // account — that would defeat the whole point of per-user elevated
+            // access. Login here only ever happens via the explicit elevated
+            // logon path (SapConnectionPool.AcquireElevatedWorkerAsync), which
+            // logs in with the caller's own credentials before any work item is
+            // queued. Reaching here means a work item was queued on this slot
+            // without going through that path — a bug, not a transient outage.
+            throw new SapConnectionException(SlotId,
+                "Elevated SAP slot is not logged in. Work must not be queued on an elevated slot outside AcquireElevatedWorkerAsync's login.");
 
         _logger.LogInformation("Slot {SlotId} attempting reconnection.", SlotId);
         Thread.Sleep(_options.ReconnectDelayMs);

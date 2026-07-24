@@ -59,4 +59,13 @@ public sealed class WorkerStatus
     public bool     IsConnected  { get; init; }
     public int      QueueDepth   { get; init; }
     public DateTime LastActivity { get; init; }
+
+    /// <summary>
+    /// True for one of the elevated worker slots (logged out by default,
+    /// only logged in with a specific user's SAP credentials for the
+    /// duration of one elevated request). Disconnected is the expected
+    /// steady state for these — see SapSessionMonitor, which does not warn
+    /// on an idle-disconnected elevated slot the way it does for a service slot.
+    /// </summary>
+    public bool IsElevated { get; init; }
 }

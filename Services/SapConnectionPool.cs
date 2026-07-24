@@ -1,5 +1,7 @@
+using System.Collections.Concurrent;
 using Microsoft.Extensions.Options;
 using SapServer.Configuration;
+using SapServer.Exceptions;
 using SapServer.Models;
 using SapServer.Services.Interfaces;
 
@@ -16,7 +18,29 @@ namespace SapServer.Services;
 /// </summary>
 public sealed class SapConnectionPool : ISapConnectionPool, IDisposable
 {
+    // "Service" workers — always logged in as the shared service account.
+    // ExecuteAsync/AcquireWorker (every ordinary RFC call) only ever route here.
     private readonly SapStaWorker[] _workers;
+
+    // "Elevated" workers — start logged OUT, only logged in on demand with a
+    // specific user's own SAP credentials for the duration of one elevated
+    // request (see task #413/#414: AcquireElevatedWorkerAsync/ReleaseElevatedWorkerAsync).
+    // Kept in a separate array so SelectWorker() (used by every normal call)
+    // can never accidentally route ordinary traffic onto one of these slots.
+    private readonly SapStaWorker[] _elevatedWorkers;
+
+    // Gates concurrent elevated acquisitions to exactly the number of elevated
+    // worker slots — WaitAsync(timeout) is what implements the agreed
+    // "queue and wait, with a timeout" behavior for a 4th+ concurrent caller.
+    private readonly SemaphoreSlim _elevatedSemaphore;
+
+    // Which elevated workers are currently unclaimed. Kept in lockstep with
+    // _elevatedSemaphore's count: a successful WaitAsync is always followed by
+    // exactly one TryDequeue, and a Release is always preceded by exactly one Enqueue.
+    private readonly ConcurrentQueue<SapStaWorker> _elevatedFreeList;
+
+    private readonly int _elevatedAcquireTimeoutMs;
+
     private readonly ILogger<SapConnectionPool> _logger;
 
     public SapConnectionPool(
@@ -27,15 +51,26 @@ public sealed class SapConnectionPool : ISapConnectionPool, IDisposable
         _logger = logger;
 
         var opts = options.Value;
-        int size = opts.ResolvedPoolSize;
 
-        _workers = new SapStaWorker[size];
-        for (int i = 0; i < size; i++)
+        _workers = new SapStaWorker[opts.ServiceWorkerCount];
+        for (int i = 0; i < _workers.Length; i++)
             _workers[i] = new SapStaWorker(i, opts, loggerFactory.CreateLogger<SapStaWorker>());
 
+        // Elevated slot IDs continue on from the service slot IDs so every
+        // worker in the pool has a unique SlotId for logging/health-status purposes.
+        _elevatedWorkers = new SapStaWorker[opts.ElevatedWorkerCount];
+        for (int i = 0; i < _elevatedWorkers.Length; i++)
+            _elevatedWorkers[i] = new SapStaWorker(
+                opts.ServiceWorkerCount + i, opts, loggerFactory.CreateLogger<SapStaWorker>(), isElevated: true);
+
+        _elevatedSemaphore        = new SemaphoreSlim(_elevatedWorkers.Length, _elevatedWorkers.Length);
+        _elevatedFreeList         = new ConcurrentQueue<SapStaWorker>(_elevatedWorkers);
+        _elevatedAcquireTimeoutMs = opts.ElevatedAcquireTimeoutSeconds * 1000;
+
         logger.LogInformation(
-            "SAP connection pool started with {PoolSize} STA workers (ProcessorCount = {Cpus}).",
-            size, Environment.ProcessorCount);
+            "SAP connection pool started with {ServiceCount} service STA workers (always logged in) " +
+            "and {ElevatedCount} elevated STA workers (logged out, per-user on demand) — {Total} threads total.",
+            _workers.Length, _elevatedWorkers.Length, opts.TotalWorkerCount);
     }
 
     /// <inheritdoc/>
@@ -64,6 +99,84 @@ public sealed class SapConnectionPool : ISapConnectionPool, IDisposable
     }
 
 
+    /// <summary>
+    /// Claims one elevated worker slot and logs it in with <paramref name="creds"/>
+    /// — one specific user's own SAP username/password, decrypted just-in-time by
+    /// the caller (see lib/sapCredentials.js in the sql2005-bridge Node app).
+    ///
+    /// If all elevated slots are already busy with other users' requests, this
+    /// queues and waits up to <c>SapPool:ElevatedAcquireTimeoutSeconds</c> for one
+    /// to free up (the agreed behavior for a 4th+ concurrent elevated caller),
+    /// then throws <see cref="PoolExhaustedException"/>.
+    ///
+    /// The caller MUST release the returned handle via
+    /// <see cref="ReleaseElevatedWorkerAsync"/> in a finally block — that's what
+    /// logs the slot back out so it can never be reused by a different user.
+    /// </summary>
+    public async Task<SapWorkerHandle> AcquireElevatedWorkerAsync(
+        SapConnectionOptions creds,
+        CancellationToken ct = default)
+    {
+        bool acquired = await _elevatedSemaphore.WaitAsync(_elevatedAcquireTimeoutMs, ct).ConfigureAwait(false);
+        if (!acquired)
+            throw new PoolExhaustedException(
+                $"All {_elevatedWorkers.Length} elevated SAP worker slots are busy with other users' requests. " +
+                $"Timed out after {_elevatedAcquireTimeoutMs / 1000}s waiting for one to free up — please retry shortly.");
+
+        if (!_elevatedFreeList.TryDequeue(out var worker))
+        {
+            // Should never happen — the semaphore count and free-list length are
+            // kept in lockstep by every acquire/release path. Guard anyway rather
+            // than silently leaking a permit.
+            _elevatedSemaphore.Release();
+            throw new InvalidOperationException(
+                "Elevated SAP worker semaphore and free-list are out of sync — this is a bug.");
+        }
+
+        try
+        {
+            await worker.LogonElevatedAsync(creds).ConfigureAwait(false);
+        }
+        catch
+        {
+            // Logon failed (bad credentials, SAP unreachable, etc.) — hand the
+            // slot straight back so the failure doesn't cost the pool a permanent
+            // elevated slot.
+            _elevatedFreeList.Enqueue(worker);
+            _elevatedSemaphore.Release();
+            throw;
+        }
+
+        return new SapWorkerHandle(worker);
+    }
+
+    /// <summary>
+    /// Releases a handle acquired via <see cref="AcquireElevatedWorkerAsync"/> —
+    /// logs the worker back out and returns the slot to the free pool. Always
+    /// call this in a finally block, on both the success and failure path of
+    /// whatever elevated request the handle was used for, so a failed request
+    /// never leaves a slot logged in as one user indefinitely.
+    /// </summary>
+    public async Task ReleaseElevatedWorkerAsync(SapWorkerHandle handle)
+    {
+        var worker = handle.Worker;
+        try
+        {
+            await worker.LogoffElevatedAsync().ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Error logging off elevated SAP slot {SlotId} on release — releasing the slot back to the pool anyway.",
+                worker.SlotId);
+        }
+        finally
+        {
+            _elevatedFreeList.Enqueue(worker);
+            _elevatedSemaphore.Release();
+        }
+    }
+
     // Executes a request directly on the specified worker's STA thread.
     public async Task<RfcResponse> ExecuteOnWorkerAsync(
         SapWorkerHandle handle,
@@ -85,17 +198,21 @@ public sealed class SapConnectionPool : ISapConnectionPool, IDisposable
 
     /// <inheritdoc/>
     public IReadOnlyList<WorkerStatus> GetPoolStatus() =>
-        _workers.Select(w => new WorkerStatus
+        _workers.Concat(_elevatedWorkers).Select(w => new WorkerStatus
         {
             SlotId       = w.SlotId,
             IsConnected  = w.IsConnected,
             QueueDepth   = w.QueueDepth,
-            LastActivity = w.LastActivity
+            LastActivity = w.LastActivity,
+            IsElevated   = w.IsElevated
         }).ToList();
 
     /// <inheritdoc/>
     public void PingIdleWorkers(TimeSpan idleThreshold)
     {
+        // Elevated workers are deliberately excluded — logged-out/idle is their
+        // normal steady state between requests, and pinging one would require
+        // logging it in, which only AcquireElevatedWorkerAsync should ever do.
         var cutoff = DateTime.UtcNow - idleThreshold;
         foreach (var worker in _workers)
         {
@@ -135,6 +252,9 @@ public sealed class SapConnectionPool : ISapConnectionPool, IDisposable
     {
         foreach (var worker in _workers)
             worker.Dispose();
+        foreach (var worker in _elevatedWorkers)
+            worker.Dispose();
+        _elevatedSemaphore.Dispose();
     }
 }
 

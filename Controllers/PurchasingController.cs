@@ -1,4 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
+using SapServer.Configuration;
 using SapServer.Helpers;
 using SapServer.Models;
 using SapServer.Models.Bapi;
@@ -9,11 +11,17 @@ namespace SapServer.Controllers;
 [Route("api/purchasing")]
 public sealed class PurchasingController : SapControllerBase
 {
+    private readonly SapPoolOptions _poolOptions;
+
     public PurchasingController(
         ISapConnectionPool pool,
         IPermissionService permissions,
+        IOptions<SapPoolOptions> poolOptions,
         ILogger<PurchasingController> logger)
-        : base(pool, permissions, logger) { }
+        : base(pool, permissions, logger)
+    {
+        _poolOptions = poolOptions.Value;
+    }
 
     /// <summary>
     /// Creates a Purchase Order via BAPI_PO_CREATE1 (one PO, one PO item per
@@ -128,5 +136,158 @@ public sealed class PurchasingController : SapControllerBase
         var response = ProductionHelpers.ParseBdcResponse(data);
 
         return Ok(ApiResponse<BdcResponse>.Ok(response));
+    }
+
+    /// <summary>
+    /// Combined, per-user-elevated flow: logon (with the calling user's own
+    /// SAP credentials) -> create PO -> commit/rollback -> one goods receipt
+    /// (MB01) per PO item -> logoff, all as one atomic unit of work on one
+    /// pinned elevated worker slot (see SapConnectionPool.AcquireElevatedWorkerAsync
+    /// / ReleaseElevatedWorkerAsync). This is what lets PO creation run under a
+    /// real user's own SAP authorization instead of the shared service account,
+    /// which doesn't have (and isn't being given) rights to create POs.
+    ///
+    /// Deliberately does NOT call CheckPermissionAsync. SapServer's own
+    /// permission check (PermissionService) queries the portal SQL Server
+    /// directly and cannot reliably do so here — that database can't be
+    /// reached over the required TLS version from this app (the same
+    /// limitation AuthOptions.BypassPermissions exists for). Authorization for
+    /// this specific route is enforced twice elsewhere instead: Nexus's own
+    /// permission check before it ever calls this endpoint, and — because this
+    /// call now genuinely runs as the calling user via their own SAP session —
+    /// SAP's own real per-user authorization on BAPI_PO_CREATE1/MB01 itself.
+    ///
+    /// The elevated worker is always released in a finally block (logging it
+    /// back out) regardless of how far the flow got, so a slot can never be
+    /// left logged in as one user waiting to be handed to somebody else.
+    /// </summary>
+    [HttpPost("create-po-and-receipt")]
+    [ProducesResponseType(typeof(ApiResponse<CreatePoAndReceiptResponse>), 200)]
+    [ProducesResponseType(typeof(ApiResponse<object>), 400)]
+    public async Task<IActionResult> CreatePurchaseOrderAndReceipt(
+        [FromBody] CreatePoAndReceiptRequest body,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(body.SapUsername) || string.IsNullOrWhiteSpace(body.SapPassword))
+            return BadRequest(ApiResponse<CreatePoAndReceiptResponse>.Fail(
+                "MISSING_CREDENTIALS", "SAP username and password are required for this elevated action.",
+                new CreatePoAndReceiptResponse()));
+
+        if (body.Items.Count == 0)
+            return BadRequest(ApiResponse<CreatePoAndReceiptResponse>.Fail(
+                "NO_ITEMS", "At least one PO item is required.", new CreatePoAndReceiptResponse()));
+
+        // Same SAP system/client as the service account — only the logon user
+        // and password differ, matching one specific portal user's own SAP access.
+        var elevatedCreds = new SapConnectionOptions
+        {
+            System   = _poolOptions.ServiceAccount.System,
+            Client   = _poolOptions.ServiceAccount.Client,
+            SystemId = _poolOptions.ServiceAccount.SystemId,
+            User     = body.SapUsername,
+            Password = body.SapPassword,
+            Language = _poolOptions.ServiceAccount.Language,
+        };
+
+        var poRequest = PurchasingHelper.BuildPoCreateRequest(new PoCreateRequest
+        {
+            Vendor   = body.Vendor,
+            Currency = body.Currency,
+            DocDate  = body.DocDate,
+            Items    = body.Items.Select(i => new PoCreateItem
+            {
+                Material          = i.Material,
+                ShortText         = i.ShortText,
+                Quantity          = i.Quantity,
+                Unit              = i.Unit,
+                NetPrice          = i.NetPrice,
+                DeliveryDate      = i.DeliveryDate,
+                AcctAssCat        = i.AcctAssCat,
+                MaterialGroup     = i.MaterialGroup,
+                GlAccount         = i.GlAccount,
+                CostCenterOrOrder = i.CostCenterOrOrder,
+            }).ToList(),
+        });
+
+        var worker = await _pool.AcquireElevatedWorkerAsync(elevatedCreds, ct);
+        try
+        {
+            var poData     = await _pool.ExecuteOnWorkerAsync(worker, poRequest, ct);
+            var poResponse = PurchasingHelper.ParsePoCreateResult(poData);
+
+            if (!poResponse.Success)
+            {
+                await _pool.ExecuteOnWorkerAsync(worker, CommitHelper.BuildBapiRollback(), ct);
+                return BadRequest(ApiResponse<CreatePoAndReceiptResponse>.Fail(
+                    "INVALID_DATA", "Purchase order creation failed. Transaction rolled back.",
+                    new CreatePoAndReceiptResponse
+                    {
+                        PurchaseOrder = poResponse.PurchaseOrder,
+                        PoSuccess     = false,
+                        PoMessages    = poResponse.Messages,
+                    }));
+            }
+
+            await _pool.ExecuteOnWorkerAsync(worker, CommitHelper.BuildBapiCommit(), ct);
+
+            // PO is committed at this point. Goods receipts are posted one per
+            // item next — per the user, each cost line gets its own MB01 call.
+            // A single line's GR failing does not roll back the PO (it's
+            // already committed and can't be) or stop the remaining lines;
+            // each line's outcome is reported individually so the caller
+            // (Node) can retry just the failed line(s) later.
+            var lineResults = new List<CreatePoAndReceiptLineResult>();
+            for (int i = 0; i < body.Items.Count; i++)
+            {
+                var item       = body.Items[i];
+                var lineNumber = i + 1;
+                var grRequest  = GoodsReceiptHelper.BuildGoodsReceiptRequest(new GoodsReceiptRequest
+                {
+                    PurchaseOrder          = poResponse.PurchaseOrder,
+                    LineNumber             = lineNumber,
+                    Reference              = item.Reference,
+                    TrackingNumber         = item.TrackingNumber,
+                    AddressCode            = item.AddressCode,
+                    ShipmentCompletionDate = item.ShipmentCompletionDate,
+                    PostingDate            = item.PostingDate,
+                });
+
+                try
+                {
+                    var grData     = await _pool.ExecuteOnWorkerAsync(worker, grRequest, ct);
+                    var grResponse = ProductionHelpers.ParseBdcResponse(grData);
+                    lineResults.Add(new CreatePoAndReceiptLineResult
+                    {
+                        LineNumber     = lineNumber,
+                        Success        = true,
+                        DocumentNumber = grResponse.DocumentNumber,
+                    });
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex,
+                        "Goods receipt failed for PO {Po} line {Line} during create-po-and-receipt.",
+                        poResponse.PurchaseOrder, lineNumber);
+                    lineResults.Add(new CreatePoAndReceiptLineResult
+                    {
+                        LineNumber = lineNumber,
+                        Success    = false,
+                        Error      = ex.Message,
+                    });
+                }
+            }
+
+            return Ok(ApiResponse<CreatePoAndReceiptResponse>.Ok(new CreatePoAndReceiptResponse
+            {
+                PurchaseOrder = poResponse.PurchaseOrder,
+                PoSuccess     = true,
+                PoMessages    = poResponse.Messages,
+                Lines         = lineResults,
+            }));
+        }
+        finally
+        {
+            await _pool.ReleaseElevatedWorkerAsync(worker);
+        }
     }
 }
