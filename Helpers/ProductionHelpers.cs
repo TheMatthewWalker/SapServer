@@ -134,6 +134,17 @@ internal static class ProductionHelpers
 
 // ── Backflush ZF40N ──────────────────────────────────────────────────────
 
+    // The packaging-instruction material ZF40N books the finished good's
+    // packaging against — "IB_363643_<code>" for stock builds with no named
+    // customer, "IB_<customer>_<code>" otherwise. Also the exact value
+    // Z_ZPRODBATCH_MAINT needs for ZPRODBATCH_TBL~PALL_MATNR (see
+    // BuildProdBatchMaintRequest below), so it's shared rather than
+    // reconstructed a second time — the combined drumming-backflush endpoint
+    // computes it once and passes it to both.
+    internal static string BuildPackagingInstruction(string? customer, string? packaging) =>
+        string.IsNullOrEmpty(packaging) ? "" :
+        string.IsNullOrEmpty(customer)  ? $"IB_363643_{packaging}" : $"IB_{customer}_{packaging}";
+
     internal static RfcRequest BuildZf40nRequest(Zf40nRequest body, bool requiresCharge) =>
         BdcBuilder.For("ZF40N")
             .Screen("SAPMZF40N", "0200")
@@ -143,8 +154,7 @@ internal static class ProductionHelpers
                 .FieldIf(requiresCharge, "ST_FLD1-ACHARG", body.Header.Substring(0, 10) ?? "")
                 .Field("ST_FLD1-BKTXT",    body.Header ?? "")
                 .Field("ST_FLD1-ERFMG",    body.Quantity )
-                .FieldIf(string.IsNullOrEmpty(body.Customer) && !string.IsNullOrEmpty(body.Packaging), "ST_ZMARA_C_T-MATNR", "IB_363643_" + body.Packaging )
-                .FieldIf(!string.IsNullOrEmpty(body.Customer) && !string.IsNullOrEmpty(body.Packaging), "ST_ZMARA_C_T-MATNR", "IB_" + body.Customer + "_" + body.Packaging )
+                .FieldIf(!string.IsNullOrEmpty(body.Packaging), "ST_ZMARA_C_T-MATNR", BuildPackagingInstruction(body.Customer, body.Packaging))
                 .Field("BDC_OKCODE", "=SAVE")
             .Build();
 
@@ -294,6 +304,131 @@ internal static class ProductionHelpers
                 StorageLocation  = cols[3],
             })
             .ToArray();
+    }
+
+    // The inverse of BuildFindBackflushDocumentRequest above — that one goes
+    // CHARG -> MBLNR (movement 131) to support reversal; this one goes
+    // MBLNR -> CHARG, to find the batch SAP assigned to the finished good a
+    // backflush document was just posted for. Same movement type, since it's
+    // the same underlying MSEG row — a ZF40N backflush's 131 line IS the
+    // finished good's goods receipt, batch and all. MATNR is included in the
+    // WHERE (not just parsed from the result) because a single backflush
+    // document only ever carries the one finished material, and filtering
+    // on it up front rules out any unrelated row sharing the same MBLNR.
+    internal static RfcRequest BuildFindProducedBatchRequest(string? materialDocument, string? material)
+    {
+        var builder = new RfcRequestBuilder(FnReadTables)
+            .Import("DELIMITER", "|")
+            .Import("ROWCOUNT",  1)
+            .Import("NO_DATA",   " ")
+            .TableRow("QUERY_TABLES", new { TABNAME = "MSEG" });
+
+        builder.TableItemRow("query_FIELDS", new { TABNAME = "MSEG", FIELDNAME = "CHARG" });
+        builder.TableItemRow("query_FIELDS", new { TABNAME = "MSEG", FIELDNAME = "MATNR" });
+        builder.TableItemRow("query_FIELDS", new { TABNAME = "MSEG", FIELDNAME = "MENGE" });
+
+        builder.WhereCondition($"MSEG~MBLNR EQ '{materialDocument}'");
+        builder.WhereCondition($"MSEG~BWART EQ '131'");
+        builder.WhereCondition($"MSEG~WERKS EQ '{Plant}'");
+        builder.WhereCondition($"MSEG~MATNR EQ '{(SapPad.Pad(material, 18) ?? "").ToUpperInvariant()}'");
+
+        builder.ReadTable("data_display"); // no fields → WA column only
+
+        return builder.Build();
+    }
+
+    internal static ProducedBatchRow[] ParseProducedBatchRows(RfcResponse response)
+    {
+        if (!response.Tables.TryGetValue("data_display", out var sapRows))
+            return [];
+
+        return SapDelimitedParser
+            .ParseRows(sapRows, '|', skipHeader: true)
+            .Where(cols => cols.Length >= 3)
+            .Select(cols => new ProducedBatchRow
+            {
+                Charge   = cols[0],
+                Material = cols[1],
+                Quantity = decimal.TryParse(cols[2], out var qty) ? qty : 0m,
+            })
+            .ToArray();
+    }
+
+
+    // ── Z_ZPRODBATCH_MAINT (Drumming batch/pack table maintenance) ─────────────
+    //
+    // Ported from the legacy Z_ZPRODBATCH_MAINT_run VBA macro. Insert-only
+    // (SQL_ACTION="I") — the macro's Read/Delete branches aren't needed here
+    // since the only caller is the combined drumming-backflush endpoint,
+    // called once per drum right after its batch is confirmed to exist.
+    // Writes one row to each of two custom SAP tables per drum:
+    //   - ZPRODBATCH_TBL: the produced batch itself (CHARG/MATNR/WERKS/
+    //     PALL_MATNR/MBLNR). PALL_MATNR is the same packaging-instruction
+    //     string ZF40N itself was given for ST_ZMARA_C_T-MATNR — see
+    //     BuildPackagingInstruction above, shared rather than rebuilt.
+    //   - ZBATCHPACK_TBL: the drum's outer packaging, keyed to the same
+    //     CHARG. MATNR here is a *different* material — not the packaging
+    //     instruction, but a fixed "P_..._NMT" packaging material looked up
+    //     from the packcode via PackCodeToPackaging below (verbatim from the
+    //     VBA's packcode If-chain). MENGE is always literal 1 (packaging
+    //     count, not the drum's own produced quantity) per the source macro.
+    internal const string FnProdBatchMaint = "Z_ZPRODBATCH_MAINT";
+
+    internal static readonly IReadOnlyDictionary<string, string> PackCodeToPackaging =
+        new Dictionary<string, string>
+        {
+            ["SD"] = "P_DRUMSML_NMT",
+            ["MD"] = "P_DRUMMED_NMT",
+            ["LD"] = "P_DRUMLGE_NMT",
+            ["XD"] = "P_DRUMXLG_NMT",
+            ["SB"] = "P_BOXPALLETSML_NMT",
+            ["MB"] = "P_BOXPALLETMED_NMT",
+            ["LB"] = "P_BOXPALLETLGE_NMT",
+            ["XB"] = "P_BOXXL_NMT",
+            ["C1"] = "P_CARTON1_NMT",
+            ["C2"] = "P_CARTON2_NMT",
+        };
+
+    internal static RfcRequest BuildProdBatchMaintRequest(
+        string charge, string material, string packInstruction, string materialDocument, decimal weightKg, string packCode)
+    {
+        var packaging = PackCodeToPackaging.GetValueOrDefault((packCode ?? "").ToUpperInvariant(), "");
+
+        var builder = new RfcRequestBuilder(FnProdBatchMaint)
+            .Import("SQL_ACTION", "I")
+            .Import("TEST", "");
+
+        builder.TableRow("ZPRODBATCH_TBL", new
+        {
+            CHARG      = SapPad.Pad(charge, 10),
+            MATNR      = SapPad.Pad(material, 18).ToUpperInvariant(),
+            WERKS      = Plant,
+            PALL_MATNR = SapPad.Pad(packInstruction, 18),
+            MBLNR      = SapPad.Pad(materialDocument, 10),
+            VBELN      = "",
+        });
+
+        builder.TableRow("ZBATCHPACK_TBL", new
+        {
+            CHARG   = SapPad.Pad(charge, 10),
+            MATNR   = SapPad.Pad(packaging, 18),
+            MENGE   = 1m,
+            MEINS   = "EA",
+            TAREWEI = weightKg,
+            GEWEI   = "KG",
+        });
+
+        return builder
+            .ReadParam("RC_BATCH")
+            .ReadParam("RC_PACK")
+            .Build();
+    }
+
+    internal static (string RcBatch, string RcPack) ParseProdBatchMaintResponse(RfcResponse response)
+    {
+        var rcBatch = ReturnTableHelper.GetParam(response, "RC_BATCH") ?? "";
+        var rcPack  = ReturnTableHelper.GetParam(response, "RC_PACK") ?? "";
+        return (rcBatch, rcPack);
     }
 
 

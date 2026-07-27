@@ -131,3 +131,55 @@ public sealed class BdcWrapper
 {
     public List<BdcResponse> Responses { get; init; } = [];
 }
+
+
+// ── Produced Batch Lookup (MSEG, movement 131) ────────────────────────────
+// Finds the batch (CHARG) SAP assigned to the finished good on a just-posted
+// backflush document — the inverse lookup of FindBackflushDocumentRequest
+// above (that one goes CHARG -> MBLNR, this one goes MBLNR -> CHARG), same
+// movement type. See BuildFindProducedBatchRequest for why 131 is correct.
+public sealed class ProducedBatchRow
+{
+    public string  Charge   { get; init; } = string.Empty; // CHARG
+    public string  Material { get; init; } = string.Empty; // MATNR
+    public decimal Quantity { get; init; }                  // MENGE
+}
+
+
+// ── Combined Drumming Backflush + ZPRODBATCH/ZBATCHPACK Maintenance ──────────
+// Drumming Entry's one point of difference from every other production
+// process: a finished drum/box must also get a row in two custom SAP tables
+// (ZPRODBATCH_TBL, ZBATCHPACK_TBL) recording its batch and outer packaging,
+// via the Z_ZPRODBATCH_MAINT BAPI — see BuildProdBatchMaintRequest. This
+// request bundles everything the combined endpoint needs to run the backflush,
+// find the resulting batch, verify it against the material's BOM, and write
+// the batch/pack rows, in one call from Node.
+public sealed class DrumBackflushRequest
+{
+    [Required, MinLength(1)] public string Material { get; init; } = string.Empty; // MATNR
+    [Range(0.001, double.MaxValue, ErrorMessage = "Quantity must be greater than zero.")]
+                              public decimal Quantity { get; init; }                 // ERFMG
+    [Required, MinLength(1)] public string Header    { get; init; } = string.Empty; // drum ref -> BKTXT
+                              public string Customer  { get; init; } = string.Empty;
+    [Required, MinLength(2)] public string PackCode   { get; init; } = string.Empty; // SD/MD/LD/XD/SB/MB/LB/XB/C1/C2
+    [Range(0.001, double.MaxValue, ErrorMessage = "Weight must be greater than zero.")]
+                              public decimal WeightKG  { get; init; }
+    // Materials of the operator-linked traceability parent batches (Node's
+    // prod.ProductionTrace, resolved to each parent's own Material before
+    // this call — SapServer has no access to that table). Compared against
+    // this material's production BOM to catch the wrong component being
+    // traced against the wrong finished good. Empty = nothing to check.
+                              public List<string> TraceabilityMaterials { get; init; } = [];
+}
+
+public sealed class DrumBackflushResponse
+{
+    public BdcResponse Backflush        { get; init; } = new();
+    public string      MaterialDocument { get; init; } = string.Empty;
+    public string      Batch            { get; init; } = string.Empty; // CHARG found post-backflush
+    public string      RcBatch          { get; init; } = string.Empty; // Z_ZPRODBATCH_MAINT RC_BATCH
+    public string      RcPack           { get; init; } = string.Empty; // Z_ZPRODBATCH_MAINT RC_PACK
+    public bool         BomMismatch        { get; init; }
+    public string[]     ExpectedComponents { get; init; } = []; // this material's BOM components (IDNRK)
+    public string[]     ActualComponents   { get; init; } = []; // echoes request.TraceabilityMaterials
+}

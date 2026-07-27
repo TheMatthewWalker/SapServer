@@ -44,6 +44,100 @@ public sealed class ProductionController : SapControllerBase
         return Ok(ApiResponse<BdcResponse>.Ok(response));
     }
 
+// ── POST /api/production/drumming-backflush ──────────────────────────
+//
+// Drumming's one point of difference from every other production process:
+// the finished drum also needs a row in two custom SAP tables (ZPRODBATCH_TBL,
+// ZBATCHPACK_TBL) via Z_ZPRODBATCH_MAINT — see ProductionHelpers'
+// BuildProdBatchMaintRequest for the full rationale. This endpoint runs the
+// same ZF40N backflush as plain /backflush, then chains on: finding the
+// batch SAP just assigned the finished good (MSEG, movement 131), comparing
+// that batch's material against the operator's traceability entries against
+// this material's BOM (mistake-prevention only — never blocks; a mismatch
+// here means the physical drum already exists, the data just needs fixing
+// and Node/PROD_SUPERVISOR need to know), and finally writing the batch/pack
+// rows. Everything after the backflush itself only runs if the backflush
+// produced a material document — if it didn't, there's no batch or material
+// document to hang any of the rest off, so the endpoint returns early with
+// just the backflush result (same "always 200, Node reads Type" convention
+// as plain /backflush).
+
+    [HttpPost("drumming-backflush")]
+    [ProducesResponseType(typeof(ApiResponse<DrumBackflushResponse>), 200)]
+    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
+    public async Task<IActionResult> DrummingBackflush(
+
+        [FromBody] DrumBackflushRequest body,
+        CancellationToken ct)
+    {
+        await CheckPermissionAsync(GetUserId(), ProductionHelpers.FnCreate, ct);
+
+        var zf40nBody = new Zf40nRequest
+        {
+            Material = body.Material,
+            Quantity = body.Quantity,
+            Header   = body.Header,
+            Packaging = body.PackCode,
+            Customer  = body.Customer,
+        };
+
+        var chargeCheck = await _pool.ExecuteAsync(ProductionHelpers.BuildRequiresCharge(body.Material), ct);
+        var zf40n       = await _pool.ExecuteAsync(
+            ProductionHelpers.BuildZf40nRequest(zf40nBody, ProductionHelpers.ParseRequiresCharge(chargeCheck)), ct);
+        var backflush   = ProductionHelpers.ParseBdcResponse(zf40n);
+        _logger.LogInformation("Drumming backflush: " + body.Material + " x " + body.Quantity + " || " + backflush.RawMessage);
+
+        if (string.IsNullOrWhiteSpace(backflush.DocumentNumber))
+            return Ok(ApiResponse<DrumBackflushResponse>.Ok(new DrumBackflushResponse { Backflush = backflush }));
+
+        var msegData      = await _pool.ExecuteAsync(
+            ProductionHelpers.BuildFindProducedBatchRequest(backflush.DocumentNumber, body.Material), ct);
+        var producedBatch = ProductionHelpers.ParseProducedBatchRows(msegData).FirstOrDefault();
+
+        if (producedBatch == null || string.IsNullOrWhiteSpace(producedBatch.Charge))
+        {
+            _logger.LogInformation($"Drumming backflush: no batch found for MatDoc {backflush.DocumentNumber} / {body.Material} — skipping Z_ZPRODBATCH_MAINT.");
+            return Ok(ApiResponse<DrumBackflushResponse>.Ok(new DrumBackflushResponse
+            {
+                Backflush = backflush,
+                MaterialDocument = backflush.DocumentNumber,
+            }));
+        }
+
+        // BOM vs traceability — informational only, never blocks the batch/pack
+        // write below. NormaliseMaterial strips leading zeros on numeric
+        // material strings so SAP-padded BOM components and Node's bare
+        // stored materials compare equal regardless of which side is padded.
+        var bomData       = await _pool.ExecuteAsync(ProductionHelpers.BuildBomRequest(new BomQuery { Material = body.Material }), ct);
+        var bomComponents = ProductionHelpers.ParseBomRows(bomData)
+            .Select(r => PerformanceHelpers.NormaliseMaterial(r.Component))
+            .Distinct()
+            .ToArray();
+        var traceMaterials = (body.TraceabilityMaterials ?? []).Where(m => !string.IsNullOrWhiteSpace(m)).ToList();
+        var bomMismatch    = traceMaterials.Count > 0
+            && !traceMaterials.All(m => bomComponents.Contains(PerformanceHelpers.NormaliseMaterial(m)));
+
+        var packInstruction = ProductionHelpers.BuildPackagingInstruction(body.Customer, body.PackCode);
+        var maint = await _pool.ExecuteAsync(
+            ProductionHelpers.BuildProdBatchMaintRequest(
+                producedBatch.Charge, body.Material, packInstruction, backflush.DocumentNumber, body.WeightKG, body.PackCode), ct);
+        var (rcBatch, rcPack) = ProductionHelpers.ParseProdBatchMaintResponse(maint);
+        _logger.LogInformation($"Z_ZPRODBATCH_MAINT: batch {producedBatch.Charge} on {backflush.DocumentNumber} || RC_BATCH={rcBatch} RC_PACK={rcPack}");
+
+        return Ok(ApiResponse<DrumBackflushResponse>.Ok(new DrumBackflushResponse
+        {
+            Backflush          = backflush,
+            MaterialDocument   = backflush.DocumentNumber,
+            Batch              = producedBatch.Charge,
+            RcBatch            = rcBatch,
+            RcPack             = rcPack,
+            BomMismatch        = bomMismatch,
+            ExpectedComponents = bomComponents,
+            ActualComponents   = [.. traceMaterials],
+        }));
+    }
+
+
 // ── POST /api/production/scrap/post ──────────────────────────────────
 
     [HttpGet("check-profit-centre")]
