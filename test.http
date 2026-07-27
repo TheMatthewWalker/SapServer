@@ -1,5 +1,6 @@
 @baseUrl = http://127.0.0.1:5200
-@token = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzcWwyMDA1LWJyaWRnZSIsImF1ZCI6InNhcC1zZXJ2ZXIiLCJzdWIiOiJkZXYiLCJ1c2VySWQiOjEsInJvbGUiOiJhZG1pbiIsImlhdCI6MTc4NDc5MDE2OSwiZXhwIjoxNzg0NzkzNzY5fQ.wvUdtIkUQUaTlMFEKtAQcwD0gO_ABVILqbTVRk3-Ew4
+@token = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzcWwyMDA1LWJyaWRnZSIsImF1ZCI6InNhcC1zZXJ2ZXIiLCJzdWIiOiJkZXYiLCJ1c2VySWQiOjEsInJvbGUiOiJhZG1pbiIsImlhdCI6MTc4NDg4NTA2MCwiZXhwIjoxNzg0ODg4NjYwfQ.YAtEiofoLTwaxaqpt2eUTLdWSV1ZnaorP5Bun42G1hQ
+
 
 
 
@@ -10,311 +11,6 @@ Authorization: Bearer {{token}}
 
 {
     "FunctionName": "BAPI_GL_GETGLACCPERIODBALANCES"
-}
-###
-
-
-
-### Customs — LIPS (delivery items)
-POST {{baseUrl}}/api/sap/lips
-Content-Type: application/json
-Authorization: Bearer {{token}}
-
-{
-  "deliveries": ["82878876"]
-}
-
-###
-
-### Customs — LIKP (delivery header: incoterms + consignee)
-POST {{baseUrl}}/api/sap/likp
-Content-Type: application/json
-Authorization: Bearer {{token}}
-
-{
-  "deliveries": ["82878876"]
-}
-
-###
-
-### Customs — VBFA (invoice lookup by delivery + item)
-POST {{baseUrl}}/api/sap/vbfa
-Content-Type: application/json
-Authorization: Bearer {{token}}
-
-{
-  "lines": [
-    { "delivery": "82878876", "item": "000010" }
-  ]
-}
-
-###
-
-### Customs — MARC (commodity code + country of origin)
-POST {{baseUrl}}/api/sap/marc
-Content-Type: application/json
-Authorization: Bearer {{token}}
-
-{
-  "materials": ["TSDL4-8B01C02/S"]
-}
-
-###
-
-### Customs — KNA1 (customer destination country)
-POST {{baseUrl}}/api/sap/kna1
-Content-Type: application/json
-Authorization: Bearer {{token}}
-
-{
-  "customers": ["363720"]
-}
-
-###
-
-### Ping: pool status
-GET {{baseUrl}}/api/rfc/status
-Authorization: Bearer {{token}}
-
-###
-
-### ZRFC_READ_TABLES – read LQUA stock
-POST {{baseUrl}}/api/rfc/execute
-Content-Type: application/json
-Authorization: Bearer {{token}}
-
-{
-  "functionName": "ZRFC_READ_TABLES",
-  "importParameters": {
-    "DELIMITER": "|",
-    "ROWCOUNT": "10",
-    "NO_DATA": " "
-  },
-  "inputTables": {
-    "QUERY_TABLES": [
-      { "TABNAME": "LQUA" }
-    ]
-  },
-  "inputTablesItems": {
-      "query_FIELDS": [
-        { "TABNAME": "LQUA", "FIELDNAME": "MATNR" },
-        { "TABNAME": "LQUA", "FIELDNAME": "CHARG" },
-        { "TABNAME": "LQUA", "FIELDNAME": "VERME" }
-      ]
-  },
-  "exportParameters": [],
-  "outputTables": {
-    "data_display":   ["WA"]
-  }
-}
-
-###
-
-### RFC_READ_TABLE – read USR01 (current user profile), no field filter
-POST {{baseUrl}}/api/rfc/execute
-Content-Type: application/json
-Authorization: Bearer {{token}}
-
-{
-        "functionName": "L_TO_CREATE_SINGLE",
-        "importParameters": {
-          "I_LGNUM": "312", 
-          "I_WERKS": "3012", 
-          "I_LGORT": "1710",
-          "I_SQUIT": "X",
-          "I_BWLVS": "999",
-          "I_MATNR": "000000000000010006",
-          "I_ANFME": 10,
-          "I_CHARG": "",
-          "I_ZEUGN": "",
-          "I_VLTYP": "RO",
-          "I_VLPLA": "YARD",
-          "I_BESTQ": "",
-          "I_SOBKZ": "",
-          "I_SONUM": "",
-          "I_NLPLA": "YARD",
-          "I_NLTYP": "RO"
-        },
-        "inputTables":      {},
-        "inputTablesItems": {},
-        "exportParameters": ["E_TANUM"],
-        "outputTables":     { "RETURN": ["TYPE", "MESSAGE"] }
-      }
-
-
-
-### POST /api/warehouse/consignment-mb1b — consignment receipt + stock swap
-POST {{baseUrl}}/api/warehouse/consignment-mb1b
-Content-Type: application/json
-Authorization: Bearer {{token}}
-
-{
-  "material":        "10000",
-  "quantity":        1,
-  "header":          "test",
-  "vendor":          "200088",
-  "storageLocation": "1710",
-  "sourceType":      "RO",
-  "sourceBin":       "YARD",
-  "destinationType": "RO",
-  "destinationBin":  "YARD",
-  "deliveryNote":    ""
-}
-
-
-### POST /api/warehouse/consignment-mb1b — consignment receipt + stock swap
-POST {{baseUrl}}/api/warehouse/transfer-order
-Content-Type: application/json
-Authorization: Bearer {{token}}
-
-{
-  "Material":        "10000",
-  "Quantity":        1,
-  "StorageLocation": "1710",
-  "SourceType":      "RO",
-  "SourceBin":       "YARD",
-  "DestinationType": "RO",
-  "DestinationBin":  "YARD"
-}
-
-###
-
-### TESTING cost-sheet API with hardcoded filters (ignoring request body filters)
-POST {{baseUrl}}/api/costing/cost-sheet
-Content-Type: application/json
-
-{
-    "date": "31.12.2026",
-    "status": "FR"
-}
-
-
-### POST /api/production/backflush — test ZF40N with charge and customer fields
-POST {{baseUrl}}/api/production/backflush
-Content-Type: application/json
-Authorization: Bearer {{token}}
-
-{
-  "Material":        "TCEV9-5B01/S",
-  "Quantity":        1,
-  "Header":      "DR00000014",
-  "Charge":       "363660",
-  "Customer": "363660",
-  "Packaging":  "MD"
-}
-
-###
-
-
-### POST /api/production/reverse-backflush — test MF41 with material document input
-POST {{baseUrl}}/api/production/reverse-backflush
-Content-Type: application/json
-Authorization: Bearer {{token}}
-
-{
-  "MaterialDocument": "4973006744"
-}
-
-###
-
-
-### POST /api/production/scrap/post — test MB11 with material and quantity input
-POST {{baseUrl}}/api/production/scrap/post
-Content-Type: application/json
-Authorization: Bearer {{token}}
-
-{
-  "Material": "TCEV9-5B01",
-  "Quantity": 1,
-  "MovementType": "551",
-  "Header": "TEST",
-  "ScrapReason": "4801"
-}
-
-###
-
-### POST /api/production/scrap/reverse — test MBST with material document input
-POST {{baseUrl}}/api/production/scrap/reverse
-Content-Type: application/json
-Authorization: Bearer {{token}}
-
-{
-  "MaterialDocument": "4973095655"
-}
-
-###
-
-
-### POST /api/quality/block — test MB1B with quality block movement type
-POST {{baseUrl}}/api/quality/block
-Content-Type: application/json
-Authorization: Bearer {{token}}
-
-{
-  "Material": "TCEV9-5B01",
-  "Quantity": 1,
-  "Header": "TEST",
-  "Username": "MAWANOGB",
-  "StorageLocation": "1716"
-}
-
-###
-
-
-### POST /api/quality/unblock — test MB1B with quality block movement type
-POST {{baseUrl}}/api/quality/unblock
-Content-Type: application/json
-Authorization: Bearer {{token}}
-
-{
-  "Material": "TCEV9-5B01",
-  "Quantity": 1,
-  "Header": "TEST",
-  "Username": "MAWANOGB",
-  "StorageLocation": "1716"
-}
-
-###
-
-
-### POST /api/costing/profit-center
-POST {{baseUrl}}/api/costing/profit-center
-Content-Type: application/json
-Authorization: Bearer {{token}}
-
-{
-  "DateFrom": "01.01.2026",
-  "DateTo": "31.01.2026",
-  "GlAccounts": ["301000"]
-}
-###
-
-
-
-### GET /api/logistics/picksheets/open
-GET {{baseUrl}}/api/logistics/picksheets/open
-Content-Type: application/json
-Authorization: Bearer {{token}}
-
-{
-}
-###
-
-
-### GET /api/logistics/picksheets/open
-POST {{baseUrl}}/api/costing/freight-posting
-Content-Type: application/json
-Authorization: Bearer {{token}}
-
-{
-    "Shipment": "00014541",
-    "DocDate": "21.04.2026",
-    "Vendor": "78712",
-    "GlAccount": "601200",
-    "ProfitCenter": "2004",
-    "Currency": "EUR",
-    "Amount": 1600,
-    "Information": "26 PLTS, 4092KG, WF61TN -> PL31752"
 }
 ###
 
@@ -451,7 +147,7 @@ Content-Type: application/json
 Authorization: Bearer {{token}}
 
 {
-    "MaterialDocument": "5000012345"
+    "MaterialDocument": "5005241047"
 }
 ###
 
@@ -465,20 +161,20 @@ Content-Type: application/json
 Authorization: Bearer {{token}}
 
 {
-    "SapUsername": "J.SMITH",
-    "SapPassword": "REPLACE_ME",
-    "Vendor": "0000100050",
+    "SapUsername": "MAWANOGB",
+    "SapPassword": "****",
+    "Vendor": "0000078712",
     "Currency": "GBP",
     "Items": [
         {
-            "ShortText": "Freight - INB-000014",
+            "ShortText": "Inbound Freight",
             "Quantity": 1,
             "Unit": "EA",
             "NetPrice": 450.00,
             "DeliveryDate": "23.07.2026",
             "AcctAssCat": "K",
-            "MaterialGroup": "FRT01",
-            "GlAccount": "0000400100",
+            "MaterialGroup": "ITLG01A",
+            "GlAccount": "0000602200",
             "CostCenterOrOrder": "2012",
             "Reference": "INB-000014",
             "TrackingNumber": "TRK123456",
@@ -487,66 +183,5 @@ Authorization: Bearer {{token}}
             "PostingDate": "23.07.2026"
         }
     ]
-}
-###
-
-
-
-
-
-
-### GET /api/performance/agreements
-GET {{baseUrl}}/api/performance/agreements
-Content-Type: application/json
-Authorization: Bearer {{token}}
-
-{
-
-}
-###
-
-
-### GET /api/performance/invoicing
-GET {{baseUrl}}/api/performance/invoicing
-Content-Type: application/json
-Authorization: Bearer {{token}}
-
-{
-
-}
-###
-
-
-
-
-### GET /api/performance/otif
-GET {{baseUrl}}/api/performance/otif
-Content-Type: application/json
-Authorization: Bearer {{token}}
-
-{
-
-}
-###
-
-
-### GET /api/performance/stock
-GET {{baseUrl}}/api/performance/stock
-Content-Type: application/json
-Authorization: Bearer {{token}}
-
-{
-
-}
-###
-
-
-### GET /api/performance/stock
-GET {{baseUrl}}/api/production/check-profit-centre
-Content-Type: application/json
-Authorization: Bearer {{token}}
-
-{
-  "Material": "TCEV9-5B01/S"
 }
 ###
