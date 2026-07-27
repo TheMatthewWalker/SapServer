@@ -138,6 +138,35 @@ public sealed class ProductionController : SapControllerBase
     }
 
 
+// ── GET /api/production/bom ────────────────────────────────────────
+//
+// Plain read of ZBOM_INFO (BuildBomRequest/ParseBomRows — the same helper
+// DrummingBackflush and PostScrap already use internally) exposed as its
+// own endpoint. Needed by Node's drumming flow to work out, ahead of any
+// posting, how many metres of a braided (BR) component a drummed
+// product's BOM expects per unit — braiding never posts its own SAP
+// backflush (unreliable BOM data at that work centre), so Node backflushes
+// the exact BOM-implied quantity for that component itself, before the
+// drum's own backflush runs. Optional Component filter (IDNRK) narrows to
+// one row instead of the whole BOM.
+
+    [HttpGet("bom")]
+    [ProducesResponseType(typeof(ApiResponse<BomRow[]>), 200)]
+    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
+    public async Task<IActionResult> GetBom(
+
+        [FromBody] BomQuery body,
+        CancellationToken ct)
+    {
+        await CheckPermissionAsync(GetUserId(), ProductionHelpers.FnCreate, ct);
+
+        var bomData = await _pool.ExecuteAsync(ProductionHelpers.BuildBomRequest(body), ct);
+        var rows    = ProductionHelpers.ParseBomRows(bomData);
+
+        return Ok(ApiResponse<BomRow[]>.Ok(rows));
+    }
+
+
 // ── POST /api/production/scrap/post ──────────────────────────────────
 
     [HttpGet("check-profit-centre")]
