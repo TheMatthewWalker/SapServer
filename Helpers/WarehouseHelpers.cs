@@ -138,6 +138,50 @@ internal static class WarehouseHelpers
         };
     }
 
+    // ── Destination bin existence check ──────────────────────────────────────
+    //
+    // L_TO_CREATE_SINGLE doesn't behave like a clean BAPI when the destination
+    // bin (I_NLTYP/I_NLPLA) doesn't exist — instead of returning a business
+    // error in RETURN, the underlying transaction the RFC drives hits a screen
+    // it doesn't expect, the whole call fails at the RFC level (func.Call
+    // returns false) with no SAP.Exception code and nothing in RETURN, and the
+    // OCX connection is torn down and needs to reconnect. The end result:
+    // a warehouse operator who typos a bin gets a raw "RFC call ... failed (no
+    // detail available)" and has to retry once the session reconnects, with no
+    // indication of what actually went wrong (see WarehouseController.
+    // CreateTransferOrder for the fix — check the bin exists first and fail
+    // fast with a clear message, exactly the same LAGP lookup pattern already
+    // used by PicksheetHelpers.BuildBinCheckRequest/BinExists for staging
+    // bins, just scoped to a specific storage type instead of hardcoded 916).
+    internal static RfcRequest BuildBinCheckRequest(string storageType, string bin)
+    {
+        var builder = new RfcRequestBuilder(FnReadTables)
+            .Import("DELIMITER", "|")
+            .Import("NO_DATA",   " ")
+            .TableRow("QUERY_TABLES", new { TABNAME = "LAGP" })
+            .TableItemRow("query_FIELDS", new { TABNAME = "LAGP", FIELDNAME = "LGPLA" });
+
+        builder
+            .WhereCondition($"LAGP~LGNUM EQ '{Warehouse}'")
+            .WhereCondition($"LAGP~LGTYP EQ '{storageType}'")
+            .WhereCondition($"LAGP~LGPLA EQ '{bin}'");
+
+        return builder.ReadTable("data_display").Build();
+    }
+
+    internal static bool BinExists(RfcResponse response)
+    {
+        if (!response.Tables.TryGetValue("data_display", out var sapRows))
+            return false;
+
+        // skipHeader: true — data_display's first row is SAP's own column
+        // header, not a real hit; PicksheetHelpers.BinExists established this
+        // same fix already (see task history — "Filter SAP header row from
+        // stock lookup") after a bin-existence check like this one first
+        // shipped without it and reported every bin as existing.
+        return SapDelimitedParser.ParseRows(sapRows, '|', skipHeader: true).Count > 0;
+    }
+
     // ── Consignment MB1B ──────────────────────────────────────────────────────
 
     internal static RfcRequest BuildMb1bRequest(ConsignmentMb1bRequest body) =>

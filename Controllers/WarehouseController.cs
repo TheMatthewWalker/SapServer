@@ -66,7 +66,15 @@ public sealed class WarehouseController : SapControllerBase
     }
 
     // ── POST /api/warehouse/transfer-order ────────────────────────────────────
-
+    //
+    // Checks the destination bin actually exists (LAGP) before ever calling
+    // L_TO_CREATE_SINGLE. That RFC doesn't fail cleanly for a non-existent
+    // bin — no SAP.Exception code, nothing in RETURN, just the call failing
+    // outright and the OCX connection needing to reconnect — so a typo'd bin
+    // used to surface as "RFC call ... failed (no detail available)" with no
+    // indication of what was actually wrong, and cost the user a second
+    // attempt while the session reconnected. Failing fast here means a bad
+    // bin gets a clear, immediate 422 instead, and SAP is never called at all.
     [HttpPost("transfer-order")]
     [ProducesResponseType(typeof(ApiResponse<CreateTransferOrderResponse>), 200)]
     [ProducesResponseType(typeof(ApiResponse<object>), 403)]
@@ -79,6 +87,16 @@ public sealed class WarehouseController : SapControllerBase
 
         //_logger.LogInformation(
         //"User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "transfer-order");
+
+        var binCheck = await _pool.ExecuteAsync(
+            WarehouseHelpers.BuildBinCheckRequest(body.DestinationType, body.DestinationBin), ct);
+
+        if (!WarehouseHelpers.BinExists(binCheck))
+        {
+            var msg = $"Destination bin {body.DestinationType}/{body.DestinationBin} does not exist in SAP warehouse {WarehouseHelpers.Warehouse}. Check the storage type and bin and try again.";
+            return UnprocessableEntity(ApiResponse<CreateTransferOrderResponse>.Fail("422", msg,
+                new CreateTransferOrderResponse { Success = false, Messages = [new SapReturnMessage { Type = "E", Message = msg }] }));
+        }
 
         var response = await _pool.ExecuteAsync(WarehouseHelpers.BuildTransferOrderRequest(body), ct);
         return Ok(ApiResponse<CreateTransferOrderResponse>.Ok(

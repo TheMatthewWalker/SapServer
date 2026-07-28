@@ -568,9 +568,24 @@ internal sealed class SapStaWorker : IDisposable
                 return null;
             }
 
-            dynamic ret      = tables.Item("RETURN");
-            int     rowCount = 0;
-            var     messages = new List<string>();
+            dynamic? ret = tables.Item("RETURN");
+            if (ret is null)
+            {
+                // The COM automation layer returns a null item rather than
+                // throwing when "RETURN" isn't a populated table parameter
+                // for this function/this failure — iterating ret.Rows on that
+                // null previously threw a RuntimeBinderException ("Cannot
+                // perform runtime binding on a null reference") that landed in
+                // the catch below and produced a diagnostic that explained
+                // nothing. Guard it explicitly instead, same as the `tables
+                // is null` check above, so the real reason (no RETURN data
+                // for this call) is what gets logged.
+                diag = "RETURN table not populated for this call (no business-level message available)";
+                return null;
+            }
+
+            int rowCount = 0;
+            var messages = new List<string>();
 
             foreach (var row in ret.Rows)
             {
