@@ -41,11 +41,21 @@ public sealed class StockAdjustmentRequest
 
     /// <summary>Storage location. Maps to GOODSMVT_ITEM-STGE_LOC.</summary>
     public string StorageLocation { get; init; } = string.Empty;
+    public string StorageType { get; init; }  = string.Empty;
+    public string StorageBin { get; init; }  = string.Empty;
+    public string? StockCategory { get; init; }
+    public string? SpecialStockIndicator { get; init; }
+    public string? SpecialStockNumber { get; init; }
 
     /// <summary>Batch, if the material is batch-managed. Maps to GOODSMVT_ITEM-BATCH (padded to 10).</summary>
     public string? Batch { get; init; }
 
-    /// <summary>Movement type — expected "711" (increase) or "712" (decrease). Maps to GOODSMVT_ITEM-MOVE_TYPE.</summary>
+    /// <summary>
+    /// Movement type — "711" (increase) / "712" (decrease) for ordinary
+    /// unrestricted-use stock, or "717" (decrease) / "718" (increase) for
+    /// stock category 'S' (blocked) — SAP won't post 711/712 against
+    /// blocked stock. Maps to GOODSMVT_ITEM-MOVE_TYPE.
+    /// </summary>
     public string MovementType { get; init; } = string.Empty;
 
     /// <summary>Quantity to adjust, always entered as a positive number — the movement type (711 vs 712) determines direction. Maps to GOODSMVT_ITEM-ENTRY_QNT.</summary>

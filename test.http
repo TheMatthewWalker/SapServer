@@ -1,6 +1,5 @@
 @baseUrl = http://127.0.0.1:5200
-@token = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzcWwyMDA1LWJyaWRnZSIsImF1ZCI6InNhcC1zZXJ2ZXIiLCJzdWIiOiJkZXYiLCJ1c2VySWQiOjEsInJvbGUiOiJhZG1pbiIsImlhdCI6MTc4NDg4NTA2MCwiZXhwIjoxNzg0ODg4NjYwfQ.YAtEiofoLTwaxaqpt2eUTLdWSV1ZnaorP5Bun42G1hQ
-
+@token = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzcWwyMDA1LWJyaWRnZSIsImF1ZCI6InNhcC1zZXJ2ZXIiLCJzdWIiOiJkZXYiLCJ1c2VySWQiOjEsInJvbGUiOiJhZG1pbiIsImlhdCI6MTc4NTI0NTI2OCwiZXhwIjoxNzg1MjQ4ODY4fQ.oMlOKxi5U4N2cYSC4MtKcN7owXYRcXFSiT8DZPWplDU
 
 
 
@@ -11,129 +10,6 @@ Authorization: Bearer {{token}}
 
 {
     "FunctionName": "BAPI_GL_GETGLACCPERIODBALANCES"
-}
-###
-
-
-### POST /api/purchasing/create-po  (dry run — echoes the built RFC request, no SAP call)
-# BAPI_PO_CREATE1, ported field-for-field from AT_Dashboard.xlsm (module
-# BAPI_PO, sub CreateSAPPurchaseOrder). PO creation only — no goods
-# receipt/GRNI booking yet (that's the separate, not-yet-built MIGO step).
-#
-# Example below is one PO with one cost-center-assigned (K) item, matching
-# the intended Inbound Log MIGO use case: freight cost -> cost center 2012
-# (PTFE Raw Material), GL 602200. AcctAssCat/MaterialGroup/GlAccount/
-# CostCenterOrOrder can be left null for a standard stock line instead
-# (see the VBA's own "PO" sheet example row: Material 50065, no Acc. Ass).
-POST {{baseUrl}}/api/purchasing/create-po?dryRun=true
-Content-Type: application/json
-Authorization: Bearer {{token}}
-
-{
-    "Vendor": "78712",
-    "Currency": "GBP",
-    "DocDate": "21.07.2026",
-    "Items": [
-        {
-            "ShortText": "Freight - Inbound shipment 000123",
-            "Quantity": 1,
-            "Unit": "EA",
-            "NetPrice": 450.00,
-            "DeliveryDate": "21.07.2026",
-            "AcctAssCat": "K",
-            "MaterialGroup": "Road Freight",
-            "GlAccount": "602200",
-            "CostCenterOrOrder": "2012"
-        }
-    ]
-}
-###
-
-
-### POST /api/purchasing/create-po  (real call — creates the PO in SAP)
-POST {{baseUrl}}/api/purchasing/create-po
-Content-Type: application/json
-Authorization: Bearer {{token}}
-
-{
-    "Vendor": "78712",
-    "Currency": "GBP",
-    "DocDate": "21.07.2026",
-    "Items": [
-        {
-            "ShortText": "Freight - Inbound shipment 000123",
-            "Quantity": 1,
-            "Unit": "EA",
-            "NetPrice": 450.00,
-            "DeliveryDate": "21.07.2026",
-            "AcctAssCat": "K",
-            "MaterialGroup": "Road Freight",
-            "GlAccount": "602200",
-            "CostCenterOrOrder": "2012"
-        }
-    ]
-}
-###
-
-
-### POST /api/purchasing/post-goods-receipt  (dry run — echoes the built BDC table, no SAP call)
-# Transaction MB01 via BDC (Z_RFC_CALL_TRANSACTION) — BAPI_GOODSMVT_CREATE
-# doesn't work against this SAP system, so this replicates the user's own
-# BDC recording exactly. One call per PO item/cost line — LineNumber 1
-# posts against EBELP "00010", 2 against "00020", etc. (SAP renumbers PO
-# items in 10s regardless of what was sent at creation). If the PO from the
-# create-po example above had 2 cost lines, call this twice: LineNumber 1,
-# then LineNumber 2 — each is its own material document, reversible on its own.
-POST {{baseUrl}}/api/purchasing/post-goods-receipt?dryRun=true
-Content-Type: application/json
-Authorization: Bearer {{token}}
-
-{
-    "PurchaseOrder": "4500434758",
-    "LineNumber": 1,
-    "Reference": "INB-000014",
-    "TrackingNumber": "TBC",
-    "AddressCode": "US28",
-    "ShipmentCompletionDate": "23.07.2026",
-    "PostingDate": "23.07.2026"
-}
-###
-
-
-### POST /api/purchasing/post-goods-receipt  (real call — posts the goods receipt in SAP)
-# Response is BdcResponse — DocumentNumber holds the material document
-# number if SAP's message included the word "document" followed by digits
-# (e.g. "Material document 5000012345 posted"). Store it against this cost
-# line; it's needed to reverse just this line later.
-POST {{baseUrl}}/api/purchasing/post-goods-receipt
-Content-Type: application/json
-Authorization: Bearer {{token}}
-
-{
-    "PurchaseOrder": "4500434758",
-    "LineNumber": 1,
-    "Reference": "INB-000014",
-    "TrackingNumber": "TBC",
-    "AddressCode": "US28",
-    "ShipmentCompletionDate": "23.07.2026",
-    "PostingDate": "23.07.2026"
-}
-###
-
-
-### POST /api/purchasing/post-goods-receipt  (second cost line on the same PO)
-POST {{baseUrl}}/api/purchasing/post-goods-receipt
-Content-Type: application/json
-Authorization: Bearer {{token}}
-
-{
-    "PurchaseOrder": "4500434758",
-    "LineNumber": 2,
-    "Reference": "INB-000014",
-    "TrackingNumber": "TBC",
-    "AddressCode": "US28",
-    "ShipmentCompletionDate": "23.07.2026",
-    "PostingDate": "23.07.2026"
 }
 ###
 
@@ -187,33 +63,6 @@ Authorization: Bearer {{token}}
 ###
 
 
-### POST /api/warehouse/stock-adjustment  (dry run — echoes the built RFC request, no SAP call)
-# BAPI_GOODSMVT_CREATE, movement type 711 (stock increase). See
-# StockAdjustmentModels.cs / StockAdjustmentHelper.cs for the full caveat:
-# GoodsReceiptHelper already found this same BAPI doesn't work against this
-# SAP system for a different movement (101, GR-for-PO), and had to fall back
-# to a BDC of MB01 instead. This uses a different GM_CODE branch ("06" —
-# goods movements without reference, the path 711/712 normally go through
-# via MB1C) — genuinely untested here rather than known-broken, hence
-# testing it via this file before wiring it into Node, exactly as asked.
-#
-# Replace Material/StorageLocation with real values from your own system
-# before running the real-call examples below.
-POST {{baseUrl}}/api/warehouse/stock-adjustment?dryRun=true
-Content-Type: application/json
-Authorization: Bearer {{token}}
-
-{
-    "Material": "50065",
-    "StorageLocation": "0001",
-    "MovementType": "711",
-    "Quantity": 10,
-    "Unit": "KG",
-    "Reference": "STOCKADJ-TEST-01"
-}
-###
-
-
 ### POST /api/warehouse/stock-adjustment  (real call, TESTRUN — SAP simulates the
 ### posting and returns what it would have done, without creating a material
 ### document. Good first real-connectivity check: if this comes back with a
@@ -224,47 +73,15 @@ Content-Type: application/json
 Authorization: Bearer {{token}}
 
 {
-    "Material": "50065",
-    "StorageLocation": "0001",
+    "Material": "B6040/S",
+    "Batch": "0036431802",
+    "StorageType": "RO",
+    "StorageBin": "1711-RO-01",
+    "StorageLocation": "1711",
     "MovementType": "711",
-    "Quantity": 10,
-    "Unit": "KG",
-    "Reference": "STOCKADJ-TEST-01",
-    "TestRun": true
-}
-###
-
-
-### POST /api/warehouse/stock-adjustment  (real call — posts a 711 stock increase)
-POST {{baseUrl}}/api/warehouse/stock-adjustment
-Content-Type: application/json
-Authorization: Bearer {{token}}
-
-{
-    "Material": "50065",
-    "StorageLocation": "0001",
-    "Batch": "",
-    "MovementType": "711",
-    "Quantity": 10,
-    "Unit": "KG",
-    "Reference": "STOCKADJ-TEST-01"
-}
-###
-
-
-### POST /api/warehouse/stock-adjustment  (real call — posts a 712 stock decrease,
-### to correct the 711 test above back out again once you've confirmed it worked)
-POST {{baseUrl}}/api/warehouse/stock-adjustment
-Content-Type: application/json
-Authorization: Bearer {{token}}
-
-{
-    "Material": "50065",
-    "StorageLocation": "0001",
-    "Batch": "",
-    "MovementType": "712",
-    "Quantity": 10,
-    "Unit": "KG",
-    "Reference": "STOCKADJ-TEST-01-REV"
+    "Quantity": 25,
+    "Unit": "M",
+    "Reference": "stocktake corr."
+    //"TestRun": true
 }
 ###

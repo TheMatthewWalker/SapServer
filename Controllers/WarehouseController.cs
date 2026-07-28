@@ -105,15 +105,18 @@ public sealed class WarehouseController : SapControllerBase
 
     // ── POST /api/warehouse/stock-adjustment ──────────────────────────────────
     //
-    // Movement types 711/712 via BAPI_GOODSMVT_CREATE — see
-    // StockAdjustmentModels.cs for the full history/caveat: GoodsReceiptHelper
-    // already found this same BAPI doesn't work against this SAP system for a
-    // different movement (101, GR-for-PO via GM_CODE "01"), and had to fall
-    // back to a BDC recording of MB01 instead. This uses a different GM_CODE
-    // branch ("06", goods movements without reference — the code path 711/712
-    // normally go through via transaction MB1C), so it's untested against this
+    // Movement types 711/712 (unrestricted stock) or 717/718 (category 'S',
+    // blocked stock — 711/712 aren't valid against it) via
+    // BAPI_GOODSMVT_CREATE — see StockAdjustmentModels.cs for the full
+    // history/caveat: GoodsReceiptHelper already found this same BAPI
+    // doesn't work against this SAP system for a different movement (101,
+    // GR-for-PO via GM_CODE "01"), and had to fall back to a BDC recording
+    // of MB01 instead. This uses a different GM_CODE branch ("06", goods
+    // movements without reference — the code path 711/712/717/718 normally
+    // go through via transaction MB1C), so it's untested against this
     // system rather than known-broken — test it via test.http before wiring
-    // this into Node, exactly as the user asked.
+    // this into Node, exactly as the user asked. Confirmed working (711)
+    // against real data by the user since.
     //
     // Unlike the BDC calls elsewhere in this file, BAPI_GOODSMVT_CREATE is a
     // real BAPI: like BAPI_PO_CREATE1 (PurchasingController.CreatePurchaseOrder),
@@ -132,7 +135,7 @@ public sealed class WarehouseController : SapControllerBase
 
         if (!StockAdjustmentHelper.ExpectedMovementTypes.Contains(body.MovementType))
             return UnprocessableEntity(ApiResponse<StockAdjustmentResponse>.Fail("422",
-                $"Movement type must be 711 or 712 for a stock adjustment (got '{body.MovementType}').",
+                $"Movement type must be 711, 712, 717, or 718 for a stock adjustment (got '{body.MovementType}').",
                 new StockAdjustmentResponse { Success = false }));
 
         var request = StockAdjustmentHelper.BuildStockAdjustmentRequest(body);

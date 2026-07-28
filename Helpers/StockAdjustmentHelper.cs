@@ -20,14 +20,23 @@ internal static class StockAdjustmentHelper
     /// is the code path BAPI_GOODSMVT_CREATE uses for the family of
     /// movement types normally entered through transaction MB1C ("Other
     /// Goods Receipts"), which is where 711/712 (physical inventory
-    /// difference, posted directly without an inventory document) live.
+    /// difference, posted directly without an inventory document) live, and
+    /// their blocked-stock (category 'S') counterparts 717/718.
     /// Kept as a named constant rather than inlined so it's obvious what to
     /// change first if testing shows a different GM_CODE is actually needed
     /// on this SAP release.
     /// </summary>
     internal const string GmCodeOtherGoodsMovement = "06";
 
-    internal static readonly HashSet<string> ExpectedMovementTypes = ["711", "712"];
+    /// <summary>
+    /// 711/712 don't post against category 'S' (blocked) stock — per the
+    /// user, that needs 717 (reduce) / 718 (add back in) instead. Both
+    /// pairs are accepted here; StockAdjustmentHelper doesn't itself decide
+    /// which one applies for a given request — the caller (Node/frontend)
+    /// picks based on direction and StockCategory, same as it already does
+    /// for 711 vs 712.
+    /// </summary>
+    internal static readonly HashSet<string> ExpectedMovementTypes = ["711", "712", "717", "718"];
 
     internal static RfcRequest BuildStockAdjustmentRequest(StockAdjustmentRequest body)
     {
@@ -52,6 +61,10 @@ internal static class StockAdjustmentHelper
             ["MOVE_TYPE"] = body.MovementType,
             ["ENTRY_QNT"] = body.Quantity,
             ["ENTRY_UOM"] = body.Unit,
+            ["STGE_TYPE"] = body.StorageType,
+            ["STGE_BIN"] = body.StorageBin,
+            ["SPEC_STOCK"] = body.SpecialStockIndicator,
+            ["VENDOR"] = body.SpecialStockNumber
         };
         if (!string.IsNullOrWhiteSpace(body.Batch))         itemRow["BATCH"]    = SapPad.Pad(body.Batch, 10);
         if (!string.IsNullOrWhiteSpace(body.ValuationType)) itemRow["VAL_TYPE"] = body.ValuationType;
