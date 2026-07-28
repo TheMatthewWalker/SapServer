@@ -185,3 +185,86 @@ Authorization: Bearer {{token}}
     ]
 }
 ###
+
+
+### POST /api/warehouse/stock-adjustment  (dry run — echoes the built RFC request, no SAP call)
+# BAPI_GOODSMVT_CREATE, movement type 711 (stock increase). See
+# StockAdjustmentModels.cs / StockAdjustmentHelper.cs for the full caveat:
+# GoodsReceiptHelper already found this same BAPI doesn't work against this
+# SAP system for a different movement (101, GR-for-PO), and had to fall back
+# to a BDC of MB01 instead. This uses a different GM_CODE branch ("06" —
+# goods movements without reference, the path 711/712 normally go through
+# via MB1C) — genuinely untested here rather than known-broken, hence
+# testing it via this file before wiring it into Node, exactly as asked.
+#
+# Replace Material/StorageLocation with real values from your own system
+# before running the real-call examples below.
+POST {{baseUrl}}/api/warehouse/stock-adjustment?dryRun=true
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+    "Material": "50065",
+    "StorageLocation": "0001",
+    "MovementType": "711",
+    "Quantity": 10,
+    "Unit": "KG",
+    "Reference": "STOCKADJ-TEST-01"
+}
+###
+
+
+### POST /api/warehouse/stock-adjustment  (real call, TESTRUN — SAP simulates the
+### posting and returns what it would have done, without creating a material
+### document. Good first real-connectivity check: if this comes back with a
+### sensible message instead of a generic RFC failure, the BAPI is at least
+### reachable and validating input on this system.)
+POST {{baseUrl}}/api/warehouse/stock-adjustment
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+    "Material": "50065",
+    "StorageLocation": "0001",
+    "MovementType": "711",
+    "Quantity": 10,
+    "Unit": "KG",
+    "Reference": "STOCKADJ-TEST-01",
+    "TestRun": true
+}
+###
+
+
+### POST /api/warehouse/stock-adjustment  (real call — posts a 711 stock increase)
+POST {{baseUrl}}/api/warehouse/stock-adjustment
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+    "Material": "50065",
+    "StorageLocation": "0001",
+    "Batch": "",
+    "MovementType": "711",
+    "Quantity": 10,
+    "Unit": "KG",
+    "Reference": "STOCKADJ-TEST-01"
+}
+###
+
+
+### POST /api/warehouse/stock-adjustment  (real call — posts a 712 stock decrease,
+### to correct the 711 test above back out again once you've confirmed it worked)
+POST {{baseUrl}}/api/warehouse/stock-adjustment
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+    "Material": "50065",
+    "StorageLocation": "0001",
+    "Batch": "",
+    "MovementType": "712",
+    "Quantity": 10,
+    "Unit": "KG",
+    "Reference": "STOCKADJ-TEST-01-REV"
+}
+###

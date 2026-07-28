@@ -103,6 +103,68 @@ public sealed class WarehouseController : SapControllerBase
             WarehouseHelpers.ParseTransferOrderResponse(response)));
     }
 
+    // ── POST /api/warehouse/stock-adjustment ──────────────────────────────────
+    //
+    // Movement types 711/712 via BAPI_GOODSMVT_CREATE — see
+    // StockAdjustmentModels.cs for the full history/caveat: GoodsReceiptHelper
+    // already found this same BAPI doesn't work against this SAP system for a
+    // different movement (101, GR-for-PO via GM_CODE "01"), and had to fall
+    // back to a BDC recording of MB01 instead. This uses a different GM_CODE
+    // branch ("06", goods movements without reference — the code path 711/712
+    // normally go through via transaction MB1C), so it's untested against this
+    // system rather than known-broken — test it via test.http before wiring
+    // this into Node, exactly as the user asked.
+    //
+    // Unlike the BDC calls elsewhere in this file, BAPI_GOODSMVT_CREATE is a
+    // real BAPI: like BAPI_PO_CREATE1 (PurchasingController.CreatePurchaseOrder),
+    // it needs an explicit BAPI_TRANSACTION_COMMIT/ROLLBACK on the same pinned
+    // worker, or nothing actually persists in SAP.
+    [HttpPost("stock-adjustment")]
+    [ProducesResponseType(typeof(ApiResponse<StockAdjustmentResponse>), 200)]
+    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
+    [ProducesResponseType(typeof(ApiResponse<object>), 422)]
+    public async Task<IActionResult> CreateStockAdjustment(
+        [FromBody] StockAdjustmentRequest body,
+        [FromQuery] bool dryRun,
+        CancellationToken ct)
+    {
+        await CheckPermissionAsync(GetUserId(), StockAdjustmentHelper.FnGoodsMvtCreate, ct);
+
+        if (!StockAdjustmentHelper.ExpectedMovementTypes.Contains(body.MovementType))
+            return UnprocessableEntity(ApiResponse<StockAdjustmentResponse>.Fail("422",
+                $"Movement type must be 711 or 712 for a stock adjustment (got '{body.MovementType}').",
+                new StockAdjustmentResponse { Success = false }));
+
+        var request = StockAdjustmentHelper.BuildStockAdjustmentRequest(body);
+
+        if (dryRun)
+            return Ok(ApiResponse<RfcRequest>.Ok(request));
+
+        var worker = _pool.AcquireWorker();
+
+        var data     = await _pool.ExecuteOnWorkerAsync(worker, request, ct);
+        var response = StockAdjustmentHelper.ParseStockAdjustmentResponse(data);
+
+        if (body.TestRun)
+        {
+            // A test run never creates a real document, so there's nothing
+            // to commit — roll back to release whatever SAP locked while
+            // simulating the posting.
+            await _pool.ExecuteOnWorkerAsync(worker, CommitHelper.BuildBapiRollback(), ct);
+            return Ok(ApiResponse<StockAdjustmentResponse>.Ok(response));
+        }
+
+        if (!response.Success)
+        {
+            await _pool.ExecuteOnWorkerAsync(worker, CommitHelper.BuildBapiRollback(), ct);
+            return UnprocessableEntity(ApiResponse<StockAdjustmentResponse>.Fail(
+                "422", "SAP rejected the stock adjustment. Transaction rolled back.", response));
+        }
+
+        await _pool.ExecuteOnWorkerAsync(worker, CommitHelper.BuildBapiCommit(), ct);
+        return Ok(ApiResponse<StockAdjustmentResponse>.Ok(response));
+    }
+
     // ── POST /api/warehouse/picksheet-stock ───────────────────────────────────
     //
     // LQUA + ZPRODBATCH joined on batch, filtered to a specific material list —
