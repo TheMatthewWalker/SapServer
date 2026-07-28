@@ -6,7 +6,6 @@ namespace SapServer.Helpers;
 internal static class QualityHelpers
 {
     internal const string FnReadTables  = "ZRFC_READ_TABLES";
-    internal const string FnCreateTo    = "L_TO_CREATE_SINGLE";
     internal const string FnBlockStock = "Z_RFC_CALL_TRANSACTION";
     internal const string Warehouse     = "312";
     internal const string Plant         = "3012";
@@ -152,40 +151,15 @@ internal static class QualityHelpers
         }
     }
 
-    internal static RfcRequest BuildTransferOrderRequest(CreateTransferOrderRequest body) =>
-        new RfcRequestBuilder(FnCreateTo)
-            .Import("I_LGNUM", Warehouse)
-            .Import("I_WERKS", Plant)
-            .Import("I_LGORT", body.StorageLocation)
-            .Import("I_SQUIT", "X")
-            .Import("I_BWLVS", "999")
-            .Import("I_MATNR", SapPad.Pad(body.Material, 18))
-            .Import("I_ANFME", body.Quantity)
-            .Import("I_CHARG", SapPad.Pad(body.Batch, 10))
-            .Import("I_ZEUGN", SapPad.Pad(body.Batch, 10))
-            .Import("I_VLTYP", body.SourceType)
-            .Import("I_VLPLA", SapPad.Pad(body.SourceBin, 10))
-            .Import("I_BESTQ", body.StockCategory ?? "")
-            .Import("I_SOBKZ", body.SpecialStockIndicator ?? "")
-            .Import("I_SONUM", SapPad.Pad(body.SpecialStockNumber, 16))
-            .Import("I_NLPLA", SapPad.Pad(body.DestinationBin, 10))
-            .Import("I_NLTYP", body.DestinationType)
-            .ReadParam("E_TANUM")
-            .ReadTable("RETURN", "TYPE", "MESSAGE")
-            .Build();
-
-    internal static CreateTransferOrderResponse ParseTransferOrderResponse(RfcResponse response)
-    {
-        var messages = ReturnTableHelper.ExtractMessages(response, "RETURN");
-        return new CreateTransferOrderResponse
-        {
-            TransferOrderNumber = ReturnTableHelper.GetParam(response, "E_TANUM") ?? "",
-            Success             = true,
-            Messages            = messages
-                .Select(m => new SapReturnMessage { Type = m.Type, Message = m.Message })
-                .ToList()
-        };
-    }
+    // L_TO_CREATE_SINGLE build/parse used to be duplicated here byte-for-byte
+    // from WarehouseHelpers — same RFC, same fields, same Warehouse/Plant
+    // constants, no quality-specific difference. QualityController now calls
+    // WarehouseHelpers.BuildTransferOrderRequest/BuildBinCheckRequest/BinExists
+    // directly instead, which also means the two quality transfer orders get
+    // the same destination-bin existence check as the main Stock Management
+    // transfer-order endpoint (see WarehouseController.CreateTransferOrder for
+    // why that check exists — L_TO_CREATE_SINGLE fails an invalid bin
+    // ungracefully, with no real error message and a forced SAP reconnect).
 
     // ── Consignment MB1B ──────────────────────────────────────────────────────
 

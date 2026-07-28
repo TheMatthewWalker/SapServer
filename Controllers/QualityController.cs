@@ -48,11 +48,15 @@ public sealed class QualityController : SapControllerBase
 
         var mb1b   = await _pool.ExecuteAsync(QualityHelpers.BuildMb1bBlockedRequest(body, "BLOCK"),          ct);
 
-        if (body.StorageLocation == "1710" || body.StorageLocation == "1711") 
+        if (body.StorageLocation == "1710" || body.StorageLocation == "1711")
         {
             var (blocked, unrestricted) = QualityHelpers.PrepTransferOrderRequest(body, "BLOCK");
-            var whmBlocked = await _pool.ExecuteAsync(QualityHelpers.BuildTransferOrderRequest(blocked),   ct);
-            var whmUnrestricted    = await _pool.ExecuteAsync(QualityHelpers.BuildTransferOrderRequest(unrestricted),      ct);
+
+            var binError = await CheckDestinationBinsAsync(blocked, unrestricted, ct);
+            if (binError is not null) return binError;
+
+            var whmBlocked = await _pool.ExecuteAsync(WarehouseHelpers.BuildTransferOrderRequest(blocked),   ct);
+            var whmUnrestricted    = await _pool.ExecuteAsync(WarehouseHelpers.BuildTransferOrderRequest(unrestricted),      ct);
             return Ok(ApiResponse<QualityMb1bResponse>.Ok(
                 QualityHelpers.ParseQualityResponse(mb1b, whmBlocked, whmUnrestricted)));
         }
@@ -82,11 +86,15 @@ public sealed class QualityController : SapControllerBase
 
         var mb1b   = await _pool.ExecuteAsync(QualityHelpers.BuildMb1bBlockedRequest(body, "UNBLOCK"),          ct);
 
-        if (body.StorageLocation == "1710" || body.StorageLocation == "1711") 
+        if (body.StorageLocation == "1710" || body.StorageLocation == "1711")
         {
             var (blocked, unrestricted) = QualityHelpers.PrepTransferOrderRequest(body, "UNBLOCK");
-            var whmBlocked = await _pool.ExecuteAsync(QualityHelpers.BuildTransferOrderRequest(blocked),   ct);
-            var whmUnrestricted    = await _pool.ExecuteAsync(QualityHelpers.BuildTransferOrderRequest(unrestricted),      ct);
+
+            var binError = await CheckDestinationBinsAsync(blocked, unrestricted, ct);
+            if (binError is not null) return binError;
+
+            var whmBlocked = await _pool.ExecuteAsync(WarehouseHelpers.BuildTransferOrderRequest(blocked),   ct);
+            var whmUnrestricted    = await _pool.ExecuteAsync(WarehouseHelpers.BuildTransferOrderRequest(unrestricted),      ct);
             return Ok(ApiResponse<QualityMb1bResponse>.Ok(
                 QualityHelpers.ParseQualityResponse(mb1b, whmBlocked, whmUnrestricted)));
         }
@@ -99,5 +107,30 @@ public sealed class QualityController : SapControllerBase
         };
     }
 
+    // Checks both transfer orders' destination bins exist (LAGP) before either
+    // is sent to L_TO_CREATE_SINGLE — same WarehouseHelpers.BuildBinCheckRequest/
+    // BinExists check used by WarehouseController.CreateTransferOrder, and for
+    // the same reason: an invalid bin fails that RFC ungracefully (no real SAP
+    // error message, connection torn down and needing to reconnect) rather
+    // than with a clean business error. One of the two destinations here is
+    // always the fixed 922/BLOCK bin (which should always exist), but it's
+    // simplest and cheapest to check both rather than work out which one is
+    // user-supplied for BLOCK vs UNBLOCK. Returns null if both bins exist, or
+    // an UnprocessableEntity result to return directly if either is missing.
+    private async Task<IActionResult?> CheckDestinationBinsAsync(
+        CreateTransferOrderRequest req1, CreateTransferOrderRequest req2, CancellationToken ct)
+    {
+        foreach (var req in new[] { req1, req2 })
+        {
+            var binCheck = await _pool.ExecuteAsync(
+                WarehouseHelpers.BuildBinCheckRequest(req.DestinationType, req.DestinationBin), ct);
 
+            if (!WarehouseHelpers.BinExists(binCheck))
+            {
+                var msg = $"Destination bin {req.DestinationType}/{req.DestinationBin} does not exist in SAP warehouse {WarehouseHelpers.Warehouse}. Check the storage type and bin and try again.";
+                return UnprocessableEntity(ApiResponse<QualityMb1bResponse>.Fail("422", msg, new QualityMb1bResponse()));
+            }
+        }
+        return null;
+    }
 }
