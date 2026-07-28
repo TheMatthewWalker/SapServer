@@ -7,11 +7,13 @@ namespace SapServer.Models.Bapi;
 /// <summary>Optional filters for stock queries. Bound from [FromQuery] parameters.</summary>
 public sealed class StockQuery
 {
-    public string? Material    { get; init; }
-    public string? StorageType { get; init; }
-    public string? Bin         { get; init; }
-    public string? Batch       { get; init; }
-    public int     RowCount    { get; init; } = 9999;
+    public string? Material        { get; init; }
+    public string? StorageType     { get; init; }
+    public string? Bin             { get; init; }
+    public string? Batch           { get; init; }
+    public string? StorageLocation { get; init; } // LGORT
+    public string? StockCategory   { get; init; } // BESTQ
+    public int     RowCount        { get; init; } = 9999;
 }
 
 /// <summary>A single quant row from the LQUA table.</summary>

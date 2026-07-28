@@ -42,6 +42,12 @@ internal static class WarehouseHelpers
         if (!string.IsNullOrWhiteSpace(query.Batch))
             builder.WhereCondition($"LQUA~CHARG EQ '{query.Batch}'");
 
+        if (!string.IsNullOrWhiteSpace(query.StorageLocation))
+            builder.WhereCondition($"LQUA~LGORT EQ '{query.StorageLocation}'");
+
+        if (!string.IsNullOrWhiteSpace(query.StockCategory))
+            builder.WhereCondition($"LQUA~BESTQ EQ '{query.StockCategory}'");
+
         builder.ReadTable("data_display"); // no fields → WA column only
 
         return builder.Build();
