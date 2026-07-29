@@ -122,12 +122,20 @@ public sealed class QualityController : SapControllerBase
     {
         foreach (var req in new[] { req1, req2 })
         {
+            // Same fix as WarehouseController.CreateTransferOrder: pad the
+            // user-typed bin (BLOCK is a fixed literal and already >= 10
+            // chars, so SapPad.Pad leaves it alone either way) before the
+            // LAGP existence check, not just inside BuildTransferOrderRequest
+            // further down — otherwise an unpadded numeric bin here false-
+            // negatives the same way it did for the plain transfer-order flow.
+            var destinationBin = SapPad.Pad(req.DestinationBin, 10);
+
             var binCheck = await _pool.ExecuteAsync(
-                WarehouseHelpers.BuildBinCheckRequest(req.DestinationType, req.DestinationBin), ct);
+                WarehouseHelpers.BuildBinCheckRequest(req.DestinationType, destinationBin), ct);
 
             if (!WarehouseHelpers.BinExists(binCheck))
             {
-                var msg = $"Destination bin {req.DestinationType}/{req.DestinationBin} does not exist in SAP warehouse {WarehouseHelpers.Warehouse}. Check the storage type and bin and try again.";
+                var msg = $"Destination bin {req.DestinationType}/{destinationBin} does not exist in SAP warehouse {WarehouseHelpers.Warehouse}. Check the storage type and bin and try again.";
                 return UnprocessableEntity(ApiResponse<QualityMb1bResponse>.Fail("422", msg, new QualityMb1bResponse()));
             }
         }

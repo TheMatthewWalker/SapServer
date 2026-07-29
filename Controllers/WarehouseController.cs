@@ -88,12 +88,22 @@ public sealed class WarehouseController : SapControllerBase
         //_logger.LogInformation(
         //"User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "transfer-order");
 
+        // Pad here before the LAGP existence check, not just inside
+        // BuildTransferOrderRequest below — LAGP~LGPLA stores bin codes
+        // zero-padded to 10 characters, so a user typing e.g. "123" instead
+        // of "0000000123" was failing this pre-check (a false "bin does not
+        // exist") even though the padded RFC call further down would have
+        // worked fine. SapPad.Pad is idempotent on already-padded/non-numeric
+        // values, so this is safe to apply unconditionally. See the picksheet
+        // staging flow (PicksheetStageBatch) for the same pad-then-check order.
+        var destinationBin = SapPad.Pad(body.DestinationBin, 10);
+
         var binCheck = await _pool.ExecuteAsync(
-            WarehouseHelpers.BuildBinCheckRequest(body.DestinationType, body.DestinationBin), ct);
+            WarehouseHelpers.BuildBinCheckRequest(body.DestinationType, destinationBin), ct);
 
         if (!WarehouseHelpers.BinExists(binCheck))
         {
-            var msg = $"Destination bin {body.DestinationType}/{body.DestinationBin} does not exist in SAP warehouse {WarehouseHelpers.Warehouse}. Check the storage type and bin and try again.";
+            var msg = $"Destination bin {body.DestinationType}/{destinationBin} does not exist in SAP warehouse {WarehouseHelpers.Warehouse}. Check the storage type and bin and try again.";
             return UnprocessableEntity(ApiResponse<CreateTransferOrderResponse>.Fail("422", msg,
                 new CreateTransferOrderResponse { Success = false, Messages = [new SapReturnMessage { Type = "E", Message = msg }] }));
         }

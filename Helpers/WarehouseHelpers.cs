@@ -205,6 +205,14 @@ internal static class WarehouseHelpers
                 .Field("BDC_OKCODE", "=BU")
             .Build();
 
+    // SourceBin/DestinationBin here come straight from the user-typed bin
+    // fields in the consignment transfer UI (warehouse.js), same as the
+    // plain (non-consignment) transfer-order flow — padded to 10 digits with
+    // SapPad.Pad below for the same reason as BuildTransferOrderRequest's
+    // I_VLPLA/I_NLPLA: LTAP-VLPLA/LTAP-NLPLA expect zero-padded numeric bin
+    // codes, and an unpadded value here would silently write a bin SAP
+    // doesn't recognise into the BDC screen rather than raising a clear
+    // error at all.
     internal static RfcRequest BuildToNonConsignRequest(ConsignmentMb1bRequest body) =>
         BdcBuilder.For("LT01")
             .Screen("SAPML03T", "0101")
@@ -225,7 +233,7 @@ internal static class WarehouseHelpers
                 .Field("LTAP-VLTYP",  "922")
                 .Field("LTAP-VLPLA",  "BLOCK")
                 .Field("LTAP-NLTYP",  body.DestinationType)
-                .Field("LTAP-NLPLA",  body.DestinationBin)
+                .Field("LTAP-NLPLA",  SapPad.Pad(body.DestinationBin, 10))
             .Build();
 
     internal static RfcRequest BuildToConsignRequest(ConsignmentMb1bRequest body) =>
@@ -246,7 +254,7 @@ internal static class WarehouseHelpers
                 .Field("BDC_OKCODE",  "/00")
                 .Field("RL03T-SQUIT", "X")
                 .Field("LTAP-VLTYP",  body.SourceType)
-                .Field("LTAP-VLPLA",  body.SourceBin)
+                .Field("LTAP-VLPLA",  SapPad.Pad(body.SourceBin, 10))
                 .Field("LTAP-NLTYP",  "922")
                 .Field("LTAP-NLPLA",  "BLOCK")
             .Build();
