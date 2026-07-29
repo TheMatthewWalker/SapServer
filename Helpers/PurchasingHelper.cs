@@ -70,11 +70,14 @@ internal static class PurchasingHelper
         {
             var item = body.Items[i];
 
-            // 1-based, 5-digit zero-padded item number — matches the VBA's
-            // Format((p - 1), "00000") exactly (sequential 00001, 00002...,
-            // NOT the usual SAP x10 item numbering — this is intentional,
-            // copied from working code).
-            var poItem = (i + 1).ToString("D5", CultureInfo.InvariantCulture);
+            // Standard SAP x10 item numbering — 00010, 00020, 00030... —
+            // matching what ME21N/ME23N and BAPI_PO_CREATE1's own
+            // auto-numbering (when PO_ITEM is left blank) would produce.
+            // Deliberately NOT the VBA source's original Format((p - 1),
+            // "00000") (sequential 00001, 00002...) — changed on the user's
+            // instruction so item numbers here read the same as they would
+            // anywhere else in SAP.
+            var poItem = ((i + 1) * 10).ToString("D5", CultureInfo.InvariantCulture);
             var hasAcctAssignment = !string.IsNullOrWhiteSpace(item.AcctAssCat);
             var hasMaterial       = !string.IsNullOrWhiteSpace(item.Material);
             var hasNetPrice       = item.NetPrice.HasValue;
