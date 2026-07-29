@@ -10,6 +10,14 @@ namespace SapServer.Models.Bapi;
 /// the unprocessed costs log, with one PoCreateItem per cost line on that
 /// shipment. PO creation is step one of a two-step flow; the goods-receipt/
 /// GRNI booking step is separate and not implemented here.
+///
+/// Also reused (unchanged) by the MRP order-suggestion "Create PO in SAP"
+/// flow — see CreatePoElevatedModels.cs — for plain stock lines with no
+/// account assignment. One deviation from the VBA source was needed there:
+/// PoCreateItem.NetPrice is nullable so those orders can be posted without a
+/// price and let SAP's own purchasing info record / condition determination
+/// (ME12) fill it in, since the MRP vendor/material master data this feature
+/// draws on doesn't store a price. See NetPrice's own comment below.
 /// </summary>
 public sealed class PoCreateRequest
 {
@@ -38,8 +46,17 @@ public sealed class PoCreateItem
     /// <summary>Order unit, e.g. "EA". Maps to POITEM-PO_UNIT.</summary>
     public string Unit { get; init; } = string.Empty;
 
-    /// <summary>Net price for the line. PRICE_UNIT is always set to Quantity, matching the VBA exactly.</summary>
-    public decimal NetPrice { get; init; }
+    /// <summary>
+    /// Net price for the line, or null to let SAP determine it itself from
+    /// the purchasing info record / condition records (ME12) during
+    /// BAPI_PO_CREATE1 — this is standard SAP price determination, which
+    /// only kicks in when NET_PRICE (and its POITEMX "X" flag) aren't sent
+    /// at all. When a value IS supplied, PRICE_UNIT is always set to
+    /// Quantity, matching the ported VBA exactly. Deliberately nullable
+    /// rather than defaulting to 0 — an explicit 0 would still be sent to
+    /// SAP as "the price is zero", not "work it out yourself".
+    /// </summary>
+    public decimal? NetPrice { get; init; }
 
     /// <summary>Schedule-line delivery date (dd.MM.yyyy or yyyyMMdd).</summary>
     public string DeliveryDate { get; init; } = string.Empty;

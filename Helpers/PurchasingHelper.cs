@@ -77,6 +77,7 @@ internal static class PurchasingHelper
             var poItem = (i + 1).ToString("D5", CultureInfo.InvariantCulture);
             var hasAcctAssignment = !string.IsNullOrWhiteSpace(item.AcctAssCat);
             var hasMaterial       = !string.IsNullOrWhiteSpace(item.Material);
+            var hasNetPrice       = item.NetPrice.HasValue;
             var qty                = Math.Round(item.Quantity, 3);
 
             var poitemRow = new Dictionary<string, object?>
@@ -85,12 +86,21 @@ internal static class PurchasingHelper
                 ["SHORT_TEXT"] = item.ShortText,
                 ["PLANT"]      = Plant,
                 ["QUANTITY"]   = qty,
-                ["NET_PRICE"]  = Math.Round(item.NetPrice, 2),
-                ["PRICE_UNIT"] = qty, // matches VBA: POitem(...,"PRICE_UNIT") = Round(inp(p,2),3) — same value as QUANTITY
                 ["PO_UNIT"]    = item.Unit,
                 ["ITEM_CAT"]   = "0",
                 ["ACCTASSCAT"] = item.AcctAssCat ?? ""
             };
+            // NET_PRICE/PRICE_UNIT are only sent (and only flagged "X" in
+            // POITEMX below) when a price was actually supplied — leaving
+            // both out entirely, rather than sending 0, is what lets SAP's
+            // own price determination (purchasing info record / condition
+            // records) fill the price in during BAPI_PO_CREATE1 instead of
+            // us silently posting a free-of-charge line. See PoCreateItem.NetPrice.
+            if (hasNetPrice)
+            {
+                poitemRow["NET_PRICE"]  = Math.Round(item.NetPrice!.Value, 2);
+                poitemRow["PRICE_UNIT"] = qty; // matches VBA: POitem(...,"PRICE_UNIT") = Round(inp(p,2),3) — same value as QUANTITY
+            }
             if (hasMaterial)       poitemRow["MATERIAL"]    = SapPad.Pad(item.Material, 18);
             if (hasAcctAssignment) poitemRow["MATL_GROUP"]  = item.MaterialGroup ?? "";
             builder.TableRow("POITEM", poitemRow);
@@ -100,14 +110,14 @@ internal static class PurchasingHelper
                 ["PO_ITEM"]    = poItem,
                 ["PLANT"]      = "X",
                 ["QUANTITY"]   = "X",
-                ["NET_PRICE"]  = "X",
                 ["PO_UNIT"]    = "X",
                 ["ITEM_CAT"]   = "X",
                 ["ACCTASSCAT"] = "X",
                 ["SHORT_TEXT"] = "X"
             };
-            if (hasMaterial)       poitemXRow["MATERIAL"]   = "X";
-            if (hasAcctAssignment) poitemXRow["MATL_GROUP"] = "X";
+            if (hasNetPrice)        poitemXRow["NET_PRICE"]  = "X";
+            if (hasMaterial)        poitemXRow["MATERIAL"]   = "X";
+            if (hasAcctAssignment)  poitemXRow["MATL_GROUP"] = "X";
             builder.TableRow("POITEMX", poitemXRow);
 
             builder.TableRow("POSCHEDULE", new

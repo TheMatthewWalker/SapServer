@@ -1,5 +1,5 @@
 @baseUrl = http://127.0.0.1:5200
-@token = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzcWwyMDA1LWJyaWRnZSIsImF1ZCI6InNhcC1zZXJ2ZXIiLCJzdWIiOiJkZXYiLCJ1c2VySWQiOjEsInJvbGUiOiJhZG1pbiIsImlhdCI6MTc4NTI0NTI2OCwiZXhwIjoxNzg1MjQ4ODY4fQ.oMlOKxi5U4N2cYSC4MtKcN7owXYRcXFSiT8DZPWplDU
+@token = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzcWwyMDA1LWJyaWRnZSIsImF1ZCI6InNhcC1zZXJ2ZXIiLCJzdWIiOiJkZXYiLCJ1c2VySWQiOjEsInJvbGUiOiJhZG1pbiIsImlhdCI6MTc4NTI1MDQwNSwiZXhwIjoxNzg1MjU0MDA1fQ.d-CE728OT3gCpzIxA-cAA260EX19y_Qpl6QqU-oX_84
 
 
 
@@ -63,6 +63,37 @@ Authorization: Bearer {{token}}
 ###
 
 
+### POST /api/purchasing/create-po-elevated  (PO-only counterpart to
+### create-po-and-receipt, for the MRP "Create PO in SAP" flow — no goods
+### receipt. NetPrice is deliberately OMITTED on this item to test whether
+### SAP fills it in itself from the ME12 purchasing info record/condition
+### records during BAPI_PO_CREATE1, per the user — swap in a real vendor
+### number + material that actually has a purchasing info record/condition
+### set up before running this for real. If the returned PO shows a price of
+### 0 instead, the condition determination isn't kicking in and NetPrice
+### will need to be supplied explicitly from Node after all.)
+POST {{baseUrl}}/api/purchasing/create-po-elevated
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+    "SapUsername": "MAWANOGB",
+    "SapPassword": "****",
+    "Vendor": "0000078712",
+    "Currency": "GBP",
+    "Items": [
+        {
+            "Material": "000000000000123456",
+            "ShortText": "MRP replenishment order",
+            "Quantity": 500,
+            "Unit": "KG",
+            "DeliveryDate": "10.08.2026"
+        }
+    ]
+}
+###
+
+
 ### POST /api/warehouse/stock-adjustment  (real call, TESTRUN — SAP simulates the
 ### posting and returns what it would have done, without creating a material
 ### document. Good first real-connectivity check: if this comes back with a
@@ -74,11 +105,11 @@ Authorization: Bearer {{token}}
 
 {
     "Material": "B6040/S",
-    "Batch": "0036431802",
-    "StorageType": "RO",
-    "StorageBin": "1711-RO-01",
+    "Batch": "0035108565",
+    "StorageType": "901",
+    "StorageBin": "0000861200",
     "StorageLocation": "1711",
-    "MovementType": "711",
+    "MovementType": "712",
     "Quantity": 25,
     "Unit": "M",
     "Reference": "stocktake corr."

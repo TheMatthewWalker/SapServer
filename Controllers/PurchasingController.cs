@@ -290,4 +290,82 @@ public sealed class PurchasingController : SapControllerBase
             await _pool.ReleaseElevatedWorkerAsync(worker);
         }
     }
+
+    /// <summary>
+    /// PO-creation-only counterpart to CreatePurchaseOrderAndReceipt, for the
+    /// MRP order-suggestion "Create PO in SAP" flow — same per-user-elevated
+    /// authorization (the shared service account can't create POs, see that
+    /// method's header comment), same logon->create->commit/rollback->logoff
+    /// shape on one pinned elevated worker slot, but no goods-receipt step:
+    /// nothing has arrived yet when an MRP order is placed, so there's
+    /// nothing to receive in this same call. That happens later, separately,
+    /// once the shipment is actually received.
+    /// </summary>
+    [HttpPost("create-po-elevated")]
+    [ProducesResponseType(typeof(ApiResponse<CreatePoElevatedResponse>), 200)]
+    [ProducesResponseType(typeof(ApiResponse<object>), 400)]
+    public async Task<IActionResult> CreatePurchaseOrderElevated(
+        [FromBody] CreatePoElevatedRequest body,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(body.SapUsername) || string.IsNullOrWhiteSpace(body.SapPassword))
+            return BadRequest(ApiResponse<CreatePoElevatedResponse>.Fail(
+                "MISSING_CREDENTIALS", "SAP username and password are required for this elevated action.",
+                new CreatePoElevatedResponse()));
+
+        if (body.Items.Count == 0)
+            return BadRequest(ApiResponse<CreatePoElevatedResponse>.Fail(
+                "NO_ITEMS", "At least one PO item is required.", new CreatePoElevatedResponse()));
+
+        var elevatedCreds = new SapConnectionOptions
+        {
+            System   = _poolOptions.ServiceAccount.System,
+            Client   = _poolOptions.ServiceAccount.Client,
+            SystemId = _poolOptions.ServiceAccount.SystemId,
+            User     = body.SapUsername,
+            Password = body.SapPassword,
+            Language = _poolOptions.ServiceAccount.Language,
+        };
+
+        var poRequest = PurchasingHelper.BuildPoCreateRequest(new PoCreateRequest
+        {
+            Vendor   = body.Vendor,
+            Currency = body.Currency,
+            DocDate  = body.DocDate,
+            Items    = body.Items,
+        });
+
+        var worker = await _pool.AcquireElevatedWorkerAsync(elevatedCreds, ct);
+        try
+        {
+            var poData     = await _pool.ExecuteOnWorkerAsync(worker, poRequest, ct);
+            var poResponse = PurchasingHelper.ParsePoCreateResult(poData);
+
+            if (!poResponse.Success)
+            {
+                await _pool.ExecuteOnWorkerAsync(worker, CommitHelper.BuildBapiRollback(), ct);
+                return BadRequest(ApiResponse<CreatePoElevatedResponse>.Fail(
+                    "INVALID_DATA", "Purchase order creation failed. Transaction rolled back.",
+                    new CreatePoElevatedResponse
+                    {
+                        PurchaseOrder = poResponse.PurchaseOrder,
+                        Success       = false,
+                        Messages      = poResponse.Messages,
+                    }));
+            }
+
+            await _pool.ExecuteOnWorkerAsync(worker, CommitHelper.BuildBapiCommit(), ct);
+
+            return Ok(ApiResponse<CreatePoElevatedResponse>.Ok(new CreatePoElevatedResponse
+            {
+                PurchaseOrder = poResponse.PurchaseOrder,
+                Success       = true,
+                Messages      = poResponse.Messages,
+            }));
+        }
+        finally
+        {
+            await _pool.ReleaseElevatedWorkerAsync(worker);
+        }
+    }
 }
