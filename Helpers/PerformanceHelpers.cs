@@ -197,6 +197,18 @@ internal static class PerformanceHelpers
     // VBELN+POSNN) returns every item's link for the whole delivery in one
     // RFC call, same one-call-per-document convention as
     // ZdelflagHelpers.BuildLipsItemDetailRequest.
+    //
+    // VBTYP_V = 'C' additionally pins the *preceding* document category to a
+    // standard sales order. Without this, VBFA is a flat document-flow log
+    // and a single delivery item can carry more than one predecessor row —
+    // e.g. leftover flow entries from a return, a credit memo request, or a
+    // reschedule — none of which is "the order this delivery item came
+    // from". Node's insertDeliveryOrderLinksIfMissing (routes/performancesql.js)
+    // keys dbo.DeliveryOrderLink on (DeliveryNumber, DeliveryItem) alone, so
+    // more than one predecessor row per item throws a PRIMARY KEY violation
+    // on insert and aborts VBFA resolution for the whole sync — this filter
+    // is the real fix for that (Node also defensively dedupes as a
+    // belt-and-braces safeguard, but should never need to with this in place).
 
     private static readonly string[] VbfaOrderLinkColumns = ["POSNN", "VBELV", "POSNV"];
 
@@ -212,7 +224,8 @@ internal static class PerformanceHelpers
 
         builder
             .WhereCondition($"VBFA~VBELN EQ '{SapPad.Pad(delivery, 10)}'")
-            .WhereCondition("VBFA~VBTYP_N EQ 'J'");
+            .WhereCondition("VBFA~VBTYP_N EQ 'J'")
+            .WhereCondition("VBFA~VBTYP_V EQ 'C'");
 
         return builder.ReadTable("data_display").Build();
     }
