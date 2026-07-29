@@ -222,14 +222,23 @@ internal static class PerformanceHelpers
         if (!response.Tables.TryGetValue("data_display", out var sapRows))
             return [];
 
+        // RFC_READ_TABLES/ZRFC_READ_TABLES applies ALPHA-output conversion to
+        // NUMC fields, which strips leading zeros (POSNN/VBELV/POSNV all come
+        // back short, e.g. "10" instead of "000010", "82871188" instead of
+        // "0082871188") — same behaviour already worked around elsewhere via
+        // SapPad.Pad (see ZdelflagHelpers.cs re-padding VBELN/KUNNR after a
+        // read). Node/AgreementSnapshot expect these zero-padded to the
+        // standard SAP widths (order/delivery 10 digits, item 6 digits) —
+        // dbo.OrderBookLineNotes and dbo.DeliveryOrderLink are keyed on that
+        // padded format — so pad here rather than leaving it to the caller.
         return SapDelimitedParser
             .ParseRows(sapRows, '|', skipHeader: true)
             .Where(cols => cols.Length >= VbfaOrderLinkColumns.Length)
             .Select(cols => new VbfaOrderLinkRow
             {
-                DeliveryItem = cols[0].Trim(),
-                OrderNumber  = cols[1].Trim(),
-                OrderItem    = cols[2].Trim(),
+                DeliveryItem = SapPad.Pad(cols[0].Trim(), 6),
+                OrderNumber  = SapPad.Pad(cols[1].Trim(), 10),
+                OrderItem    = SapPad.Pad(cols[2].Trim(), 6),
             })
             .ToArray();
     }
