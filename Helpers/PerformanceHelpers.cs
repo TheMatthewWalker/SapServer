@@ -180,6 +180,60 @@ internal static class PerformanceHelpers
         return rows.ToArray();
     }
 
+    // ── VBFA order/delivery link ─────────────────────────────────────────────
+    // Z_STOCK_REQ_LIST's ReferenceDocument (SRC03, see AgreementRow's class
+    // comment) holds the sales order number while the order is open, but
+    // flips to the delivery number the instant SAP creates a delivery
+    // against it. That silently breaks any key built off ReferenceDocument
+    // (Node uses it as the Order Book Risk/Won't Get/comment key) the moment
+    // a line is picked — this endpoint lets Node resolve a delivery number
+    // back to the sales order/item it came from via SAP's own document flow
+    // table, VBFA.
+    //
+    // VBTYP_N = 'J' selects VBFA rows whose *successor* document category is
+    // a delivery — i.e. "this row documents an order becoming this delivery
+    // item". On such a row, VBELV/POSNV (the *preceding* document) are the
+    // originating sales order number/item. Filtering on VBELN only (not
+    // VBELN+POSNN) returns every item's link for the whole delivery in one
+    // RFC call, same one-call-per-document convention as
+    // ZdelflagHelpers.BuildLipsItemDetailRequest.
+
+    private static readonly string[] VbfaOrderLinkColumns = ["POSNN", "VBELV", "POSNV"];
+
+    internal static RfcRequest BuildVbfaOrderLinkRequest(string delivery)
+    {
+        var builder = new RfcRequestBuilder(FnReadTables)
+            .Import("DELIMITER", "|")
+            .Import("NO_DATA",   " ")
+            .TableRow("QUERY_TABLES", new { TABNAME = "VBFA" });
+
+        foreach (var f in VbfaOrderLinkColumns)
+            builder.TableItemRow("query_FIELDS", new { TABNAME = "VBFA", FIELDNAME = f });
+
+        builder
+            .WhereCondition($"VBFA~VBELN EQ '{SapPad.Pad(delivery, 10)}'")
+            .WhereCondition("VBFA~VBTYP_N EQ 'J'");
+
+        return builder.ReadTable("data_display").Build();
+    }
+
+    internal static VbfaOrderLinkRow[] ParseVbfaOrderLinkRows(RfcResponse response)
+    {
+        if (!response.Tables.TryGetValue("data_display", out var sapRows))
+            return [];
+
+        return SapDelimitedParser
+            .ParseRows(sapRows, '|', skipHeader: true)
+            .Where(cols => cols.Length >= VbfaOrderLinkColumns.Length)
+            .Select(cols => new VbfaOrderLinkRow
+            {
+                DeliveryItem = cols[0].Trim(),
+                OrderNumber  = cols[1].Trim(),
+                OrderItem    = cols[2].Trim(),
+            })
+            .ToArray();
+    }
+
     // ── Invoicing (Z_SALE_ANAL_HIST) ─────────────────────────────────────────
     // SALE_HIST_T doubles as both the selection-criteria table (rows added
     // before the call, one populated field per row, e.g. {VKORG = "3012"}) and

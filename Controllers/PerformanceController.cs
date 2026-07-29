@@ -105,6 +105,26 @@ public sealed class PerformanceController : SapControllerBase
         return Ok(ApiResponse<AgreementRow[]>.Ok(rowsWithCur));
     }
 
+    // ── GET /api/performance/vbfa-order-link/{delivery} ─────────────────────
+    // Resolves a delivery number back to the sales order(s)/item(s) it came
+    // from via SAP's document flow table VBFA. Called by Node during the
+    // Agreements sync to fix up AgreementRow.ReferenceDocument when
+    // Z_STOCK_REQ_LIST has handed back a delivery number instead of the
+    // original order — see PerformanceHelpers.BuildVbfaOrderLinkRequest.
+
+    [HttpGet("vbfa-order-link/{delivery}")]
+    [ProducesResponseType(typeof(ApiResponse<VbfaOrderLinkRow[]>), 200)]
+    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
+    public async Task<IActionResult> GetVbfaOrderLink(string delivery, CancellationToken ct)
+    {
+        await CheckPermissionAsync(GetUserId(), PerformanceHelpers.FnReadTables, ct);
+
+        var response = await _pool.ExecuteAsync(PerformanceHelpers.BuildVbfaOrderLinkRequest(delivery), ct);
+        var rows = PerformanceHelpers.ParseVbfaOrderLinkRows(response);
+
+        return Ok(ApiResponse<VbfaOrderLinkRow[]>.Ok(rows));
+    }
+
     // ── GET /api/performance/invoicing ───────────────────────────────────
 
     [HttpGet("invoicing")]

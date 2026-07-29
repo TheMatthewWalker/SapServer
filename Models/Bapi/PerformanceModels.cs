@@ -60,6 +60,16 @@ public sealed class AgreementRow
     public decimal PickedStockAllocated { get; set; }
 }
 
+// ── VBFA order/delivery link ────────────────────────────────────────────────
+// One row per delivery item that has a preceding sales order in SAP's
+// document flow (VBFA, VBTYP_N = 'J'). See PerformanceHelpers.BuildVbfaOrderLinkRequest.
+public sealed class VbfaOrderLinkRow
+{
+    public string DeliveryItem { get; init; } = ""; // POSNN
+    public string OrderNumber  { get; init; } = ""; // VBELV
+    public string OrderItem    { get; init; } = ""; // POSNV
+}
+
 // ── Invoicing (Z_SALE_ANAL_HIST) ───────────────────────────────────────────
 public sealed class InvoiceRow
 {
