@@ -28,15 +28,17 @@ internal static class ConsignmentHelpers
     internal const string FnReadTables = "ZRFC_READ_TABLES";
     internal const string Plant        = "3012";
 
-    // MATNR, MBLNR, ZEILE, MENGE, MEINS, LIFNR (all MSEG), then BLDAT, BUDAT,
-    // LFBNR (all MKPF) — LFBNR (vendor delivery note number) is the standard
+    // MATNR, MBLNR, ZEILE, MENGE, MEINS, LIFNR, LFBNR (all MSEG), then BLDAT,
+    // BUDAT (both MKPF). LFBNR (vendor delivery note number) is the standard
     // SAP field for the vendor's own reference at goods receipt, and is what
     // the old workbooks' "Invoice Number" column (e.g. "RMIE 0041") was
-    // always hand-typed from — it lives on the document header (MKPF), not
-    // per line (MSEG), since one GR document can cover several materials off
-    // the same delivery note.
-    private static readonly string[] MsegColumns = ["MATNR", "MBLNR", "ZEILE", "MENGE", "MEINS", "LIFNR"];
-    private static readonly string[] MkpfColumns  = ["BLDAT", "BUDAT", "LFBNR"];
+    // always hand-typed from — it's an MSEG-level field (document number of
+    // a reference document, one per line), NOT MKPF as originally assumed
+    // here; registering it against MKPF made ZRFC_READ_TABLES reject the
+    // whole query with FIELD_NOT_VALID at runtime (2026-07-30 sync of
+    // vendor 4) — that error is what surfaced the mistake.
+    private static readonly string[] MsegColumns = ["MATNR", "MBLNR", "ZEILE", "MENGE", "MEINS", "LIFNR", "LFBNR"];
+    private static readonly string[] MkpfColumns  = ["BLDAT", "BUDAT"];
 
     /// <summary>
     /// Pulls consignment goods-receipt lines (movement 101, SOBKZ=K) for one
@@ -92,15 +94,18 @@ internal static class ConsignmentHelpers
             .Where(cols => cols.Length >= expectedCols)
             .Select(cols => new ConsignmentGrRow
             {
+                // Column order follows registration order: MsegColumns
+                // (MATNR, MBLNR, ZEILE, MENGE, MEINS, LIFNR, LFBNR) then
+                // MkpfColumns (BLDAT, BUDAT).
                 Material         = PerformanceHelpers.NormaliseMaterial(cols[0]),
                 MaterialDocument = cols[1],
                 MaterialDocItem  = cols[2],
                 Quantity         = decimal.TryParse(cols[3].Trim(), out var qty) ? qty : 0m,
                 Uom              = cols[4],
                 Vendor           = cols[5],
-                DocumentDate     = cols[6],
-                PostingDate      = cols[7],
-                InvoiceNumber    = cols[8],
+                InvoiceNumber    = cols[6],
+                DocumentDate     = cols[7],
+                PostingDate      = cols[8],
             })
             .ToArray();
     }
