@@ -83,20 +83,39 @@ internal static class ConsignmentHelpers
 
         builder
             .WhereCondition($"MSEG~WERKS EQ '{Plant}'")
-            // NOT "( MSEG~BWART EQ '101' OR MSEG~BWART EQ '102' )" — tried
-            // first, but returned pulled=0 (not even the pre-existing 101
-            // lines) on a live re-sync (2026-07-30). No other query in this
-            // codebase uses a parenthesised OR inside a single
-            // .WhereCondition() call; every other one is a plain EQ
-            // comparison, so ZRFC_READ_TABLES's dynamic-WHERE handling of
-            // that literal boolean grouping is unproven and evidently
-            // doesn't work here — it failed silently (0 rows, no exception)
-            // rather than raising FIELD_NOT_VALID or similar. IN is the
-            // standard, well-documented RFC_READ_TABLE-family idiom for
-            // "field is one of these values" and needs no grouping.
-            .WhereCondition("MSEG~BWART IN ('101','102')")
+            // Two dead ends before this (2026-07-30), both worth recording
+            // so nobody retries them: (1) "( MSEG~BWART EQ '101' OR
+            // MSEG~BWART EQ '102' )" — a parenthesised OR inside one
+            // .WhereCondition() call — came back pulled=0 (not even the
+            // pre-existing 101 lines), failing silently rather than raising
+            // FIELD_NOT_VALID. (2) The literal SQL fragment
+            // "MSEG~BWART IN ('101','102')" — also pulled=0. Both assumed
+            // ZRFC_READ_TABLES's dynamic WHERE accepts arbitrary literal
+            // Open-SQL text; it doesn't. This custom RFC has a dedicated
+            // extended interface for IN-type conditions instead: the
+            // condition text is just "IN opt", and the actual value(s) go in
+            // a separate "value_list" input table (TABNAME/FIELDNAME/SIGN/
+            // OPTION/LOW/HIGH — the classic RFC_READ_TABLE OPTIONS
+            // structure) — already proven working for MATNR in
+            // CostingHelper.BuildCostSheetRequest. SIGN=I ("Include"),
+            // OPTION=BT ("Between") with LOW='101'/HIGH='102' covers both
+            // movement types in a single value_list row since 101 and 102
+            // are the only two valid values in that range — simpler than
+            // CostingHelper's one-row-per-value approach, which would also
+            // work here (SIGN=I/OPTION=EQ, one row for '101' and one for
+            // '102') but isn't needed for a contiguous pair.
+            .WhereCondition("MSEG~BWART IN opt")
             .WhereCondition("MSEG~SOBKZ EQ 'K'")
-            .WhereCondition($"MSEG~LIFNR EQ '{vendor}'");
+            .WhereCondition($"MSEG~LIFNR EQ '{vendor}'")
+            .TableItemRow("value_list", new
+            {
+                TABNAME   = "MSEG",
+                FIELDNAME = "BWART",
+                SIGN      = "I",
+                OPTION    = "BT",
+                LOW       = "101",
+                HIGH      = "102"
+            });
 
         if (!string.IsNullOrWhiteSpace(sinceDate))
             builder.WhereCondition($"MKPF~BUDAT GE '{sinceDate}'");
