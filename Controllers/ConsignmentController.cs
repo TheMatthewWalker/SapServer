@@ -42,7 +42,24 @@ public sealed class ConsignmentController : SapControllerBase
         var response = await _pool.ExecuteAsync(
             ConsignmentHelpers.BuildVendorGrRequest(sapVendorNumber, sinceDate), ct);
 
-        return Ok(ApiResponse<ConsignmentGrRow[]>.Ok(ConsignmentHelpers.ParseVendorGrRows(response)));
+        // Temporary diagnostic logging (2026-07-30) — the BWART IN ('101','102')
+        // fix (cf5acc2) still came back pulled=0 on a live re-sync after
+        // rebuild, same as the OR/parens attempt before it. Logging the raw
+        // row count vs. the post-filter count separates two very different
+        // failure modes: rawRowCount=0 means SAP itself matched nothing
+        // (WHERE/vendor/plant issue, or this build still isn't the one
+        // running); rawRowCount>0 but parsedRowCount=0 means SAP returned
+        // rows but ParseVendorGrRows's `cols.Length >= expectedCols` filter
+        // is dropping every one of them (a delimited-column-count mismatch —
+        // plausible since SHKZG was just added as a 10th expected column).
+        // Remove once the sync is confirmed working again.
+        var rawRowCount = response.Tables.TryGetValue("data_display", out var rawRows) ? rawRows.Count : -1;
+        var parsedRows  = ConsignmentHelpers.ParseVendorGrRows(response);
+        _logger.LogInformation(
+            "[consignment-gr-diag] vendor={SapVendorNumber} sinceDate={SinceDate} rawRowCount={RawRowCount} parsedRowCount={ParsedRowCount} (build marker: BWART-IN)",
+            sapVendorNumber, sinceDate ?? "(none)", rawRowCount, parsedRows.Length);
+
+        return Ok(ApiResponse<ConsignmentGrRow[]>.Ok(parsedRows));
     }
 
     // ── GET /api/consignment/stock ─────────────────────────────────────────────
