@@ -1,4 +1,5 @@
 using SapServer.Models;
+using SapServer.Models.Bapi;
 
 namespace SapServer.Helpers;
 
