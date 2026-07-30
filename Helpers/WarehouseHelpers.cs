@@ -182,6 +182,186 @@ internal static class WarehouseHelpers
         return SapDelimitedParser.ParseRows(sapRows, '|', skipHeader: true).Count > 0;
     }
 
+    // ── Open Transfer Requirements (LTBK/LTBP) ──────────────────────────────────
+    //
+    // Mirrors wm_open_tr.xltm's Get_LAGP_LQUA sub exactly (its name is a
+    // leftover from an earlier version of that macro — it has always
+    // queried LTBK/LTBP/MARC/MKPF, not LAGP/LQUA): same 4-table join, same
+    // field list, same WHERE clause the warehouse team's own Excel macro has
+    // used for years to list open Transfer Requirements ready for LT04.
+    //
+    // LTBK~STATU NE 'E' excludes only error/cancelled TR headers — there's
+    // no explicit "not yet converted to a TO" flag in this select, because
+    // this SAP system evidently doesn't need one for TRs generated from a
+    // 131 movement (once fully converted, the LTBP row simply stops
+    // appearing here, same assumption the macro has always relied on).
+    // LTBP~BESTQ EQ '' excludes quality-blocked items (BESTQ 'Q') — the same
+    // gate CheckQualityBlock enforces again per-item immediately before
+    // posting, so a blocked line never shows up as pickable in the first
+    // place, matching the macro's own two-layer check.
+    internal static readonly string[] OpenTrColumns =
+        ["DISPO", "TBNUM", "MATNR", "LGORT", "MENGE", "MEINS", "BKTXT", "MBLNR", "BNAME", "BDATU", "BZEIT", "VLTYP", "VLPLA", "BWLVS"];
+
+    internal static RfcRequest BuildOpenTransferRequirementsRequest(string? mrpController)
+    {
+        var builder = new RfcRequestBuilder(FnReadTables)
+            .Import("DELIMITER", "|")
+            .Import("NO_DATA",   " ")
+            .TableRow("QUERY_TABLES", new { TABNAME = "LTBK" })
+            .TableRow("QUERY_TABLES", new { TABNAME = "LTBP" })
+            .TableRow("QUERY_TABLES", new { TABNAME = "MARC" })
+            .TableRow("QUERY_TABLES", new { TABNAME = "MKPF" });
+
+        builder
+            .TableItemRow("query_FIELDS", new { TABNAME = "MARC", FIELDNAME = "DISPO" })
+            .TableItemRow("query_FIELDS", new { TABNAME = "LTBP", FIELDNAME = "TBNUM" })
+            .TableItemRow("query_FIELDS", new { TABNAME = "LTBP", FIELDNAME = "MATNR" })
+            .TableItemRow("query_FIELDS", new { TABNAME = "LTBP", FIELDNAME = "LGORT" })
+            .TableItemRow("query_FIELDS", new { TABNAME = "LTBP", FIELDNAME = "MENGE" })
+            .TableItemRow("query_FIELDS", new { TABNAME = "LTBP", FIELDNAME = "MEINS" })
+            .TableItemRow("query_FIELDS", new { TABNAME = "MKPF", FIELDNAME = "BKTXT" })
+            .TableItemRow("query_FIELDS", new { TABNAME = "LTBK", FIELDNAME = "MBLNR" })
+            .TableItemRow("query_FIELDS", new { TABNAME = "LTBK", FIELDNAME = "BNAME" })
+            .TableItemRow("query_FIELDS", new { TABNAME = "LTBK", FIELDNAME = "BDATU" })
+            .TableItemRow("query_FIELDS", new { TABNAME = "LTBK", FIELDNAME = "BZEIT" })
+            .TableItemRow("query_FIELDS", new { TABNAME = "LTBK", FIELDNAME = "VLTYP" })
+            .TableItemRow("query_FIELDS", new { TABNAME = "LTBK", FIELDNAME = "VLPLA" })
+            .TableItemRow("query_FIELDS", new { TABNAME = "LTBK", FIELDNAME = "BWLVS" });
+
+        builder
+            .TableItemRow("join_FIELDS", new { TAB_FROM = "LTBK", FLD_FROM = "MANDT", TAB_TO = "LTBP", FLD_TO = "MANDT" })
+            .TableItemRow("join_FIELDS", new { TAB_FROM = "LTBK", FLD_FROM = "LGNUM", TAB_TO = "LTBP", FLD_TO = "LGNUM" })
+            .TableItemRow("join_FIELDS", new { TAB_FROM = "LTBK", FLD_FROM = "TBNUM", TAB_TO = "LTBP", FLD_TO = "TBNUM" })
+            .TableItemRow("join_FIELDS", new { TAB_FROM = "LTBP", FLD_FROM = "MANDT", TAB_TO = "MARC", FLD_TO = "MANDT" })
+            .TableItemRow("join_FIELDS", new { TAB_FROM = "LTBP", FLD_FROM = "MATNR", TAB_TO = "MARC", FLD_TO = "MATNR" })
+            .TableItemRow("join_FIELDS", new { TAB_FROM = "LTBP", FLD_FROM = "WERKS", TAB_TO = "MARC", FLD_TO = "WERKS" })
+            .TableItemRow("join_FIELDS", new { TAB_FROM = "LTBK", FLD_FROM = "MANDT", TAB_TO = "MKPF", FLD_TO = "MANDT" })
+            .TableItemRow("join_FIELDS", new { TAB_FROM = "LTBK", FLD_FROM = "MBLNR", TAB_TO = "MKPF", FLD_TO = "MBLNR" });
+
+        builder.WhereCondition($"LTBP~LGNUM EQ '{Warehouse}'");
+        builder.WhereCondition("LTBK~STATU NE 'E'");
+        builder.WhereCondition("LTBP~BESTQ EQ ''");
+
+        if (!string.IsNullOrWhiteSpace(mrpController))
+            builder.WhereCondition($"MARC~DISPO EQ '{mrpController}'");
+
+        return builder.ReadTable("data_display").Build();
+    }
+
+    internal static OpenTransferRequirementRow[] ParseOpenTransferRequirementRows(RfcResponse response)
+    {
+        if (!response.Tables.TryGetValue("data_display", out var sapRows))
+            return [];
+
+        return SapDelimitedParser
+            .ParseRows(sapRows, '|', skipHeader: true)
+            .Where(cols => cols.Length >= OpenTrColumns.Length)
+            .Select(cols => new OpenTransferRequirementRow
+            {
+                MrpController    = cols[0],
+                TrNumber         = cols[1],
+                Material         = cols[2],
+                StorageLocation  = cols[3],
+                Quantity         = decimal.TryParse(cols[4], out var qty) ? qty : 0m,
+                Uom              = cols[5],
+                DocumentText     = cols[6],
+                MaterialDocument = cols[7],
+                CreatedBy        = cols[8],
+                CreatedDate      = cols[9],
+                CreatedTime      = cols[10],
+                MovementType     = cols[13],
+            })
+            .ToArray();
+    }
+
+    // ── LT04 quality pre-check ──────────────────────────────────────────────────
+    //
+    // Mirrors create_LT04's own pre-check exactly (ati_code.bas):
+    //   sap_rt "LQUA", "CHARG eq '<pnr>' and WERKS eq '3012' and MATNR eq '<matnr>'", "BESTQ", resu
+    //   If resu(1) = "Q" Then <refuse — "not scanned out of firewall yet">
+    // A single-field LQUA lookup keyed on batch+material+plant, not the
+    // usual multi-column StockRow shape — kept separate from
+    // BuildStockRequest/ParseStockRows above rather than overloading them.
+    internal static RfcRequest BuildQualityBlockCheckRequest(string material, string palletOrBatch)
+    {
+        var builder = new RfcRequestBuilder(FnReadTables)
+            .Import("DELIMITER", "|")
+            .Import("NO_DATA",   " ")
+            .TableRow("QUERY_TABLES", new { TABNAME = "LQUA" })
+            .TableItemRow("query_FIELDS", new { TABNAME = "LQUA", FIELDNAME = "BESTQ" });
+
+        builder
+            .WhereCondition($"LQUA~CHARG EQ '{SapPad.Pad(palletOrBatch, 10)}'")
+            .WhereCondition($"LQUA~WERKS EQ '{Plant}'")
+            .WhereCondition($"LQUA~MATNR EQ '{SapPad.Pad(material, 18)}'");
+
+        return builder.ReadTable("data_display").Build();
+    }
+
+    internal static bool IsQualityBlocked(RfcResponse response)
+    {
+        if (!response.Tables.TryGetValue("data_display", out var sapRows))
+            return false;
+
+        var row = SapDelimitedParser.ParseRows(sapRows, '|', skipHeader: true).FirstOrDefault();
+        return row is { Length: > 0 } && row[0] == "Q";
+    }
+
+    // ── Create LT04 (create + auto-confirm TO from an open TR) ─────────────────
+    //
+    // Replicates transaction LT04 screen-for-screen exactly as recorded in
+    // wm_lt01.xltm's ati_code module (create_LT04 function) — see that
+    // recording for the ground truth this mirrors:
+    //   Screen 0131: enter warehouse + TR number, tick ALAKT ("adopt
+    //     quantities") and TBELI ("select item") so SAP pulls in the TR's
+    //     line straight away.
+    //   Screen 0104 (=P+ "create item"): LMEN2=0, then the destination
+    //     quantity/type/bin on the item-table row the recording used —
+    //     row index 5 (LTAPE-*(5)), preserved exactly as recorded since
+    //     this only ever needs to handle a single-item TR, matching this
+    //     warehouse's actual 131-movement-generated TRs.
+    //   Screen 0104 (=TAH1): commits that item row into the TO being built.
+    //   Screen 0102: RL03T-SQUIT = "X" — this is the "Adopt +
+    //     confirm" tickbox the operators tick manually in LT04 today, i.e.
+    //     the auto-confirm step that makes a second LT12 confirmation
+    //     unnecessary. LTAP-ZEUGN (reference) is the batch/pallet number,
+    //     or an explicit override when one's supplied — exactly as recorded.
+    //   Screen 0104 (=BU): save/post.
+    // Response parsing reuses ProductionHelpers.ParseBdcResponse/BdcResponse
+    // (the same MESSG-parsing helper every other BDC flow in this codebase
+    // uses) rather than a bespoke parser — Type == "S" is success, matching
+    // create_LT04's own `Left(mt04_message, 1) = "S"` check.
+    internal static RfcRequest BuildCreateLt04Request(CreateLt04Request body)
+    {
+        var destinationBin = SapPad.Pad(body.DestinationBin, 10);
+        var reference       = string.IsNullOrWhiteSpace(body.Reference)
+            ? SapPad.Pad(body.PalletOrBatch, 10)
+            : body.Reference;
+
+        return BdcBuilder.For("LT04")
+            .Screen("SAPML03T", "0131")
+                .Field("BDC_OKCODE",  "/00")
+                .Field("LTAK-LGNUM",  Warehouse)
+                .Field("LTBK-TBNUM",  body.TrNumber)
+                .Field("RL03T-ALAKT", "X")
+                .Field("RL03T-TBELI", "X")
+            .Screen("SAPML03T", "0104")
+                .Field("BDC_OKCODE",     "=P+")
+                .Field("RL03T-LMEN2",    "0")
+                .Field("LTAPE-ANFME(5)", body.Quantity)
+                .Field("LTAPE-NLTYP(5)", body.DestinationType)
+                .Field("LTAPE-NLPLA(5)", destinationBin)
+            .Screen("SAPML03T", "0104")
+                .Field("BDC_OKCODE", "=TAH1")
+            .Screen("SAPML03T", "0102")
+                .Field("BDC_OKCODE",  "/00")
+                .Field("RL03T-SQUIT", "X")
+                .Field("LTAP-ZEUGN",  reference)
+            .Screen("SAPML03T", "0104")
+                .Field("BDC_OKCODE", "=BU")
+            .Build();
+    }
+
     // ── Consignment MB1B ──────────────────────────────────────────────────────
 
     internal static RfcRequest BuildMb1bRequest(ConsignmentMb1bRequest body) =>

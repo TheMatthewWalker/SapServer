@@ -366,6 +366,67 @@ public sealed class WarehouseController : SapControllerBase
             Messages:            toResult.Messages)));
     }
 
+    // ── GET /api/warehouse/open-transfer-requirements ─────────────────────────
+    //
+    // Backs the Transfer Requirements (LT04) tile — lists open TRs (LTBK/LTBP
+    // joined to MARC for MRP controller and MKPF for the doc text), ready to
+    // be turned into a confirmed TO. Same ZRFC_READ_TABLES permission gate as
+    // GetStock above, since it's the same read-only RFC. Optional
+    // mrpController filter lets the frontend narrow the list the same way
+    // the source Excel macro's operators already work by MRP controller.
+
+    [HttpGet("open-transfer-requirements")]
+    [ProducesResponseType(typeof(ApiResponse<OpenTransferRequirementRow[]>), 200)]
+    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
+    public async Task<IActionResult> GetOpenTransferRequirements(
+        [FromQuery] string? mrpController,
+        CancellationToken ct)
+    {
+        await CheckPermissionAsync(GetUserId(), WarehouseHelpers.FnReadTables, ct);
+
+        var response = await _pool.ExecuteAsync(
+            WarehouseHelpers.BuildOpenTransferRequirementsRequest(mrpController), ct);
+        return Ok(ApiResponse<OpenTransferRequirementRow[]>.Ok(
+            WarehouseHelpers.ParseOpenTransferRequirementRows(response)));
+    }
+
+    // ── POST /api/warehouse/create-lt04 ───────────────────────────────────────
+    //
+    // Replicates transaction LT04 (create + auto-confirm a TO from an open TR)
+    // exactly as recorded in wm_lt01.xltm's create_LT04 — see
+    // WarehouseHelpers.BuildCreateLt04Request for the full screen mapping.
+    // Runs create_LT04's own quality pre-check first (LQUA~BESTQ = 'Q' means
+    // the batch hasn't been scanned out of firewall yet) and fails fast with
+    // a 422 before ever calling LT04, mirroring the bin-existence check in
+    // CreateTransferOrder above. Gated on FnConsignment (Z_RFC_CALL_TRANSACTION)
+    // rather than a bespoke permission — it's the same underlying RFC every
+    // other BDC-driven transaction in this controller (consignment-mb1b) is
+    // gated on.
+    [HttpPost("create-lt04")]
+    [ProducesResponseType(typeof(ApiResponse<BdcResponse>), 200)]
+    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
+    [ProducesResponseType(typeof(ApiResponse<object>), 422)]
+    public async Task<IActionResult> CreateLt04(
+        [FromBody] CreateLt04Request body,
+        CancellationToken ct)
+    {
+        await CheckPermissionAsync(GetUserId(), WarehouseHelpers.FnConsignment, ct);
+
+        var qualityCheck = await _pool.ExecuteAsync(
+            WarehouseHelpers.BuildQualityBlockCheckRequest(body.Material, body.PalletOrBatch), ct);
+
+        if (WarehouseHelpers.IsQualityBlocked(qualityCheck))
+        {
+            const string msg = "This has not been scanned out of firewall yet. Unable to LT04.";
+            return UnprocessableEntity(ApiResponse<BdcResponse>.Fail("422", msg,
+                new BdcResponse { Type = "E", Message = msg }));
+        }
+
+        var response = await _pool.ExecuteAsync(WarehouseHelpers.BuildCreateLt04Request(body), ct);
+        var result   = ProductionHelpers.ParseBdcResponse(response);
+        return Ok(ApiResponse<BdcResponse>.Ok(result));
+    }
+
     // ── POST /api/warehouse/consignment-mb1b ──────────────────────────────────
 
     [HttpPost("consignment-mb1b")]

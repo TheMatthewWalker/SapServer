@@ -1,5 +1,5 @@
 @baseUrl = http://127.0.0.1:5200
-@token = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzcWwyMDA1LWJyaWRnZSIsImF1ZCI6InNhcC1zZXJ2ZXIiLCJzdWIiOiJkZXYiLCJ1c2VySWQiOjEsInJvbGUiOiJhZG1pbiIsImlhdCI6MTc4NTI1MDQwNSwiZXhwIjoxNzg1MjU0MDA1fQ.d-CE728OT3gCpzIxA-cAA260EX19y_Qpl6QqU-oX_84
+@token = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzcWwyMDA1LWJyaWRnZSIsImF1ZCI6InNhcC1zZXJ2ZXIiLCJzdWIiOiJkZXYiLCJ1c2VySWQiOjEsInJvbGUiOiJhZG1pbiIsImlhdCI6MTc4NTMzOTA1MiwiZXhwIjoxNzg1MzQyNjUyfQ.iVXR2Aie3WHsiRlH0IAgl-qKwn-wrz2Ftaou4dgk7Sc
 
 
 
@@ -9,7 +9,7 @@ Content-Type: application/json
 Authorization: Bearer {{token}}
 
 {
-    "FunctionName": "BAPI_GL_GETGLACCPERIODBALANCES"
+    "FunctionName": "L_TO_CREATE_TR"
 }
 ###
 
@@ -114,5 +114,34 @@ Authorization: Bearer {{token}}
     "Unit": "M",
     "Reference": "stocktake corr."
     //"TestRun": true
+}
+###
+
+
+### GET /api/warehouse/open-transfer-requirements  (LT04 tile — lists open TRs
+### ready to be confirmed. Optional mrpController filter.)
+GET {{baseUrl}}/api/warehouse/open-transfer-requirements
+Content-Type: application/json
+Authorization: Bearer {{token}}
+###
+
+
+### POST /api/warehouse/create-lt04  (replicates transaction LT04 exactly as
+### recorded in wm_lt01.xltm's create_LT04 — see WarehouseHelpers.
+### BuildCreateLt04Request. Swap in a real open TR number + material/batch
+### combination from open-transfer-requirements above before running for
+### real; a quality-blocked batch (LQUA BESTQ='Q') will fail fast with a 422
+### instead of ever reaching SAP's LT04.)
+POST {{baseUrl}}/api/warehouse/create-lt04
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+    "TrNumber": "0000123456",
+    "Material": "B6040/S",
+    "Quantity": 25,
+    "DestinationType": "001",
+    "DestinationBin": "A-01-01",
+    "PalletOrBatch": "0035108565"
 }
 ###

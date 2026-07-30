@@ -106,6 +106,57 @@ public sealed class ConsignmentMb1bResponse
 }
 
 
+// ── Open Transfer Requirements (LTBK/LTBP) ──────────────────────────────────
+//
+// Backs the "Transfer Requirements (LT04)" tile — replicates the list this
+// warehouse team's existing Excel macro (wm_open_tr.xltm, Get_LAGP_LQUA sub)
+// has always shown operators: open TRs auto-created by a 131 goods movement,
+// ready to be turned into a confirmed TO via LT04. See WarehouseHelpers.
+// BuildOpenTransferRequirementsRequest for the exact join this mirrors.
+
+public sealed class OpenTransferRequirementRow
+{
+    public string  TrNumber         { get; init; } = string.Empty; // LTBP-TBNUM
+    public string  Material         { get; init; } = string.Empty; // LTBP-MATNR
+    public string  StorageLocation  { get; init; } = string.Empty; // LTBP-LGORT
+    public decimal Quantity         { get; init; }                  // LTBP-MENGE
+    public string  Uom              { get; init; } = string.Empty; // LTBP-MEINS
+    public string  MrpController    { get; init; } = string.Empty; // MARC-DISPO
+    public string  DocumentText     { get; init; } = string.Empty; // MKPF-BKTXT
+    public string  MaterialDocument { get; init; } = string.Empty; // LTBK-MBLNR
+    public string  CreatedBy        { get; init; } = string.Empty; // LTBK-BNAME
+    public string  CreatedDate      { get; init; } = string.Empty; // LTBK-BDATU
+    public string  CreatedTime      { get; init; } = string.Empty; // LTBK-BZEIT
+    public string  MovementType     { get; init; } = string.Empty; // LTBK-BWLVS
+}
+
+// ── Create LT04 (create + auto-confirm TO from an open TR) ─────────────────
+//
+// Replicates transaction LT04 exactly as recorded in wm_lt01.xltm's
+// ati_code module (create_LT04 function) — see WarehouseHelpers.
+// BuildCreateLt04Request for the full screen-by-screen mapping. The
+// destination storage type/bin are operator-entered (this warehouse's LT04
+// process has never used automatic bin determination), matching the
+// existing manual workflow exactly.
+
+public sealed class CreateLt04Request
+{
+    [Required, MinLength(1)] public string  TrNumber        { get; init; } = string.Empty; // LTBK-TBNUM
+    [Required, MinLength(1)] public string  Material        { get; init; } = string.Empty; // quality pre-check (LQUA-MATNR), padded to 18
+    [Range(0.001, double.MaxValue, ErrorMessage = "Quantity must be greater than zero.")]
+                             public decimal Quantity        { get; init; }                  // LTAPE-ANFME(5)
+    [Required, MinLength(1)] public string  DestinationType { get; init; } = string.Empty; // LTAPE-NLTYP(5)
+    [Required, MinLength(1)] public string  DestinationBin  { get; init; } = string.Empty; // LTAPE-NLPLA(5), padded to 10
+    [Required, MinLength(1)] public string  PalletOrBatch   { get; init; } = string.Empty; // "pnr" — quality pre-check (LQUA-CHARG) + default LTAP-ZEUGN reference, padded to 10
+                             public string? Reference       { get; init; }                  // "charge" override for LTAP-ZEUGN — defaults to PalletOrBatch when blank, exactly as recorded
+}
+
+// Response: reuses SapServer.Models.Bapi.BdcResponse (ProductionHelpers.
+// ParseBdcResponse) exactly like ProductionController.Backflush does — a
+// single BDC call with one MESSG result doesn't need its own wrapper type.
+// Type == "S" is success, matching create_LT04's own Left(msg,1)="S" check.
+
+
 // ── SetDeliveryWeight (ZDEL) ─────────────────────────────────────────────────
 //
 // Records the delivery's actual picked/packed figures back onto LIKP once a
