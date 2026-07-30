@@ -57,13 +57,19 @@ internal static class ConsignmentHelpers
     /// <paramref name="sapVendorNumber"/> should be the raw
     /// dbo.Vendor.SapVendorNumber value (padding is handled here, matching
     /// SapPad.Pad's idempotent-on-already-padded-values behaviour used
-    /// everywhere else in this codebase). <paramref name="sinceDate"/> is an
-    /// optional posting-date floor (SAP dd.mm.yyyy format) to keep the daily
-    /// re-sync cheap once a vendor has years of history — omit it for a
-    /// vendor's first-ever sync to pull everything.
+    /// everywhere else in this codebase). <paramref name="materials"/> is
+    /// the vendor's known material list (Node's dbo.VendorMaterial) and is
+    /// the primary/selective filter here — see the WHERE-building comment
+    /// below for why. <paramref name="sinceDate"/> is an optional
+    /// posting-date floor (SAP dd.mm.yyyy format) to keep the daily re-sync
+    /// cheap once a vendor has years of history — omit it for a vendor's
+    /// first-ever sync to pull everything.
     /// </summary>
-    internal static RfcRequest BuildVendorGrRequest(string sapVendorNumber, string? sinceDate = null)
+    internal static RfcRequest BuildVendorGrRequest(string sapVendorNumber, IReadOnlyList<string> materials, string? sinceDate = null)
     {
+        if (materials.Count == 0)
+            throw new ArgumentException("At least one material is required — see ConsignmentController.GetVendorGr.", nameof(materials));
+
         var vendor = SapPad.Pad(sapVendorNumber, 10);
 
         var builder = new RfcRequestBuilder(FnReadTables)
@@ -81,12 +87,37 @@ internal static class ConsignmentHelpers
             .TableItemRow("join_FIELDS", new { TAB_FROM = "MSEG", FLD_FROM = "MANDT", TAB_TO = "MKPF", FLD_TO = "MANDT" })
             .TableItemRow("join_FIELDS", new { TAB_FROM = "MSEG", FLD_FROM = "MBLNR", TAB_TO = "MKPF", FLD_TO = "MBLNR" });
 
+        builder.WhereCondition($"MSEG~WERKS EQ '{Plant}'");
+
+        // MATNR IN opt is deliberately the primary/selective filter here —
+        // Matthew's own experience running equivalent reports directly in
+        // SAP is that filtering MSEG on a known material list runs much
+        // faster than filtering on LIFNR (2026-07-30; this is what fixed a
+        // >3-minute first-sync timeout even after the BWART filter below was
+        // already working correctly). Same IN-opt/value_list interface as
+        // BWART — see that condition's comment for why literal SQL text
+        // doesn't work with this custom RFC. OPTION left blank (not "EQ")
+        // for each value, matching CostingHelper.BuildCostSheetRequest's
+        // already-proven MATNR IN opt usage exactly.
+        builder.WhereCondition("MSEG~MATNR IN opt");
+        foreach (var material in materials)
+        {
+            builder.TableItemRow("value_list", new
+            {
+                TABNAME   = "MSEG",
+                FIELDNAME = "MATNR",
+                SIGN      = "I",
+                OPTION    = "",
+                LOW       = SapPad.Pad(material, 18),
+                HIGH      = ""
+            });
+        }
+
         builder
-            .WhereCondition($"MSEG~WERKS EQ '{Plant}'")
-            // Two dead ends before this (2026-07-30), both worth recording
-            // so nobody retries them: (1) "( MSEG~BWART EQ '101' OR
-            // MSEG~BWART EQ '102' )" — a parenthesised OR inside one
-            // .WhereCondition() call — came back pulled=0 (not even the
+            // Two dead ends before landing on IN opt (2026-07-30), both
+            // worth recording so nobody retries them: (1) "( MSEG~BWART EQ
+            // '101' OR MSEG~BWART EQ '102' )" — a parenthesised OR inside
+            // one .WhereCondition() call — came back pulled=0 (not even the
             // pre-existing 101 lines), failing silently rather than raising
             // FIELD_NOT_VALID. (2) The literal SQL fragment
             // "MSEG~BWART IN ('101','102')" — also pulled=0. Both assumed
@@ -96,16 +127,16 @@ internal static class ConsignmentHelpers
             // condition text is just "IN opt", and the actual value(s) go in
             // a separate "value_list" input table (TABNAME/FIELDNAME/SIGN/
             // OPTION/LOW/HIGH — the classic RFC_READ_TABLE OPTIONS
-            // structure) — already proven working for MATNR in
-            // CostingHelper.BuildCostSheetRequest. SIGN=I ("Include"),
-            // OPTION=BT ("Between") with LOW='101'/HIGH='102' covers both
-            // movement types in a single value_list row since 101 and 102
-            // are the only two valid values in that range — simpler than
-            // CostingHelper's one-row-per-value approach, which would also
-            // work here (SIGN=I/OPTION=EQ, one row for '101' and one for
-            // '102') but isn't needed for a contiguous pair.
+            // structure). SIGN=I ("Include"), OPTION=BT ("Between") with
+            // LOW='101'/HIGH='102' covers both movement types in a single
+            // value_list row since 101 and 102 are the only two valid values
+            // in that range.
             .WhereCondition("MSEG~BWART IN opt")
             .WhereCondition("MSEG~SOBKZ EQ 'K'")
+            // Kept as a belt-and-suspenders filter now that MATNR is doing
+            // the selective work above — cheap once MATNR has already
+            // narrowed the result set, and guards against a material ever
+            // being mis-assigned to the wrong vendor in dbo.VendorMaterial.
             .WhereCondition($"MSEG~LIFNR EQ '{vendor}'")
             .TableItemRow("value_list", new
             {

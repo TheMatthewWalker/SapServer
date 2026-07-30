@@ -27,37 +27,42 @@ public sealed class ConsignmentController : SapControllerBase
     //
     // Consignment goods-receipt lines for one vendor (MSEG BWART=101 or 102
     // reversal/SOBKZ=K, joined to MKPF) — see
-    // ConsignmentHelpers.BuildVendorGrRequest.
+    // ConsignmentHelpers.BuildVendorGrRequest. materials (comma-separated
+    // MATNR list, Node's dbo.VendorMaterial for this vendor) is required and
+    // is the primary/selective WHERE filter, not just an LIFNR safety net —
+    // see BuildVendorGrRequest's comment for why (LIFNR filtering alone was
+    // too slow in production, 2026-07-30).
     [HttpGet("gr")]
     [ProducesResponseType(typeof(ApiResponse<ConsignmentGrRow[]>), 200)]
     [ProducesResponseType(typeof(ApiResponse<object>), 400)]
     public async Task<IActionResult> GetVendorGr(
         [FromQuery] string sapVendorNumber,
+        [FromQuery] string? materials,
         [FromQuery] string? sinceDate,
         CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(sapVendorNumber))
             return BadRequest(ApiResponse<ConsignmentGrRow[]>.Fail("400", "sapVendorNumber is required.", []));
 
-        var response = await _pool.ExecuteAsync(
-            ConsignmentHelpers.BuildVendorGrRequest(sapVendorNumber, sinceDate), ct);
+        var materialList = (materials ?? string.Empty)
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
-        // Temporary diagnostic logging (2026-07-30) — the BWART IN ('101','102')
-        // fix (cf5acc2) still came back pulled=0 on a live re-sync after
-        // rebuild, same as the OR/parens attempt before it. Logging the raw
-        // row count vs. the post-filter count separates two very different
-        // failure modes: rawRowCount=0 means SAP itself matched nothing
-        // (WHERE/vendor/plant issue, or this build still isn't the one
-        // running); rawRowCount>0 but parsedRowCount=0 means SAP returned
-        // rows but ParseVendorGrRows's `cols.Length >= expectedCols` filter
-        // is dropping every one of them (a delimited-column-count mismatch —
-        // plausible since SHKZG was just added as a 10th expected column).
-        // Remove once the sync is confirmed working again.
+        if (materialList.Length == 0)
+            return BadRequest(ApiResponse<ConsignmentGrRow[]>.Fail("400",
+                "materials is required (comma-separated MATNR list) — see ConsignmentHelpers.BuildVendorGrRequest.", []));
+
+        var response = await _pool.ExecuteAsync(
+            ConsignmentHelpers.BuildVendorGrRequest(sapVendorNumber, materialList, sinceDate), ct);
+
+        // Temporary diagnostic logging (2026-07-30, kept through the
+        // MATNR-filter change) — logs raw SAP row count vs. post-filter
+        // count so a future empty/slow result is diagnosable from the log
+        // alone rather than another blind guess-and-rebuild cycle.
         var rawRowCount = response.Tables.TryGetValue("data_display", out var rawRows) ? rawRows.Count : -1;
         var parsedRows  = ConsignmentHelpers.ParseVendorGrRows(response);
         _logger.LogInformation(
-            "[consignment-gr-diag] vendor={SapVendorNumber} sinceDate={SinceDate} rawRowCount={RawRowCount} parsedRowCount={ParsedRowCount} (build marker: BWART-IN)",
-            sapVendorNumber, sinceDate ?? "(none)", rawRowCount, parsedRows.Length);
+            "[consignment-gr-diag] vendor={SapVendorNumber} materialCount={MaterialCount} sinceDate={SinceDate} rawRowCount={RawRowCount} parsedRowCount={ParsedRowCount} (build marker: MATNR-filter)",
+            sapVendorNumber, materialList.Length, sinceDate ?? "(none)", rawRowCount, parsedRows.Length);
 
         return Ok(ApiResponse<ConsignmentGrRow[]>.Ok(parsedRows));
     }
