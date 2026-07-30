@@ -26,45 +26,42 @@ public sealed class ConsignmentController : SapControllerBase
     // ── GET /api/consignment/gr ────────────────────────────────────────────────
     //
     // Consignment goods-receipt lines for one vendor (MSEG BWART=101 or 102
-    // reversal/SOBKZ=K, joined to MKPF) — see
-    // ConsignmentHelpers.BuildVendorGrRequest. materials (comma-separated
-    // MATNR list, Node's dbo.VendorMaterial for this vendor) is required and
-    // is the primary/selective WHERE filter, not just an LIFNR safety net —
-    // see BuildVendorGrRequest's comment for why (LIFNR filtering alone was
-    // too slow in production, 2026-07-30).
+    // reversal/SOBKZ=K, joined to MKPF), fetched as two separate RFC calls
+    // (one per movement type) and merged here — see
+    // ConsignmentHelpers.BuildVendorGrRequest for why: every attempt at
+    // filtering on more than one BWART value in a single call (parenthesised
+    // OR, literal SQL IN, RFC_READ_TABLE-style IN-opt/value_list) came back
+    // with zero rows, so this reverts to the single-value EQ condition
+    // that's actually confirmed to work. A `materials` query param sent by
+    // an older Node build is harmless here — it's simply not bound/used;
+    // the WHERE filter is LIFNR-based again (see BuildVendorGrRequest).
     [HttpGet("gr")]
     [ProducesResponseType(typeof(ApiResponse<ConsignmentGrRow[]>), 200)]
     [ProducesResponseType(typeof(ApiResponse<object>), 400)]
     public async Task<IActionResult> GetVendorGr(
         [FromQuery] string sapVendorNumber,
-        [FromQuery] string? materials,
         [FromQuery] string? sinceDate,
         CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(sapVendorNumber))
             return BadRequest(ApiResponse<ConsignmentGrRow[]>.Fail("400", "sapVendorNumber is required.", []));
 
-        var materialList = (materials ?? string.Empty)
-            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var response101 = await _pool.ExecuteAsync(
+            ConsignmentHelpers.BuildVendorGrRequest(sapVendorNumber, "101", sinceDate), ct);
+        var response102 = await _pool.ExecuteAsync(
+            ConsignmentHelpers.BuildVendorGrRequest(sapVendorNumber, "102", sinceDate), ct);
 
-        if (materialList.Length == 0)
-            return BadRequest(ApiResponse<ConsignmentGrRow[]>.Fail("400",
-                "materials is required (comma-separated MATNR list) — see ConsignmentHelpers.BuildVendorGrRequest.", []));
+        var rows101 = ConsignmentHelpers.ParseVendorGrRows(response101);
+        var rows102 = ConsignmentHelpers.ParseVendorGrRows(response102);
+        var allRows = rows101.Concat(rows102).ToArray();
 
-        var response = await _pool.ExecuteAsync(
-            ConsignmentHelpers.BuildVendorGrRequest(sapVendorNumber, materialList, sinceDate), ct);
-
-        // Temporary diagnostic logging (2026-07-30, kept through the
-        // MATNR-filter change) — logs raw SAP row count vs. post-filter
-        // count so a future empty/slow result is diagnosable from the log
-        // alone rather than another blind guess-and-rebuild cycle.
-        var rawRowCount = response.Tables.TryGetValue("data_display", out var rawRows) ? rawRows.Count : -1;
-        var parsedRows  = ConsignmentHelpers.ParseVendorGrRows(response);
+        // Diagnostic logging (2026-07-30) — kept from earlier debugging so a
+        // future empty/unexpected result is diagnosable from the log alone.
         _logger.LogInformation(
-            "[consignment-gr-diag] vendor={SapVendorNumber} materialCount={MaterialCount} sinceDate={SinceDate} rawRowCount={RawRowCount} parsedRowCount={ParsedRowCount} (build marker: MATNR-filter)",
-            sapVendorNumber, materialList.Length, sinceDate ?? "(none)", rawRowCount, parsedRows.Length);
+            "[consignment-gr-diag] vendor={SapVendorNumber} sinceDate={SinceDate} rows101={Rows101} rows102={Rows102} total={Total} (build marker: two-call-EQ)",
+            sapVendorNumber, sinceDate ?? "(none)", rows101.Length, rows102.Length, allRows.Length);
 
-        return Ok(ApiResponse<ConsignmentGrRow[]>.Ok(parsedRows));
+        return Ok(ApiResponse<ConsignmentGrRow[]>.Ok(allRows));
     }
 
     // ── GET /api/consignment/stock ─────────────────────────────────────────────

@@ -48,28 +48,46 @@ internal static class ConsignmentHelpers
     private static readonly string[] MkpfColumns  = ["BLDAT", "BUDAT"];
 
     /// <summary>
-    /// Pulls consignment goods-receipt lines (movement 101 — GR — and its
-    /// reversal, movement 102, SOBKZ=K) for one vendor. Including 102 keeps
-    /// a mistakenly-posted-then-reversed GR from inflating the vendor's
-    /// delivered total: the reversal comes back as its own MSEG line (its
-    /// own MaterialDocument), signed negative via SHKZG so
-    /// SUM(ConsignmentDelivery.Quantity) nets to what SAP actually shows.
+    /// Pulls consignment goods-receipt lines for one vendor and ONE movement
+    /// type (SOBKZ=K). Called twice by ConsignmentController.GetVendorGr —
+    /// once with movementType="101" (GR) and once with movementType="102"
+    /// (reversal of a mistakenly-posted GR) — and the two response sets are
+    /// merged in C#, rather than trying to get SAP to match both movement
+    /// types in a single call.
+    ///
+    /// This is a deliberate rollback (2026-07-30) after repeated failures
+    /// trying to filter on more than one value per field in a single
+    /// ZRFC_READ_TABLES call: neither "( MSEG~BWART EQ '101' OR MSEG~BWART
+    /// EQ '102' )" (parenthesised OR), nor the literal "MSEG~BWART IN
+    /// ('101','102')" SQL fragment, nor the RFC_READ_TABLE-style "IN opt" +
+    /// value_list mechanism (used successfully elsewhere in this codebase
+    /// for MATNR in CostingHelper.BuildCostSheetRequest, and by all
+    /// appearances the textbook-correct approach) ever actually returned
+    /// data here — every attempt came back with zero rows, silently, even
+    /// for the pre-existing 101 lines that a plain single-value EQ filter
+    /// had always returned correctly. Whatever the real cause (this
+    /// function's dynamic-WHERE handling may simply not support multi-value
+    /// conditions the way standard RFC_READ_TABLE does, or may not support
+    /// stacking two independent IN-opt conditions — MATNR and BWART — in one
+    /// call), the pragmatic fix is to stop fighting it: go back to the
+    /// single-value "MSEG~BWART EQ '{value}'" condition that is proven to
+    /// work, and get both movement types by calling twice. Also dropped, for
+    /// the same reason, the MATNR-based filtering added earlier today for
+    /// performance (SapServer d8bce68) — LIFNR EQ is the filter that's
+    /// actually confirmed working, so that's what's back in use here.
+    /// Revisit the materials-based speedup as its own isolated change once
+    /// GR sync is confirmed reliable again.
+    ///
     /// <paramref name="sapVendorNumber"/> should be the raw
     /// dbo.Vendor.SapVendorNumber value (padding is handled here, matching
     /// SapPad.Pad's idempotent-on-already-padded-values behaviour used
-    /// everywhere else in this codebase). <paramref name="materials"/> is
-    /// the vendor's known material list (Node's dbo.VendorMaterial) and is
-    /// the primary/selective filter here — see the WHERE-building comment
-    /// below for why. <paramref name="sinceDate"/> is an optional
-    /// posting-date floor (SAP dd.mm.yyyy format) to keep the daily re-sync
-    /// cheap once a vendor has years of history — omit it for a vendor's
-    /// first-ever sync to pull everything.
+    /// everywhere else in this codebase). <paramref name="sinceDate"/> is an
+    /// optional posting-date floor (SAP dd.mm.yyyy format) to keep the daily
+    /// re-sync cheap once a vendor has years of history — omit it for a
+    /// vendor's first-ever sync to pull everything.
     /// </summary>
-    internal static RfcRequest BuildVendorGrRequest(string sapVendorNumber, IReadOnlyList<string> materials, string? sinceDate = null)
+    internal static RfcRequest BuildVendorGrRequest(string sapVendorNumber, string movementType, string? sinceDate = null)
     {
-        if (materials.Count == 0)
-            throw new ArgumentException("At least one material is required — see ConsignmentController.GetVendorGr.", nameof(materials));
-
         var vendor = SapPad.Pad(sapVendorNumber, 10);
 
         var builder = new RfcRequestBuilder(FnReadTables)
@@ -87,66 +105,11 @@ internal static class ConsignmentHelpers
             .TableItemRow("join_FIELDS", new { TAB_FROM = "MSEG", FLD_FROM = "MANDT", TAB_TO = "MKPF", FLD_TO = "MANDT" })
             .TableItemRow("join_FIELDS", new { TAB_FROM = "MSEG", FLD_FROM = "MBLNR", TAB_TO = "MKPF", FLD_TO = "MBLNR" });
 
-        builder.WhereCondition($"MSEG~WERKS EQ '{Plant}'");
-
-        // MATNR IN opt is deliberately the primary/selective filter here —
-        // Matthew's own experience running equivalent reports directly in
-        // SAP is that filtering MSEG on a known material list runs much
-        // faster than filtering on LIFNR (2026-07-30; this is what fixed a
-        // >3-minute first-sync timeout even after the BWART filter below was
-        // already working correctly). Same IN-opt/value_list interface as
-        // BWART — see that condition's comment for why literal SQL text
-        // doesn't work with this custom RFC. OPTION left blank (not "EQ")
-        // for each value, matching CostingHelper.BuildCostSheetRequest's
-        // already-proven MATNR IN opt usage exactly.
-        builder.WhereCondition("MSEG~MATNR IN opt");
-        foreach (var material in materials)
-        {
-            builder.TableItemRow("value_list", new
-            {
-                TABNAME   = "MSEG",
-                FIELDNAME = "MATNR",
-                SIGN      = "I",
-                OPTION    = "",
-                LOW       = SapPad.Pad(material, 18),
-                HIGH      = ""
-            });
-        }
-
         builder
-            // Two dead ends before landing on IN opt (2026-07-30), both
-            // worth recording so nobody retries them: (1) "( MSEG~BWART EQ
-            // '101' OR MSEG~BWART EQ '102' )" — a parenthesised OR inside
-            // one .WhereCondition() call — came back pulled=0 (not even the
-            // pre-existing 101 lines), failing silently rather than raising
-            // FIELD_NOT_VALID. (2) The literal SQL fragment
-            // "MSEG~BWART IN ('101','102')" — also pulled=0. Both assumed
-            // ZRFC_READ_TABLES's dynamic WHERE accepts arbitrary literal
-            // Open-SQL text; it doesn't. This custom RFC has a dedicated
-            // extended interface for IN-type conditions instead: the
-            // condition text is just "IN opt", and the actual value(s) go in
-            // a separate "value_list" input table (TABNAME/FIELDNAME/SIGN/
-            // OPTION/LOW/HIGH — the classic RFC_READ_TABLE OPTIONS
-            // structure). SIGN=I ("Include"), OPTION=BT ("Between") with
-            // LOW='101'/HIGH='102' covers both movement types in a single
-            // value_list row since 101 and 102 are the only two valid values
-            // in that range.
-            .WhereCondition("MSEG~BWART IN opt")
+            .WhereCondition($"MSEG~WERKS EQ '{Plant}'")
+            .WhereCondition($"MSEG~BWART EQ '{movementType}'")
             .WhereCondition("MSEG~SOBKZ EQ 'K'")
-            // Kept as a belt-and-suspenders filter now that MATNR is doing
-            // the selective work above — cheap once MATNR has already
-            // narrowed the result set, and guards against a material ever
-            // being mis-assigned to the wrong vendor in dbo.VendorMaterial.
-            .WhereCondition($"MSEG~LIFNR EQ '{vendor}'")
-            .TableItemRow("value_list", new
-            {
-                TABNAME   = "MSEG",
-                FIELDNAME = "BWART",
-                SIGN      = "I",
-                OPTION    = "BT",
-                LOW       = "101",
-                HIGH      = "102"
-            });
+            .WhereCondition($"MSEG~LIFNR EQ '{vendor}'");
 
         if (!string.IsNullOrWhiteSpace(sinceDate))
             builder.WhereCondition($"MKPF~BUDAT GE '{sinceDate}'");
