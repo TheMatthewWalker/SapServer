@@ -28,21 +28,33 @@ internal static class ConsignmentHelpers
     internal const string FnReadTables = "ZRFC_READ_TABLES";
     internal const string Plant        = "3012";
 
-    // MATNR, MBLNR, ZEILE, MENGE, MEINS, LIFNR, LFBNR (all MSEG), then BLDAT,
-    // BUDAT (both MKPF). LFBNR (vendor delivery note number) is the standard
-    // SAP field for the vendor's own reference at goods receipt, and is what
-    // the old workbooks' "Invoice Number" column (e.g. "RMIE 0041") was
-    // always hand-typed from — it's an MSEG-level field (document number of
-    // a reference document, one per line), NOT MKPF as originally assumed
-    // here; registering it against MKPF made ZRFC_READ_TABLES reject the
-    // whole query with FIELD_NOT_VALID at runtime (2026-07-30 sync of
+    // MATNR, MBLNR, ZEILE, MENGE, MEINS, LIFNR, LFBNR, SHKZG (all MSEG), then
+    // BLDAT, BUDAT (both MKPF). LFBNR (vendor delivery note number) is the
+    // standard SAP field for the vendor's own reference at goods receipt,
+    // and is what the old workbooks' "Invoice Number" column (e.g. "RMIE
+    // 0041") was always hand-typed from — it's an MSEG-level field (document
+    // number of a reference document, one per line), NOT MKPF as originally
+    // assumed here; registering it against MKPF made ZRFC_READ_TABLES reject
+    // the whole query with FIELD_NOT_VALID at runtime (2026-07-30 sync of
     // vendor 4) — that error is what surfaced the mistake.
-    private static readonly string[] MsegColumns = ["MATNR", "MBLNR", "ZEILE", "MENGE", "MEINS", "LIFNR", "LFBNR"];
+    //
+    // SHKZG (debit/credit indicator — 'S' = stock increase, 'H' = stock
+    // decrease) signs the quantity for movement 102 (GR reversal — someone
+    // posted a 101 by mistake and reversed it). Deliberately reading this
+    // straight from SAP rather than assuming "BWART 102 always means
+    // negative" — same reasoning as everywhere else in this file: a wrong
+    // guess here would misstate a vendor's delivered total.
+    private static readonly string[] MsegColumns = ["MATNR", "MBLNR", "ZEILE", "MENGE", "MEINS", "LIFNR", "LFBNR", "SHKZG"];
     private static readonly string[] MkpfColumns  = ["BLDAT", "BUDAT"];
 
     /// <summary>
-    /// Pulls consignment goods-receipt lines (movement 101, SOBKZ=K) for one
-    /// vendor. <paramref name="sapVendorNumber"/> should be the raw
+    /// Pulls consignment goods-receipt lines (movement 101 — GR — and its
+    /// reversal, movement 102, SOBKZ=K) for one vendor. Including 102 keeps
+    /// a mistakenly-posted-then-reversed GR from inflating the vendor's
+    /// delivered total: the reversal comes back as its own MSEG line (its
+    /// own MaterialDocument), signed negative via SHKZG so
+    /// SUM(ConsignmentDelivery.Quantity) nets to what SAP actually shows.
+    /// <paramref name="sapVendorNumber"/> should be the raw
     /// dbo.Vendor.SapVendorNumber value (padding is handled here, matching
     /// SapPad.Pad's idempotent-on-already-padded-values behaviour used
     /// everywhere else in this codebase). <paramref name="sinceDate"/> is an
@@ -71,7 +83,7 @@ internal static class ConsignmentHelpers
 
         builder
             .WhereCondition($"MSEG~WERKS EQ '{Plant}'")
-            .WhereCondition("MSEG~BWART EQ '101'")
+            .WhereCondition("( MSEG~BWART EQ '101' OR MSEG~BWART EQ '102' )")
             .WhereCondition("MSEG~SOBKZ EQ 'K'")
             .WhereCondition($"MSEG~LIFNR EQ '{vendor}'");
 
@@ -92,20 +104,31 @@ internal static class ConsignmentHelpers
         return SapDelimitedParser
             .ParseRows(sapRows, '|', skipHeader: true)
             .Where(cols => cols.Length >= expectedCols)
-            .Select(cols => new ConsignmentGrRow
+            .Select(cols =>
             {
                 // Column order follows registration order: MsegColumns
-                // (MATNR, MBLNR, ZEILE, MENGE, MEINS, LIFNR, LFBNR) then
-                // MkpfColumns (BLDAT, BUDAT).
-                Material         = PerformanceHelpers.NormaliseMaterial(cols[0]),
-                MaterialDocument = cols[1],
-                MaterialDocItem  = cols[2],
-                Quantity         = decimal.TryParse(cols[3].Trim(), out var qty) ? qty : 0m,
-                Uom              = cols[4],
-                Vendor           = cols[5],
-                InvoiceNumber    = cols[6],
-                DocumentDate     = cols[7],
-                PostingDate      = cols[8],
+                // (MATNR, MBLNR, ZEILE, MENGE, MEINS, LIFNR, LFBNR, SHKZG)
+                // then MkpfColumns (BLDAT, BUDAT).
+                var rawQty = decimal.TryParse(cols[3].Trim(), out var qty) ? qty : 0m;
+                var shkzg  = cols[7].Trim();
+                // 'H' = credit / stock decrease — a 102 reversal. 'S' (or
+                // anything else, defensively) = debit / stock increase, the
+                // normal 101 GR. MENGE itself always comes back positive
+                // from SAP; SHKZG is what carries the direction.
+                var signedQty = shkzg == "H" ? -rawQty : rawQty;
+
+                return new ConsignmentGrRow
+                {
+                    Material         = PerformanceHelpers.NormaliseMaterial(cols[0]),
+                    MaterialDocument = cols[1],
+                    MaterialDocItem  = cols[2],
+                    Quantity         = signedQty,
+                    Uom              = cols[4],
+                    Vendor           = cols[5],
+                    InvoiceNumber    = cols[6],
+                    DocumentDate     = cols[8],
+                    PostingDate      = cols[9],
+                };
             })
             .ToArray();
     }

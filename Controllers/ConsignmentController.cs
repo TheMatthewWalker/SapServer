@@ -25,8 +25,9 @@ public sealed class ConsignmentController : SapControllerBase
 
     // ── GET /api/consignment/gr ────────────────────────────────────────────────
     //
-    // Consignment goods-receipt lines for one vendor (MSEG BWART=101/SOBKZ=K,
-    // joined to MKPF) — see ConsignmentHelpers.BuildVendorGrRequest.
+    // Consignment goods-receipt lines for one vendor (MSEG BWART=101 or 102
+    // reversal/SOBKZ=K, joined to MKPF) — see
+    // ConsignmentHelpers.BuildVendorGrRequest.
     [HttpGet("gr")]
     [ProducesResponseType(typeof(ApiResponse<ConsignmentGrRow[]>), 200)]
     [ProducesResponseType(typeof(ApiResponse<object>), 400)]
