@@ -83,7 +83,18 @@ internal static class ConsignmentHelpers
 
         builder
             .WhereCondition($"MSEG~WERKS EQ '{Plant}'")
-            .WhereCondition("( MSEG~BWART EQ '101' OR MSEG~BWART EQ '102' )")
+            // NOT "( MSEG~BWART EQ '101' OR MSEG~BWART EQ '102' )" — tried
+            // first, but returned pulled=0 (not even the pre-existing 101
+            // lines) on a live re-sync (2026-07-30). No other query in this
+            // codebase uses a parenthesised OR inside a single
+            // .WhereCondition() call; every other one is a plain EQ
+            // comparison, so ZRFC_READ_TABLES's dynamic-WHERE handling of
+            // that literal boolean grouping is unproven and evidently
+            // doesn't work here — it failed silently (0 rows, no exception)
+            // rather than raising FIELD_NOT_VALID or similar. IN is the
+            // standard, well-documented RFC_READ_TABLE-family idiom for
+            // "field is one of these values" and needs no grouping.
+            .WhereCondition("MSEG~BWART IN ('101','102')")
             .WhereCondition("MSEG~SOBKZ EQ 'K'")
             .WhereCondition($"MSEG~LIFNR EQ '{vendor}'");
 
