@@ -1,4 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
+using SapServer.Configuration;
 using SapServer.Helpers;
 using SapServer.Models;
 using SapServer.Models.Bapi;
@@ -19,11 +21,17 @@ namespace SapServer.Controllers;
 [Route("api/packaging")]
 public sealed class PackagingController : SapControllerBase
 {
+    private readonly SapPoolOptions _poolOptions;
+
     public PackagingController(
         ISapConnectionPool pool,
         IPermissionService permissions,
+        IOptions<SapPoolOptions> poolOptions,
         ILogger<PackagingController> logger)
-        : base(pool, permissions, logger) { }
+        : base(pool, permissions, logger)
+    {
+        _poolOptions = poolOptions.Value;
+    }
 
 // ── GET /api/packaging/{material}/exists ──────────────────────────────────
 
@@ -230,9 +238,11 @@ public sealed class PackagingController : SapControllerBase
     }
 
 // ── POST /api/packaging/create ─────────────────────────────────────────────
-// New Packaging Creation — for a customer part number, create the MM01
-// material master + CS01 BOM for each selected packaging-type code. Skips
-// (and reports) any code whose material already exists rather than erroring.
+// Legacy service-account path — kept for parity with the rest of this
+// controller's endpoints, but no longer called by Node for the real New
+// Packaging Creation flow (see CreateElevated below): the service account
+// doesn't have (and isn't being given) MM01/CS01 create authorization, same
+// reasoning as PurchasingController's plain create-po vs create-po-elevated.
 
     [HttpPost("create")]
     [ProducesResponseType(typeof(ApiResponse<List<CreatePackagingResult>>), 200)]
@@ -242,10 +252,83 @@ public sealed class PackagingController : SapControllerBase
     {
         await CheckPermissionAsync(GetUserId(), PackagingHelpers.FnCreate, ct);
 
-        var codes = body.Codes.Count > 0 ? body.Codes : PackagingHelpers.PackagingCodes.ToList();
+        var results = await RunCreateFlow(body.CustomerPart, body.Codes, req => _pool.ExecuteAsync(req, ct), ct);
+        return Ok(ApiResponse<List<CreatePackagingResult>>.Ok(results));
+    }
+
+// ── POST /api/packaging/create-elevated ────────────────────────────────────
+// New Packaging Creation — per-user-elevated flow: logon with the calling
+// user's own SAP credentials -> create the MM01 material master + CS01 BOM
+// for each selected packaging-type code -> logoff, all on one pinned
+// elevated worker slot (see SapConnectionPool.AcquireElevatedWorkerAsync /
+// ReleaseElevatedWorkerAsync). Matches PurchasingController's
+// create-po-elevated pattern: the shared service account doesn't have (and
+// isn't being given) rights to create material masters, so this has to run
+// as a real user with real SAP authorization instead.
+//
+// Deliberately does NOT call CheckPermissionAsync — same reasoning as
+// PurchasingController's elevated endpoints: this database can't reliably be
+// reached over the required TLS version from here, so authorization is
+// enforced twice elsewhere instead — Node's own MASTER_DATA permission check
+// before it ever calls this endpoint, and SAP's own real per-user
+// authorization on MM01/CS01 itself now that this genuinely runs as the
+// calling user.
+//
+// The elevated worker is always released in a finally block regardless of
+// how far the flow got, so a slot can never be left logged in as one user
+// waiting to be handed to somebody else. Unlike PO creation, there's no
+// BAPI commit/rollback step here — MM01/CS01 batch-input transactions
+// commit per-screen as they run, not as a separate BAPI_TRANSACTION_COMMIT.
+
+    [HttpPost("create-elevated")]
+    [ProducesResponseType(typeof(ApiResponse<List<CreatePackagingResult>>), 200)]
+    [ProducesResponseType(typeof(ApiResponse<object>), 400)]
+    public async Task<IActionResult> CreateElevated([FromBody] CreatePackagingElevatedRequest body, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(body.SapUsername) || string.IsNullOrWhiteSpace(body.SapPassword))
+            return BadRequest(ApiResponse<List<CreatePackagingResult>>.Fail(
+                "MISSING_CREDENTIALS", "SAP username and password are required for this elevated action.", null!));
+
+        if (string.IsNullOrWhiteSpace(body.CustomerPart))
+            return BadRequest(ApiResponse<List<CreatePackagingResult>>.Fail(
+                "NO_CUSTOMER_PART", "customerPart is required.", null!));
+
+        var elevatedCreds = new SapConnectionOptions
+        {
+            System   = _poolOptions.ServiceAccount.System,
+            Client   = _poolOptions.ServiceAccount.Client,
+            SystemId = _poolOptions.ServiceAccount.SystemId,
+            User     = body.SapUsername,
+            Password = body.SapPassword,
+            Language = _poolOptions.ServiceAccount.Language,
+        };
+
+        var worker = await _pool.AcquireElevatedWorkerAsync(elevatedCreds, ct);
+        try
+        {
+            var results = await RunCreateFlow(body.CustomerPart, body.Codes,
+                req => _pool.ExecuteOnWorkerAsync(worker, req, ct), ct);
+            return Ok(ApiResponse<List<CreatePackagingResult>>.Ok(results));
+        }
+        finally
+        {
+            await _pool.ReleaseElevatedWorkerAsync(worker);
+        }
+    }
+
+// ── Shared New Packaging Creation loop ─────────────────────────────────────
+// Same per-code MM01+CS01 logic for both the service-account and elevated
+// paths above — only how each RFC call is dispatched differs (a plain pooled
+// worker vs. a pinned elevated one), so that's passed in as a delegate
+// rather than duplicated.
+
+    private async Task<List<CreatePackagingResult>> RunCreateFlow(
+        string customerPart, List<string> codes, Func<RfcRequest, Task<RfcResponse>> execute, CancellationToken ct)
+    {
+        var effectiveCodes = codes.Count > 0 ? codes : PackagingHelpers.PackagingCodes.ToList();
         var results = new List<CreatePackagingResult>();
 
-        foreach (var code in codes)
+        foreach (var code in effectiveCodes)
         {
             if (!PackagingHelpers.TryGetDrumComponent(code, out var component))
             {
@@ -253,9 +336,9 @@ public sealed class PackagingController : SapControllerBase
                 continue;
             }
 
-            var material = PackagingHelpers.PackagingMaterial(body.CustomerPart, code);
+            var material = PackagingHelpers.PackagingMaterial(customerPart, code);
 
-            var existsResponse = await _pool.ExecuteAsync(PackagingHelpers.BuildMaterialExistsRequest(material), ct);
+            var existsResponse = await execute(PackagingHelpers.BuildMaterialExistsRequest(material));
             if (PackagingHelpers.ParseMaterialExists(existsResponse))
             {
                 results.Add(new CreatePackagingResult
@@ -266,8 +349,8 @@ public sealed class PackagingController : SapControllerBase
                 continue;
             }
 
-            var mm01Response = await _pool.ExecuteAsync(
-                PackagingHelpers.BuildCreateMaterialRequest(material, PackagingHelpers.ReferenceMaterial(code)), ct);
+            var mm01Response = await execute(
+                PackagingHelpers.BuildCreateMaterialRequest(material, PackagingHelpers.ReferenceMaterial(code)));
             var mm01Result = ProductionHelpers.ParseBdcResponse(mm01Response);
 
             _logger.LogInformation($"New Packaging: create material {material} (ref {PackagingHelpers.ReferenceMaterial(code)}) || {mm01Result.RawMessage}");
@@ -282,7 +365,7 @@ public sealed class PackagingController : SapControllerBase
                 continue;
             }
 
-            var cs01Response = await _pool.ExecuteAsync(PackagingHelpers.BuildCreateBomRequest(material, component), ct);
+            var cs01Response = await execute(PackagingHelpers.BuildCreateBomRequest(material, component));
             var cs01Result = ProductionHelpers.ParseBdcResponse(cs01Response);
 
             _logger.LogInformation($"New Packaging: create BOM {material} <- {component} || {cs01Result.RawMessage}");
@@ -301,6 +384,6 @@ public sealed class PackagingController : SapControllerBase
             });
         }
 
-        return Ok(ApiResponse<List<CreatePackagingResult>>.Ok(results));
+        return results;
     }
 }

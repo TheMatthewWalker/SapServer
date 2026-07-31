@@ -115,3 +115,18 @@ public sealed class CreatePackagingResult
     public bool   BomCreated      { get; init; }
     public string Message         { get; init; } = "";
 }
+
+/// <summary>Request body for the per-user-elevated New Packaging Creation flow
+/// (PackagingController.CreateElevated). Same shape as CreatePackagingRequest
+/// plus the calling user's own SAP credentials — MM01/CS01 need real
+/// authorization to create master data, which the shared service account
+/// doesn't have (and isn't being given), so this runs on a pinned elevated
+/// worker logged in as the user instead. See PurchasingController's
+/// create-po-elevated for the established pattern this mirrors.</summary>
+public sealed class CreatePackagingElevatedRequest
+{
+    [Required, MinLength(1)] public string       SapUsername  { get; init; } = "";
+    [Required, MinLength(1)] public string       SapPassword  { get; init; } = "";
+    [Required, MinLength(1)] public string       CustomerPart { get; init; } = "";
+    public List<string> Codes { get; init; } = [];
+}
