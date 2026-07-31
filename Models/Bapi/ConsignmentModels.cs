@@ -22,5 +22,5 @@ public sealed class ConsignmentGrRow
     public string  Vendor           { get; init; } = string.Empty; // MSEG-LIFNR
     public string  DocumentDate     { get; init; } = string.Empty; // MKPF-BLDAT, dd.mm.yyyy
     public string  PostingDate      { get; init; } = string.Empty; // MKPF-BUDAT, dd.mm.yyyy
-    public string  InvoiceNumber    { get; init; } = string.Empty; // MSEG-LFBNR (vendor delivery note ref)
+    public string  InvoiceNumber    { get; init; } = string.Empty; // MSEG-XBLNR_MKPF (invoice reference)
 }

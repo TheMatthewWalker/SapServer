@@ -28,15 +28,16 @@ internal static class ConsignmentHelpers
     internal const string FnReadTables = "ZRFC_READ_TABLES";
     internal const string Plant        = "3012";
 
-    // MATNR, MBLNR, ZEILE, MENGE, MEINS, LIFNR, LFBNR, SHKZG (all MSEG), then
-    // BLDAT, BUDAT (both MKPF). LFBNR (vendor delivery note number) is the
-    // standard SAP field for the vendor's own reference at goods receipt,
-    // and is what the old workbooks' "Invoice Number" column (e.g. "RMIE
-    // 0041") was always hand-typed from — it's an MSEG-level field (document
-    // number of a reference document, one per line), NOT MKPF as originally
-    // assumed here; registering it against MKPF made ZRFC_READ_TABLES reject
-    // the whole query with FIELD_NOT_VALID at runtime (2026-07-30 sync of
-    // vendor 4) — that error is what surfaced the mistake.
+    // MATNR, MBLNR, ZEILE, MENGE, MEINS, LIFNR, XBLNR_MKPF, SHKZG (all MSEG),
+    // then BLDAT, BUDAT (both MKPF). XBLNR_MKPF (2026-07-31, per Matthew's
+    // direct SAP knowledge) is the field that actually holds the invoice
+    // reference — despite the "_MKPF" suffix it's an MSEG-level field (a
+    // duplicate of the header MKPF-XBLNR carried down onto the line, same
+    // pattern as SHKZG), so it's registered against TABNAME=MSEG here, not
+    // MKPF. This replaces an earlier guess (LFBNR, "vendor delivery note
+    // number") that was never actually confirmed against a real invoice —
+    // LFBNR is dropped from this query entirely since nothing else in this
+    // file reads it.
     //
     // SHKZG (debit/credit indicator — 'S' = stock increase, 'H' = stock
     // decrease) signs the quantity for movement 102 (GR reversal — someone
@@ -44,7 +45,7 @@ internal static class ConsignmentHelpers
     // straight from SAP rather than assuming "BWART 102 always means
     // negative" — same reasoning as everywhere else in this file: a wrong
     // guess here would misstate a vendor's delivered total.
-    private static readonly string[] MsegColumns = ["MATNR", "MBLNR", "ZEILE", "MENGE", "MEINS", "LIFNR", "LFBNR", "SHKZG"];
+    private static readonly string[] MsegColumns = ["MATNR", "MBLNR", "ZEILE", "MENGE", "MEINS", "LIFNR", "XBLNR_MKPF", "SHKZG"];
     private static readonly string[] MkpfColumns  = ["BLDAT", "BUDAT"];
 
     /// <summary>
@@ -131,8 +132,8 @@ internal static class ConsignmentHelpers
             .Select(cols =>
             {
                 // Column order follows registration order: MsegColumns
-                // (MATNR, MBLNR, ZEILE, MENGE, MEINS, LIFNR, LFBNR, SHKZG)
-                // then MkpfColumns (BLDAT, BUDAT).
+                // (MATNR, MBLNR, ZEILE, MENGE, MEINS, LIFNR, XBLNR_MKPF,
+                // SHKZG) then MkpfColumns (BLDAT, BUDAT).
                 var rawQty = decimal.TryParse(cols[3].Trim(), out var qty) ? qty : 0m;
                 var shkzg  = cols[7].Trim();
                 // 'H' = credit / stock decrease — a 102 reversal. 'S' (or
