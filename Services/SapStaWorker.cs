@@ -283,7 +283,7 @@ internal sealed class SapStaWorker : IDisposable
             dynamic conn  = _sapFunctions!.Connection;
             conn.System   = creds.System;
             conn.Client   = creds.Client;
-            conn.SystemID = creds.SystemId;
+            conn.SystemID = creds.System;
             conn.User     = creds.User;
             conn.Password = creds.Password;
             conn.Language = creds.Language;

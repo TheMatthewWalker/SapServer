@@ -71,4 +71,5 @@ public sealed class SapConnectionOptions
     public string User     { get; init; } = string.Empty;
     public string Password { get; init; } = string.Empty;
     public string Language { get; init; } = "EN";
+    public string ApplicationServer { get; init; } = string.Empty;
 }
