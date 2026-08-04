@@ -57,4 +57,16 @@ public sealed class GoodsReceiptRequest
 
     /// <summary>Posting date (dd.MM.yyyy or yyyyMMdd) — always the date of posting. Defaults to today. Maps to MKPF-BUDAT.</summary>
     public string? PostingDate { get; init; }
+
+    /// <summary>
+    /// Confirmed received quantity for this PO item. Optional — when null or
+    /// &lt;= 0, the request is built exactly as before: XFULL=X on screen
+    /// 0200 has SAP default the entry screen to the full outstanding PO
+    /// quantity, with no explicit override (the original, real-BDC-recording
+    /// behaviour, unchanged). When supplied, GoodsReceiptHelper writes this
+    /// value directly into MSEG-ERFMG(01) on screen 0221, overwriting
+    /// whatever XFULL pre-filled, so a short/over delivery can be posted for
+    /// exactly what arrived instead of the full PO line. Maps to MSEG-ERFMG(01).
+    /// </summary>
+    public decimal? Quantity { get; init; }
 }

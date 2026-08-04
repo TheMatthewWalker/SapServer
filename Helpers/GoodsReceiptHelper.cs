@@ -37,7 +37,7 @@ internal static class GoodsReceiptHelper
     {
         var ebelp = (Math.Max(body.LineNumber, 1) * ItemInterval).ToString("D5", CultureInfo.InvariantCulture);
 
-        return BdcBuilder.For(TransactionCode)
+        var bdc = BdcBuilder.For(TransactionCode)
             .Screen("SAPMM07M", "0200")
                 .Field("BDC_OKCODE",     "/00")
                 .Field("MKPF-BLDAT",     NormaliseDate(body.ShipmentCompletionDate))
@@ -53,7 +53,32 @@ internal static class GoodsReceiptHelper
                 .Field("RM07M-XNAPR",    "X")
                 .Field("RM07M-WVERS1",   "X")
             .Screen("SAPMM07M", "0221")
-                .Field("BDC_CURSOR", "MSEG-ERFMG(01)")
+                .Field("BDC_CURSOR", "MSEG-ERFMG(01)");
+
+        // Quantity is optional. Left out (null/<=0): XFULL above is the only
+        // thing driving the entry screen, so SAP defaults it to the full
+        // outstanding PO quantity — this is the exact, unmodified real-BDC-
+        // recording behaviour the header comment describes, and every
+        // existing caller that doesn't pass a quantity (e.g.
+        // CreatePurchaseOrderAndReceipt) is unaffected.
+        //
+        // Supplied (Normanton Nexus's Inbound Log confirm-quantity flow):
+        // writes the confirmed value directly into MSEG-ERFMG(01), which BDC
+        // batch input keys into the field and so overwrites whatever XFULL
+        // pre-filled — the same "set XFULL AND explicitly override
+        // MSEG-ERFMG(01)" combination already proven working for this exact
+        // field against this SAP system in
+        // QualityHelpers.BuildMb1bBlockedRequest (MB11) and
+        // ProductionHelpers.BuildBomScrapRequest (MB11). Unlike those two,
+        // this specific combination has not itself been captured as a real
+        // BDC recording for MB01 — treat a partial/short-quantity GR through
+        // this path as unverified until confirmed against a live SAP GUI
+        // session, which is exactly what Normanton Nexus's Mark Received
+        // "skip SAP" checkbox exists to allow during that testing.
+        if (body.Quantity is > 0)
+            bdc.Field("MSEG-ERFMG(01)", body.Quantity.Value);
+
+        return bdc
                 .Field("BDC_OKCODE", "=SELE")
             .Screen("SAPMM07M", "0221")
                 .Field("BDC_OKCODE", "=BU")
