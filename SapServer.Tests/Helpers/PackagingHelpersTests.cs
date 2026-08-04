@@ -1,0 +1,156 @@
+using SapServer.Helpers;
+using SapServer.Models;
+using SapServer.Models.Bapi;
+
+namespace SapServer.Tests.Helpers;
+
+public class PackagingHelpersTests
+{
+    [Fact]
+    public void TryGetDrumComponent_resolves_a_known_packaging_code_case_insensitively()
+    {
+        Assert.True(PackagingHelpers.TryGetDrumComponent("sd", out var component));
+        Assert.Equal("P_DRUMSML_NMT", component);
+    }
+
+    [Fact]
+    public void TryGetDrumComponent_fails_for_an_unknown_code()
+    {
+        Assert.False(PackagingHelpers.TryGetDrumComponent("ZZ", out _));
+    }
+
+    [Fact]
+    public void ReferenceMaterial_and_PackagingMaterial_follow_the_IB_naming_convention()
+    {
+        Assert.Equal("IB_363800_SD", PackagingHelpers.ReferenceMaterial("SD"));
+        Assert.Equal("IB_363660_SD", PackagingHelpers.PackagingMaterial("363660", "SD"));
+    }
+
+    [Fact]
+    public void ParseMaterialExists_is_true_only_when_a_row_comes_back()
+    {
+        var exists = new RfcResponse { Tables = new() { ["data_display"] = new() { new() { ["WA"] = "header" }, new() { ["WA"] = "3012" } } } };
+        var missing = new RfcResponse { Tables = new() };
+        Assert.True(PackagingHelpers.ParseMaterialExists(exists));
+        Assert.False(PackagingHelpers.ParseMaterialExists(missing));
+    }
+
+    [Fact]
+    public void ParseMara_converts_the_weight_from_grams_to_kilograms()
+    {
+        var response = new RfcResponse
+        {
+            Tables = new()
+            {
+                ["data_display"] = new()
+                {
+                    new() { ["WA"] = "header" },
+                    new() { ["WA"] = "5000|VERP|INSB|KG" },
+                }
+            }
+        };
+        var row = PackagingHelpers.ParseMara(response);
+        Assert.NotNull(row);
+        Assert.Equal(5.0m, row!.WeightKg);
+        Assert.Equal("VERP", row.MaterialType);
+    }
+
+    [Fact]
+    public void ParseMara_returns_null_when_nothing_matches()
+    {
+        Assert.Null(PackagingHelpers.ParseMara(new RfcResponse()));
+    }
+
+    [Fact]
+    public void BuildZpackInstrRequest_filters_by_blank_KUNNR_for_a_plant_default_lookup()
+    {
+        var request = PackagingHelpers.BuildZpackInstrRequest("30005R", "");
+        var whereText = string.Join(" ", request.InputTablesItems["where_clause"].Select(r => r["TEXT"]));
+        Assert.Contains("ZPACK_INSTR~KUNNR EQ ''", whereText);
+    }
+
+    [Fact]
+    public void BuildZpackInstrRequest_filters_by_the_padded_customer_when_one_is_given()
+    {
+        var request = PackagingHelpers.BuildZpackInstrRequest("30005R", "12345");
+        var whereText = string.Join(" ", request.InputTablesItems["where_clause"].Select(r => r["TEXT"]));
+        Assert.Contains("ZPACK_INSTR~KUNNR EQ '0000012345'", whereText);
+    }
+
+    [Fact]
+    public void ParseZpackInstr_converts_quantities_from_thousandths_and_flags_from_non_blank()
+    {
+        var response = new RfcResponse
+        {
+            Tables = new()
+            {
+                ["data_display"] = new()
+                {
+                    new() { ["WA"] = "header" },
+                    new() { ["WA"] = "IB_363660_MB|1000000|500000|X| |X| |X| | " },
+                }
+            }
+        };
+        var row = PackagingHelpers.ParseZpackInstr(response);
+
+        Assert.NotNull(row);
+        Assert.Equal(1000m, row!.PalletQty);   // 1,000,000 / 1000
+        Assert.Equal(500m, row.SmallBoxQty);   // 500,000 / 1000
+        Assert.True(row.PackProd);
+        Assert.False(row.BoxGen);
+        Assert.True(row.BatchSpread);
+    }
+
+    [Fact]
+    public void BuildPackInstrMaintRequest_only_sends_trace_flags_when_saving_at_plant_level()
+    {
+        var plantLevel = PackagingHelpers.BuildPackInstrMaintRequest(new PackagingInstrSaveRequest
+        {
+            Material = "30005R", Customer = null, ChargeReq = true, TechStatReq = true, PNumReq = true,
+        });
+        var plantRow = plantLevel.InputTables["IT_ZPACK_INSTR"][0];
+        Assert.Equal("X", plantRow["CHARGE_REQ"]);
+        Assert.Equal("X", plantRow["TECHSTAT_REQ"]);
+        Assert.Equal("X", plantRow["PNUM_REQ"]);
+
+        var customerLevel = PackagingHelpers.BuildPackInstrMaintRequest(new PackagingInstrSaveRequest
+        {
+            Material = "30005R", Customer = "12345", ChargeReq = true, TechStatReq = true, PNumReq = true,
+        });
+        var customerRow = customerLevel.InputTables["IT_ZPACK_INSTR"][0];
+        Assert.Equal("", customerRow["CHARGE_REQ"]); // ignored at customer level even though requested
+        Assert.Equal("", customerRow["TECHSTAT_REQ"]);
+        Assert.Equal("", customerRow["PNUM_REQ"]);
+    }
+
+    [Fact]
+    public void ParsePackInstrMaintResult_reports_success_when_RC_is_zero()
+    {
+        var response = new RfcResponse { Parameters = new() { ["RC"] = "0" }, Tables = new() };
+        var (success, message) = PackagingHelpers.ParsePackInstrMaintResult(response);
+        Assert.True(success);
+        Assert.Equal("OK", message);
+    }
+
+    [Fact]
+    public void ParsePackInstrMaintResult_reports_failure_and_joins_messages_when_RC_is_nonzero()
+    {
+        var response = new RfcResponse
+        {
+            Parameters = new() { ["RC"] = "4" },
+            Tables = new() { ["IT_MESSAGES"] = [new() { ["Text"] = "Material does not exist" }] },
+        };
+        var (success, message) = PackagingHelpers.ParsePackInstrMaintResult(response);
+        Assert.False(success);
+        Assert.Equal("Material does not exist", message);
+    }
+
+    [Fact]
+    public void ParsePackInstrMaintResult_falls_back_to_a_generic_message_when_RC_is_nonzero_with_no_messages()
+    {
+        var response = new RfcResponse { Parameters = new() { ["RC"] = "4" }, Tables = new() };
+        var (success, message) = PackagingHelpers.ParsePackInstrMaintResult(response);
+        Assert.False(success);
+        Assert.Equal("Update failed (no message returned)", message);
+    }
+}

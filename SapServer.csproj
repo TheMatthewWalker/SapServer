@@ -9,11 +9,24 @@
     <UserSecretsId>sap-server-secrets</UserSecretsId>
     <Platforms>AnyCPU;x64</Platforms>
   </PropertyGroup>
-  <ItemGroup>
+  <!--
+    The real interop DLL wins whenever it's present (a real dev machine or
+    production build). When it's absent — a fresh checkout that hasn't
+    generated it yet, or any CI runner, which can never have a real SAP GUI
+    install — fall back to interop-stubs/SAPFunctions64.DevStub, which
+    supplies just enough of the same namespace/types for the solution
+    (including SapServer.Tests) to compile. See that project's
+    SAPFunctions64.cs for the full rationale; SapStaWorker.cs's actual COM
+    calls are explicitly out of scope for automated tests either way.
+  -->
+  <ItemGroup Condition="Exists('libs\Interop.SAPFunctions64.dll')">
       <Reference Include="SAPFunctions64">
         <HintPath>libs\Interop.SAPFunctions64.dll</HintPath>
         <Private>true</Private>
       </Reference>
+  </ItemGroup>
+  <ItemGroup Condition="!Exists('libs\Interop.SAPFunctions64.dll')">
+      <ProjectReference Include="interop-stubs\SAPFunctions64.DevStub\SAPFunctions64.DevStub.csproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.*" />
@@ -24,9 +37,39 @@
     <PackageReference Include="Serilog.Sinks.File" Version="6.*" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="7.*" />
   </ItemGroup>
-  <ItemGroup>
+  <ItemGroup Condition="Exists('libs\Interop.SAPFunctions64.dll')">
     <None Update="libs\Interop.SAPFunctions64.dll">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <!--
+    Both interop-stubs/ and SapServer.Tests/ are separate SDK projects nested
+    under this project's own directory. Web SDK's default item globs cover
+    more than just Compile — without excluding Content/None too, this
+    project would treat the OTHER projects' own bin/obj output as its own
+    content to copy on every build, which (since SapServer.Tests is nested
+    inside this directory) recursively nests SapServer.Tests/bin inside
+    itself deeper on every rebuild. Compile alone only fixes duplicate-type
+    compilation (CS0436); this fixes the file-copy recursion.
+  -->
+  <ItemGroup>
+    <Compile Remove="interop-stubs\**\*.cs" />
+    <Compile Remove="SapServer.Tests\**\*.cs" />
+    <Content Remove="interop-stubs\**" />
+    <Content Remove="SapServer.Tests\**" />
+    <None Remove="interop-stubs\**" />
+    <None Remove="SapServer.Tests\**" />
+  </ItemGroup>
+
+  <!-- Lets SapServer.Tests unit-test the internal Helpers/* request builders
+       and response parsers directly, without making them public. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="SapServer.Tests" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Update="libs\wdtfuncs64.ocx">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </None>
   </ItemGroup>
 

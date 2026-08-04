@@ -151,3 +151,7 @@ app.UseAuthorization();
 app.MapControllers();
 
 app.Run();
+
+// Required for WebApplicationFactory<Program> (SapServer.Tests) to work with
+// top-level statements — no behavior change.
+public partial class Program { }

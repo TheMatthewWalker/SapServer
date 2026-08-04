@@ -1,0 +1,36 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      # No CI runner ever has a real SAP GUI install, so libs/Interop.SAPFunctions64.dll
+      # is never present here — SapServer.csproj's Exists() check falls back to
+      # interop-stubs/SAPFunctions64.DevStub automatically (see that project and
+      # SapServer.csproj for the full rationale). Nothing extra needed for that here.
+      - run: dotnet restore
+
+      - run: dotnet build --no-restore
+
+      # Unit + WebApplicationFactory tests always run. PermissionService's
+      # integration tests (SapServer.Tests/Integration/) skip automatically —
+      # not fail — until TEST_SQL_* secrets are configured once the staging
+      # SQL Server exists (see SapServer.Tests/Infrastructure/StagingDb.cs).
+      - run: dotnet test --no-build
+        env:
+          TEST_SQL_SERVER: ${{ secrets.TEST_SQL_SERVER }}
+          TEST_SQL_DATABASE: ${{ secrets.TEST_SQL_DATABASE }}
+          TEST_SQL_USER: ${{ secrets.TEST_SQL_USER }}
+          TEST_SQL_PASSWORD: ${{ secrets.TEST_SQL_PASSWORD }}

@@ -51,6 +51,10 @@ libs/
 # MSBuild Binary and Structured Log
 *.binlog
 
+# SAP NW RFC library trace log — contains real internal hostnames/IPs and
+# SAP usernames from local dev connection attempts, not safe to commit.
+dev_rfc.log
+
 # MSTest test Results
 [Tt]est[Rr]esult*/
 [Bb]uild[Ll]og.*
