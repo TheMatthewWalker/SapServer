@@ -100,6 +100,11 @@ public sealed class ConsignmentMb1bRequest
 
 public sealed class ConsignmentMb1bResponse
 {
+    // False if any of the three legs (MB1B goods issue, then the two LT01
+    // transfer postings) came back with an SAP error message — the stock
+    // never actually moved as intended even though every RFC call
+    // succeeded at the protocol level. See WarehouseHelpers.ParseConsignmentResponse.
+    public bool   Success               { get; init; }
     public string Mb1bMessage           { get; init; } = string.Empty;
     public string ToNonConsignMessage   { get; init; } = string.Empty;
     public string ToConsignMessage      { get; init; } = string.Empty;

@@ -146,4 +146,51 @@ public class QualityHelpersTests
         Assert.Equal("Moved to non-blocked", result.ToNonBlockedMessage);
         Assert.Equal("Moved to blocked", result.ToBlockedMessage);
     }
+
+    [Fact]
+    public void ParseQualityResponse_succeeds_when_the_MB11_leg_reports_a_non_error_type_and_the_whm_legs_are_empty()
+    {
+        // Mirrors a non-WHM storage location: QualityController never
+        // attempts a transfer order, so toNonBlocked/toBlocked are
+        // genuinely empty RfcResponse()s.
+        var mb1b = new RfcResponse { Parameters = new() { ["MESSG"] = "S    M7   001 MB1B posted" } };
+
+        var result = QualityHelpers.ParseQualityResponse(mb1b, new RfcResponse(), new RfcResponse());
+
+        Assert.True(result.Success);
+    }
+
+    // Regression test: previously ParseQualityResponse only kept the raw
+    // MESSG text and never looked at the message type, so a rejected MB11
+    // block/unblock was indistinguishable from a successful one to
+    // QualityController — the stock movement never actually happened even
+    // though the endpoint reported success.
+    [Fact]
+    public void ParseQualityResponse_fails_when_the_MB11_leg_reports_an_SAP_error()
+    {
+        var mb1b = new RfcResponse { Parameters = new() { ["MESSG"] = "E    M7   021 Deficit of SL stock" } };
+
+        var result = QualityHelpers.ParseQualityResponse(mb1b, new RfcResponse(), new RfcResponse());
+
+        Assert.False(result.Success);
+    }
+
+    [Fact]
+    public void ParseQualityResponse_fails_when_either_WHM_transfer_order_legs_RETURN_table_has_a_blocking_error()
+    {
+        var mb1b = new RfcResponse { Parameters = new() { ["MESSG"] = "S    M7   001 MB1B posted" } };
+        RfcResponse WithReturn(string type) => new()
+        {
+            Tables = new() { ["RETURN"] = new() { new() { ["TYPE"] = type, ["MESSAGE"] = "Bin does not exist" } } },
+        };
+
+        var toNonBlockedFails = QualityHelpers.ParseQualityResponse(mb1b, WithReturn("E"), WithReturn("S"));
+        Assert.False(toNonBlockedFails.Success);
+
+        var toBlockedFails = QualityHelpers.ParseQualityResponse(mb1b, WithReturn("S"), WithReturn("E"));
+        Assert.False(toBlockedFails.Success);
+
+        var bothSucceed = QualityHelpers.ParseQualityResponse(mb1b, WithReturn("S"), WithReturn("S"));
+        Assert.True(bothSucceed.Success);
+    }
 }

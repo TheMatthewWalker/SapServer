@@ -37,6 +37,7 @@ public sealed class QualityController : SapControllerBase
     [HttpPost("block")]
     [ProducesResponseType(typeof(ApiResponse<QualityMb1bResponse>), 200)]
     [ProducesResponseType(typeof(ApiResponse<object>), 403)]
+    [ProducesResponseType(typeof(ApiResponse<object>), 422)]
     public async Task<IActionResult> BlockStock(
         [FromBody] QualityMb1bRequest body,
         CancellationToken ct)
@@ -57,15 +58,13 @@ public sealed class QualityController : SapControllerBase
 
             var whmBlocked = await _pool.ExecuteAsync(WarehouseHelpers.BuildTransferOrderRequest(blocked),   ct);
             var whmUnrestricted    = await _pool.ExecuteAsync(WarehouseHelpers.BuildTransferOrderRequest(unrestricted),      ct);
-            return Ok(ApiResponse<QualityMb1bResponse>.Ok(
-                QualityHelpers.ParseQualityResponse(mb1b, whmBlocked, whmUnrestricted)));
+            return ToActionResult(QualityHelpers.ParseQualityResponse(mb1b, whmBlocked, whmUnrestricted));
         }
         else
         {
             var whmBlocked = new RfcResponse(); // empty response for non-whm locations
             var whmUnrestricted = new RfcResponse(); // empty response for non-whm locations
-            return Ok(ApiResponse<QualityMb1bResponse>.Ok(
-                QualityHelpers.ParseQualityResponse(mb1b, whmBlocked, whmUnrestricted)));
+            return ToActionResult(QualityHelpers.ParseQualityResponse(mb1b, whmBlocked, whmUnrestricted));
         };
     }
 
@@ -75,6 +74,7 @@ public sealed class QualityController : SapControllerBase
     [HttpPost("unblock")]
     [ProducesResponseType(typeof(ApiResponse<QualityMb1bResponse>), 200)]
     [ProducesResponseType(typeof(ApiResponse<object>), 403)]
+    [ProducesResponseType(typeof(ApiResponse<object>), 422)]
     public async Task<IActionResult> UnblockStock(
         [FromBody] QualityMb1bRequest body,
         CancellationToken ct)
@@ -95,16 +95,31 @@ public sealed class QualityController : SapControllerBase
 
             var whmBlocked = await _pool.ExecuteAsync(WarehouseHelpers.BuildTransferOrderRequest(blocked),   ct);
             var whmUnrestricted    = await _pool.ExecuteAsync(WarehouseHelpers.BuildTransferOrderRequest(unrestricted),      ct);
-            return Ok(ApiResponse<QualityMb1bResponse>.Ok(
-                QualityHelpers.ParseQualityResponse(mb1b, whmBlocked, whmUnrestricted)));
+            return ToActionResult(QualityHelpers.ParseQualityResponse(mb1b, whmBlocked, whmUnrestricted));
         }
         else
         {
             var whmBlocked = new RfcResponse(); // empty response for non-whm locations
             var whmUnrestricted = new RfcResponse(); // empty response for non-whm locations
-            return Ok(ApiResponse<QualityMb1bResponse>.Ok(
-                QualityHelpers.ParseQualityResponse(mb1b, whmBlocked, whmUnrestricted)));
+            return ToActionResult(QualityHelpers.ParseQualityResponse(mb1b, whmBlocked, whmUnrestricted));
         };
+    }
+
+    // Any leg reporting an SAP error (the MB11 block/unblock itself, or
+    // either WHM transfer-order leg) means the stock movement never
+    // actually happened — surface it as a real failure instead of 200/
+    // success, mirroring WarehouseController.ConsignmentMb1b.
+    private IActionResult ToActionResult(QualityMb1bResponse result)
+    {
+        if (!result.Success)
+        {
+            var msg = new[] { result.Mb1bMessage, result.ToNonBlockedMessage, result.ToBlockedMessage }
+                .FirstOrDefault(m => m.StartsWith("E ", StringComparison.Ordinal))
+                ?? "SAP rejected the quality stock movement.";
+            return UnprocessableEntity(ApiResponse<QualityMb1bResponse>.Fail("422", msg, result));
+        }
+
+        return Ok(ApiResponse<QualityMb1bResponse>.Ok(result));
     }
 
     // Checks both transfer orders' destination bins exist (LAGP) before either

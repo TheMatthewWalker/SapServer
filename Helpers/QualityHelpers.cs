@@ -191,11 +191,32 @@ internal static class QualityHelpers
             .Build();
 
     internal static QualityMb1bResponse ParseQualityResponse(
-        RfcResponse mb1b, RfcResponse toNonBlocked, RfcResponse toBlocked) =>
-        new QualityMb1bResponse
+        RfcResponse mb1b, RfcResponse toNonBlocked, RfcResponse toBlocked)
+    {
+        // mb1b is always a BDC call (transaction MB11) — same MESSG
+        // "<type> <class> <number> <text>" convention as every other BDC
+        // call, so its Type tells us whether the block/unblock actually
+        // posted. toNonBlocked/toBlocked are real L_TO_CREATE_SINGLE
+        // responses (RETURN table, no MESSG) when QualityController
+        // actually attempts a transfer order for a WHM storage location
+        // (1710/1711), or a deliberately empty RfcResponse() otherwise
+        // (non-WHM locations skip the transfer orders entirely) —
+        // HasBlockingError on an absent RETURN table is false, so the
+        // non-WHM path is unaffected. Previously none of this was checked:
+        // every message was kept as raw text with the type thrown away, so
+        // a rejected MB11 (or a rejected WHM transfer order) looked
+        // identical to a successful one to QualityController.
+        var mb1bResult = ProductionHelpers.ParseBdcResponse(mb1b);
+
+        var toNonBlockedError = ReturnTableHelper.HasBlockingError(ReturnTableHelper.ExtractMessages(toNonBlocked, "RETURN"));
+        var toBlockedError    = ReturnTableHelper.HasBlockingError(ReturnTableHelper.ExtractMessages(toBlocked,    "RETURN"));
+
+        return new QualityMb1bResponse
         {
-            Mb1bMessage         = ReturnTableHelper.GetParam(mb1b,         "MESSG") ?? "",
+            Success             = mb1bResult.Type != "E" && !toNonBlockedError && !toBlockedError,
+            Mb1bMessage         = mb1bResult.RawMessage,
             ToNonBlockedMessage = ReturnTableHelper.GetParam(toNonBlocked, "MESSG") ?? "",
             ToBlockedMessage    = ReturnTableHelper.GetParam(toBlocked,    "MESSG") ?? ""
         };
+    }
 }

@@ -432,6 +432,7 @@ public sealed class WarehouseController : SapControllerBase
     [HttpPost("consignment-mb1b")]
     [ProducesResponseType(typeof(ApiResponse<ConsignmentMb1bResponse>), 200)]
     [ProducesResponseType(typeof(ApiResponse<object>), 403)]
+    [ProducesResponseType(typeof(ApiResponse<object>), 422)]
     public async Task<IActionResult> ConsignmentMb1b(
         [FromBody] ConsignmentMb1bRequest body,
         CancellationToken ct)
@@ -444,8 +445,22 @@ public sealed class WarehouseController : SapControllerBase
         var mb1b   = await _pool.ExecuteAsync(WarehouseHelpers.BuildMb1bRequest(body),          ct);
         var toNonC = await _pool.ExecuteAsync(WarehouseHelpers.BuildToNonConsignRequest(body),   ct);
         var toC    = await _pool.ExecuteAsync(WarehouseHelpers.BuildToConsignRequest(body),      ct);
-        return Ok(ApiResponse<ConsignmentMb1bResponse>.Ok(
-            WarehouseHelpers.ParseConsignmentResponse(mb1b, toNonC, toC)));
+        var result = WarehouseHelpers.ParseConsignmentResponse(mb1b, toNonC, toC);
+
+        // Any leg reporting an SAP error (deficit stock, missing
+        // authorization, etc.) means the consignment issue never actually
+        // posted — surface it as a real failure instead of 200/success so
+        // callers (routes/staging.js's Staging Post delivery flow) don't
+        // record a delivery that never happened in SAP.
+        if (!result.Success)
+        {
+            var msg = new[] { result.Mb1bMessage, result.ToNonConsignMessage, result.ToConsignMessage }
+                .FirstOrDefault(m => m.StartsWith("E ", StringComparison.Ordinal))
+                ?? "SAP rejected the consignment issue.";
+            return UnprocessableEntity(ApiResponse<ConsignmentMb1bResponse>.Fail("422", msg, result));
+        }
+
+        return Ok(ApiResponse<ConsignmentMb1bResponse>.Ok(result));
     }
 
     // ── POST /api/warehouse/set-delivery-weight ───────────────────────────────

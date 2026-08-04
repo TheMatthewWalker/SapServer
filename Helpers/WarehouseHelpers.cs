@@ -440,13 +440,26 @@ internal static class WarehouseHelpers
             .Build();
 
     internal static ConsignmentMb1bResponse ParseConsignmentResponse(
-        RfcResponse mb1b, RfcResponse toNonConsign, RfcResponse toConsign) =>
-        new ConsignmentMb1bResponse
+        RfcResponse mb1b, RfcResponse toNonConsign, RfcResponse toConsign)
+    {
+        // Same MESSG "<type> <class> <number> <text>" convention every other
+        // BDC call in this file uses — Type "E" means SAP rejected that leg
+        // (e.g. deficit stock), even though the RFC call itself returned
+        // normally. Previously this only kept the raw message text and threw
+        // the type away, so a failed MB1B looked identical to a successful
+        // one to every caller — see ConsignmentMb1b in WarehouseController.
+        var mb1bResult   = ProductionHelpers.ParseBdcResponse(mb1b);
+        var toNonCResult = ProductionHelpers.ParseBdcResponse(toNonConsign);
+        var toCResult    = ProductionHelpers.ParseBdcResponse(toConsign);
+
+        return new ConsignmentMb1bResponse
         {
-            Mb1bMessage         = ReturnTableHelper.GetParam(mb1b,         "MESSG") ?? "",
-            ToNonConsignMessage = ReturnTableHelper.GetParam(toNonConsign, "MESSG") ?? "",
-            ToConsignMessage    = ReturnTableHelper.GetParam(toConsign,    "MESSG") ?? ""
+            Success             = mb1bResult.Type != "E" && toNonCResult.Type != "E" && toCResult.Type != "E",
+            Mb1bMessage         = mb1bResult.RawMessage,
+            ToNonConsignMessage = toNonCResult.RawMessage,
+            ToConsignMessage    = toCResult.RawMessage
         };
+    }
 
     // ── Set Delivery Weight (ZDEL) ────────────────────────────────────────────
     //

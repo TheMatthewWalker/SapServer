@@ -95,4 +95,45 @@ public class QualityControllerTests
         Assert.IsType<OkObjectResult>(result);
         _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Once);
     }
+
+    private static RfcResponse Mb1bMessage(string type, string message) => new()
+    {
+        Parameters = new() { ["MESSG"] = $"{type}    M7   001 {message}" },
+    };
+
+    // Regression test for the same bug class already fixed on the warehouse
+    // consignment MB1B path: QualityController previously returned 200/
+    // success:true regardless of whether the MB11 block actually posted in
+    // SAP, so a rejected block (deficit stock, etc.) looked identical to a
+    // successful one — the stock never actually moved even though the
+    // endpoint reported success.
+    [Fact]
+    public async Task BlockStock_at_a_non_WHM_location_returns_422_when_SAP_rejects_the_MB11_leg()
+    {
+        _pool.Setup(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Mb1bMessage("E", "Deficit of SL stock 5 PC : 30005R 1000 999 BIN-001"));
+
+        var result = await _controller.BlockStock(SampleRequest("3012"), CancellationToken.None); // not 1710/1711
+
+        var unprocessable = Assert.IsType<UnprocessableEntityObjectResult>(result);
+        var body = Assert.IsType<ApiResponse<QualityMb1bResponse>>(unprocessable.Value);
+        Assert.False(body.Success);
+        Assert.False(body.Data!.Success);
+        Assert.Contains("Deficit of SL stock", body.Error!.Message);
+    }
+
+    [Fact]
+    public async Task BlockStock_at_a_WHM_location_returns_422_when_a_transfer_order_legs_RETURN_table_has_a_blocking_error()
+    {
+        _pool.SetupSequence(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Mb1bMessage("S", "MB11 posted")) // MB1B
+            .ReturnsAsync(new RfcResponse { Tables = new() { ["data_display"] = new() { new() { ["WA"] = "h" }, new() { ["WA"] = "BIN-A" } } } }) // bin check 1: exists
+            .ReturnsAsync(new RfcResponse { Tables = new() { ["data_display"] = new() { new() { ["WA"] = "h" }, new() { ["WA"] = "BIN-B" } } } }) // bin check 2: exists
+            .ReturnsAsync(new RfcResponse { Tables = new() { ["RETURN"] = new() { new() { ["TYPE"] = "E", ["MESSAGE"] = "Bin is full" } } } }) // transfer order 1: rejected
+            .ReturnsAsync(new RfcResponse()); // transfer order 2
+
+        var result = await _controller.BlockStock(SampleRequest("1710"), CancellationToken.None);
+
+        Assert.IsType<UnprocessableEntityObjectResult>(result);
+    }
 }

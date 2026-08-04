@@ -93,6 +93,56 @@ public class WarehouseHelpersTests
         Assert.Equal("S", result.Messages[0].Type);
     }
 
+    private static RfcResponse Mb1bMessage(string type, string message) => new()
+    {
+        Parameters = new() { ["MESSG"] = $"{type}    M7   001 {message}" },
+    };
+
+    [Fact]
+    public void ParseConsignmentResponse_succeeds_when_all_three_legs_report_a_non_error_type()
+    {
+        var result = WarehouseHelpers.ParseConsignmentResponse(
+            Mb1bMessage("S", "MB1B posted"),
+            Mb1bMessage("S", "Moved to non-consign"),
+            Mb1bMessage("S", "Moved to consign"));
+
+        Assert.True(result.Success);
+        Assert.Equal("S    M7   001 MB1B posted", result.Mb1bMessage);
+    }
+
+    // Regression test: previously ParseConsignmentResponse only kept the raw
+    // MESSG text and never looked at the message type, so a rejected MB1B
+    // (deficit stock, missing authorization, etc.) was indistinguishable
+    // from a successful one to WarehouseController.ConsignmentMb1b — the
+    // consignment stock never actually left SAP even though the endpoint
+    // reported success.
+    [Fact]
+    public void ParseConsignmentResponse_fails_when_the_MB1B_leg_reports_an_SAP_error()
+    {
+        var result = WarehouseHelpers.ParseConsignmentResponse(
+            Mb1bMessage("E", "Deficit of SL stock 5 PC : 30005R 1000 SA B02"),
+            Mb1bMessage("S", "Moved to non-consign"),
+            Mb1bMessage("S", "Moved to consign"));
+
+        Assert.False(result.Success);
+    }
+
+    [Fact]
+    public void ParseConsignmentResponse_fails_when_either_LT01_leg_reports_an_SAP_error()
+    {
+        var toNonConsignFails = WarehouseHelpers.ParseConsignmentResponse(
+            Mb1bMessage("S", "MB1B posted"),
+            Mb1bMessage("E", "Bin does not exist"),
+            Mb1bMessage("S", "Moved to consign"));
+        Assert.False(toNonConsignFails.Success);
+
+        var toConsignFails = WarehouseHelpers.ParseConsignmentResponse(
+            Mb1bMessage("S", "MB1B posted"),
+            Mb1bMessage("S", "Moved to non-consign"),
+            Mb1bMessage("E", "Bin does not exist"));
+        Assert.False(toConsignFails.Success);
+    }
+
     [Fact]
     public void BinExists_is_false_when_only_the_SAP_header_row_comes_back()
     {

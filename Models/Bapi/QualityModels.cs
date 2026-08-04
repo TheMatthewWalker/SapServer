@@ -22,6 +22,11 @@ public sealed class QualityMb1bRequest
 
 public sealed class QualityMb1bResponse
 {
+    // False if the MB11 block/unblock leg reported an SAP error, or either
+    // WHM transfer-order leg's RETURN table has a blocking error — the
+    // stock movement never actually happened even though every RFC call
+    // succeeded at the protocol level. See QualityHelpers.ParseQualityResponse.
+    public bool   Success               { get; init; }
     public string Mb1bMessage           { get; init; } = string.Empty;
     public string ToNonBlockedMessage   { get; init; } = string.Empty;
     public string ToBlockedMessage      { get; init; } = string.Empty;

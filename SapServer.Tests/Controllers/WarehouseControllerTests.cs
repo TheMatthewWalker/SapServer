@@ -187,6 +187,79 @@ public class WarehouseControllerTests
         _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Once); // only the quality check
     }
 
+    private static RfcResponse Mb1bMessage(string type, string message) => new()
+    {
+        Parameters = new() { ["MESSG"] = $"{type}    M7   001 {message}" },
+    };
+
+    private static ConsignmentMb1bRequest SampleConsignmentBody() => new()
+    {
+        Material = "30005R",
+        Quantity = 5,
+        Header = "Test",
+        SpecialStockNumber = "12345",
+        StorageLocation = "1000",
+        SourceType = "PDR",
+        SourceBin = "B01",
+        DestinationType = "SA",
+        DestinationBin = "B02",
+    };
+
+    [Fact]
+    public async Task ConsignmentMb1b_returns_200_when_all_three_legs_succeed()
+    {
+        _permissions.Setup(p => p.CanExecuteAsync(1, WarehouseHelpers.FnConsignment, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        _pool.SetupSequence(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Mb1bMessage("S", "MB1B posted"))
+            .ReturnsAsync(Mb1bMessage("S", "Moved to non-consign"))
+            .ReturnsAsync(Mb1bMessage("S", "Moved to consign"));
+
+        var result = await _controller.ConsignmentMb1b(SampleConsignmentBody(), CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var body = Assert.IsType<ApiResponse<ConsignmentMb1bResponse>>(ok.Value);
+        Assert.True(body.Data!.Success);
+    }
+
+    // Regression test for the Staging Post bug: SapServer previously always
+    // returned 200/success:true for consignment-mb1b regardless of whether
+    // MB1B actually posted in SAP, so a rejected goods movement (deficit
+    // stock, missing authorization, etc.) looked identical to a real one to
+    // every caller (routes/staging.js's Mark Delivered flow chief among
+    // them) — the consignment stock never actually left SAP even though the
+    // portal recorded the delivery as successful.
+    [Fact]
+    public async Task ConsignmentMb1b_returns_422_when_the_MB1B_leg_is_rejected_by_SAP()
+    {
+        _permissions.Setup(p => p.CanExecuteAsync(1, WarehouseHelpers.FnConsignment, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        _pool.SetupSequence(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Mb1bMessage("E", "Deficit of SL stock 5 PC : 30005R 1000 SA B02"))
+            .ReturnsAsync(Mb1bMessage("S", "Moved to non-consign"))
+            .ReturnsAsync(Mb1bMessage("S", "Moved to consign"));
+
+        var result = await _controller.ConsignmentMb1b(SampleConsignmentBody(), CancellationToken.None);
+
+        var unprocessable = Assert.IsType<UnprocessableEntityObjectResult>(result);
+        var body = Assert.IsType<ApiResponse<ConsignmentMb1bResponse>>(unprocessable.Value);
+        Assert.False(body.Success);
+        Assert.False(body.Data!.Success);
+        Assert.Contains("Deficit of SL stock", body.Error!.Message);
+    }
+
+    [Fact]
+    public async Task ConsignmentMb1b_returns_422_when_either_LT01_leg_is_rejected_by_SAP()
+    {
+        _permissions.Setup(p => p.CanExecuteAsync(1, WarehouseHelpers.FnConsignment, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        _pool.SetupSequence(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Mb1bMessage("S", "MB1B posted"))
+            .ReturnsAsync(Mb1bMessage("S", "Moved to non-consign"))
+            .ReturnsAsync(Mb1bMessage("E", "Bin does not exist"));
+
+        var result = await _controller.ConsignmentMb1b(SampleConsignmentBody(), CancellationToken.None);
+
+        Assert.IsType<UnprocessableEntityObjectResult>(result);
+    }
+
     [Fact]
     public async Task GetZdelflagLikpAblad_requires_no_permission_check_at_all()
     {
