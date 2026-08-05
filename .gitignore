@@ -55,6 +55,11 @@ libs/
 # SAP usernames from local dev connection attempts, not safe to commit.
 dev_rfc.log
 
+# Unattended-deploy git credentials (fine-grained PAT / SSH deploy key) used
+# by Normanton-Nexus's deploy-runner.cjs to pull this repo before running
+# scripts/deploy.ps1 — same convention as Normanton-Nexus's own .deploykey.
+.deploykey
+
 # MSTest test Results
 [Tt]est[Rr]esult*/
 [Bb]uild[Ll]og.*
