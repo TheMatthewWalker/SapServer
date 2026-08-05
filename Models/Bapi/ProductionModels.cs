@@ -102,15 +102,47 @@ public sealed class Mf41Request
 // ── MB11 Posting ───────────────────────────────────────────────────
 public sealed class BomScrapRequest
 {
-    [Required, Length(1, 18)] public string  Material        { get; init; } = string.Empty; 
-                             public string  ComponentUnit        { get; init; } = string.Empty; 
+    [Required, Length(1, 18)] public string  Material        { get; init; } = string.Empty;
+                             public string  ComponentUnit        { get; init; } = string.Empty;
     [Range(0.001, double.MaxValue, ErrorMessage = "Quantity must be greater than zero.")]
-                             public decimal Quantity        { get; init; }                 
-    [Required, MinLength(1)] public string  Header          { get; init; } = string.Empty; 
+                             public decimal Quantity        { get; init; }
+    [Required, MinLength(1)] public string  Header          { get; init; } = string.Empty;
     [Required, Length(3, 3)] public string  MovementType    { get; init; } = string.Empty;
-    [Length(4, 4)]           public string  ScrapReason     { get; init; } = string.Empty; 
-                             public string StorageLocation { get; init; } = string.Empty;   
-                             public string ProfitCentre { get; init; } = string.Empty; 
+    [Length(4, 4)]           public string  ScrapReason     { get; init; } = string.Empty;
+                             public string StorageLocation { get; init; } = string.Empty;
+                             public string ProfitCentre { get; init; } = string.Empty;
+}
+
+
+// ── BAPI_GOODSMVT_CREATE Posting — finished mix batch (not BOM components) ──
+//
+// For scrapping a whole expired mixing tub directly (movement 551), rather
+// than looping over a material's BOM components the way
+// PostScrap/BomScrapRequest does via MB11/BDC. Uses the same
+// BAPI_GOODSMVT_CREATE / GM_CODE "06" path as StockAdjustmentHelper — see
+// MixingScrapHelper.cs for the full rationale and the pinned-worker +
+// explicit commit/rollback calling convention this BAPI requires. No
+// batch/CHARG field: mix materials are not batch-managed in SAP — all
+// tub/batch-level traceability for mixes lives in Normanton-Nexus only.
+// StorageLocation is optional — the controller resolves it from MARC-LGPRO
+// when not supplied, same as PostScrap already does per BOM component.
+public sealed class MixingScrapRequest
+{
+    [Required, Length(1, 18)] public string  Material        { get; init; } = string.Empty;
+                             public string? Plant             { get; init; }
+                             public string? StorageLocation   { get; init; }
+    [Range(0.001, double.MaxValue, ErrorMessage = "Quantity must be greater than zero.")]
+                             public decimal Quantity          { get; init; }
+                             public string  Unit               { get; init; } = "KG";
+
+    /// <summary>Reason for movement — GOODSMVT_ITEM-MOVE_REAS, 4-char SAP code.</summary>
+    [Length(4, 4)]           public string? ScrapReason       { get; init; }
+
+    /// <summary>Reference text on the resulting material document — GOODSMVT_HEADER-REF_DOC_NO (max 16 chars). The mix ref, for traceability inside SAP's own document text even though SAP itself carries no batch.</summary>
+    [Required, MinLength(1)] public string  Header            { get; init; } = string.Empty;
+
+    /// <summary>If true, asks SAP to simulate the posting (GOODSMVT_HEADER/TESTRUN "X") without creating a real material document.</summary>
+                             public bool    TestRun           { get; init; }
 }
 
 

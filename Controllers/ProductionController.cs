@@ -325,6 +325,79 @@ public sealed class ProductionController : SapControllerBase
         return Ok(ApiResponse<BdcWrapper>.Ok(scrapResponses));
     }
 
+// ── POST /api/production/mixing-scrap ──────────────────────────────────
+//
+// Scraps a whole finished mixing batch directly — for tubs that exceed
+// their 96h shelf life without being staged into Billet (Normanton-Nexus's
+// PROD_SUPERVISOR-approved expiry-scrap action). Unlike PostScrap, which
+// fans out over a material's BOM *components* via MB11/BDC, this posts
+// once against the mix material itself via BAPI_GOODSMVT_CREATE (movement
+// 551, GM_CODE "06") — see MixingScrapHelper.cs for the full rationale:
+// this is the same BAPI/GM_CODE combination StockAdjustmentHelper already
+// uses and the user has confirmed working (711) against real data on this
+// system. No batch/CHARG anywhere: mix materials are not batch-managed in
+// SAP — all tub/batch traceability for mixes lives in Normanton-Nexus only.
+//
+// Like WarehouseController.CreateStockAdjustment, this is a real BAPI and
+// needs an explicit BAPI_TRANSACTION_COMMIT/ROLLBACK on the same pinned
+// worker afterward, or nothing actually persists in SAP.
+
+    [HttpPost("mixing-scrap")]
+    [ProducesResponseType(typeof(ApiResponse<StockAdjustmentResponse>), 200)]
+    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
+    [ProducesResponseType(typeof(ApiResponse<object>), 422)]
+    public async Task<IActionResult> PostMixingScrap(
+
+        [FromBody] MixingScrapRequest body,
+        [FromQuery] bool dryRun,
+        CancellationToken ct)
+    {
+        await CheckPermissionAsync(GetUserId(), ProductionHelpers.FnCreate, ct);
+
+        var storageLocation = body.StorageLocation;
+        if (string.IsNullOrWhiteSpace(storageLocation))
+        {
+            var slocArray = await _pool.ExecuteAsync(ProductionHelpers.BuildStorageLocation(body.Material), ct);
+            try { storageLocation = ProductionHelpers.ParseSingleSapResult(slocArray); }
+            catch { storageLocation = null; }
+        }
+
+        if (string.IsNullOrWhiteSpace(storageLocation))
+            return BadRequest(ApiResponse<StockAdjustmentResponse>.Fail("400", $"No storage location (MARC-LGPRO) found for material '{body.Material}'.", null!));
+
+        var request = MixingScrapHelper.BuildMixingScrapRequest(body, storageLocation);
+
+        if (dryRun)
+            return Ok(ApiResponse<RfcRequest>.Ok(request));
+
+        var worker = _pool.AcquireWorker();
+
+        var data     = await _pool.ExecuteOnWorkerAsync(worker, request, ct);
+        var response = StockAdjustmentHelper.ParseStockAdjustmentResponse(data);
+
+        _logger.LogInformation($"Posting mixing scrap: {body.Material} x {body.Quantity} KG from {storageLocation} || MatDoc {response.MaterialDocument}");
+
+        if (body.TestRun)
+        {
+            // A test run never creates a real document, so there's nothing
+            // to commit — roll back to release whatever SAP locked while
+            // simulating the posting.
+            await _pool.ExecuteOnWorkerAsync(worker, CommitHelper.BuildBapiRollback(), ct);
+            return Ok(ApiResponse<StockAdjustmentResponse>.Ok(response));
+        }
+
+        if (!response.Success)
+        {
+            await _pool.ExecuteOnWorkerAsync(worker, CommitHelper.BuildBapiRollback(), ct);
+            return UnprocessableEntity(ApiResponse<StockAdjustmentResponse>.Fail(
+                "422", "SAP rejected the mixing scrap posting. Transaction rolled back.", response));
+        }
+
+        await _pool.ExecuteOnWorkerAsync(worker, CommitHelper.BuildBapiCommit(), ct);
+        return Ok(ApiResponse<StockAdjustmentResponse>.Ok(response));
+    }
+
+
 // ── POST /api/production/scrap/reverse ──────────────────────────────────
 
     [HttpPost("scrap/reverse")]
