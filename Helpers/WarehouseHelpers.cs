@@ -182,6 +182,269 @@ internal static class WarehouseHelpers
         return SapDelimitedParser.ParseRows(sapRows, '|', skipHeader: true).Count > 0;
     }
 
+    // ── Bin → storage type lookup ────────────────────────────────────────────
+    //
+    // Same LAGP table as BuildBinCheckRequest, but the other direction: given
+    // just a bin (no storage type filter), return every storage type LAGP has
+    // that bin registered under. Backs the shared "auto-derive storage type
+    // from a scanned/typed bin" QoL feature wired into the LT04 scan flow,
+    // the LT04 modal, both Stock Management transfer forms, and the
+    // standalone Transfer Orders tile. Expects paddedBin already padded by
+    // the caller (SapPad.Pad(bin, 10)) — same convention CreateTransferOrder
+    // already uses before calling BuildBinCheckRequest, not padding inside
+    // the helper itself.
+    internal static RfcRequest BuildBinStorageTypeLookupRequest(string paddedBin)
+    {
+        var builder = new RfcRequestBuilder(FnReadTables)
+            .Import("DELIMITER", "|")
+            .Import("NO_DATA",   " ")
+            .TableRow("QUERY_TABLES", new { TABNAME = "LAGP" })
+            .TableItemRow("query_FIELDS", new { TABNAME = "LAGP", FIELDNAME = "LGTYP" });
+
+        builder
+            .WhereCondition($"LAGP~LGNUM EQ '{Warehouse}'")
+            .WhereCondition($"LAGP~LGPLA EQ '{paddedBin}'");
+
+        return builder.ReadTable("data_display").Build();
+    }
+
+    internal static string[] ParseBinStorageTypeRows(RfcResponse response)
+    {
+        if (!response.Tables.TryGetValue("data_display", out var sapRows))
+            return [];
+
+        // skipHeader: true — same ZRFC_READ_TABLES column-header gotcha as
+        // BinExists/every other data_display parse in this file.
+        return SapDelimitedParser
+            .ParseRows(sapRows, '|', skipHeader: true)
+            .Where(cols => cols.Length > 0 && !string.IsNullOrWhiteSpace(cols[0]))
+            .Select(cols => cols[0])
+            .Distinct()
+            .OrderBy(t => t)
+            .ToArray();
+    }
+
+    // ── Delete TR (LB02) ─────────────────────────────────────────────────────
+    //
+    // Replicates wm_open_tr.xlsm's ati_code.delete_tr sub exactly (recovered
+    // via MS-OVBA decompression of the workbook's vbaProject.bin — the
+    // warehouse team's Excel macro this whole TR-management feature is
+    // modernising). Primary path hard-deletes item "" (all items) via =DLK +
+    // the SAPLSPO1 confirm popup. SAP sometimes refuses with
+    // "E L2 019  You are not allowed to delete transfer requirement item
+    // 0001" when the TR has a second line already partially processed — the
+    // macro's own fallback re-targets TBPOS "2" specifically and sets the
+    // LVORM deletion-indicator flag instead of a hard delete, rather than
+    // giving up. See IsDeleteTrItemBlocked/WarehouseController.DeleteTr for
+    // the retry wiring.
+    internal static RfcRequest BuildDeleteTrRequest(string trNumber) =>
+        BdcBuilder.For("LB02")
+            .Screen("SAPML02B", "0100")
+                .Field("BDC_OKCODE", "/00")
+                .Field("LTBK-LGNUM", Warehouse)
+                .Field("LTBK-TBNUM", trNumber)
+                .Field("LTBP-TBPOS", "")
+            .Screen("SAPML02B", "1103")
+                .Field("BDC_OKCODE", "=DLK")
+            .Screen("SAPLSPO1", "0400")
+                .Field("BDC_OKCODE", "=YES")
+            .Build();
+
+    internal static RfcRequest BuildDeleteTrFallbackRequest(string trNumber) =>
+        BdcBuilder.For("LB02")
+            .Screen("SAPML02B", "0100")
+                .Field("BDC_OKCODE", "/00")
+                .Field("LTBK-LGNUM", Warehouse)
+                .Field("LTBK-TBNUM", trNumber)
+                .Field("LTBP-TBPOS", "2")
+            .Screen("SAPML02B", "0102")
+                .Field("BDC_OKCODE",  "=BU")
+                .Field("LTBP1-LVORM", "X")
+            .Build();
+
+    // True only for the exact "E L2 019" refusal — checked on the parsed
+    // Type/MessageClass/MessageNumber triple (ProductionHelpers.
+    // ParseBdcResponse already regex-splits MESSG into these), same idiom
+    // PerformanceController already uses for its own S/M3/801 check, so
+    // whitespace differences in SAP's own message text can't break the retry.
+    internal static bool IsDeleteTrItemBlocked(BdcResponse result) =>
+        result.Type == "E" && result.MessageClass == "L2" && result.MessageNumber == "019";
+
+    // ── TR Cleanup Candidates (LTBK/LTBP/MARC/MCHB → LQUA) ──────────────────
+    //
+    // Mirrors wm_open_tr.xltm's Get_LAGP_LQUA/Get_LQUA subs: extends the same
+    // open-TR join with MCHB~CLABS (call 1: BuildTrCleanupCandidatesBaseRequest),
+    // then re-queries LQUA filtered to just the batches found (call 2:
+    // BuildTrCleanupLquaByBatchRequest) to check whether each batch currently
+    // sits somewhere other than storage type 901.
+    //
+    // NOTE: the MCHB join below is effectively an inner join — a TR line
+    // whose batch has no MCHB row at all (never posted any goods movement)
+    // will be silently dropped from call 1's results rather than showing up
+    // with a blank CLABS. Confirm against a real SAP system whether this
+    // matches the macro's own behavior; if not, split into two separate LTBP
+    // and MCHB lookups joined in C# instead of at the RFC layer.
+    internal static readonly string[] TrCleanupBaseColumns =
+        ["DISPO", "TBNUM", "MATNR", "LGORT", "MENGE", "MEINS", "CHARG", "CLABS"];
+
+    internal static RfcRequest BuildTrCleanupCandidatesBaseRequest()
+    {
+        var builder = new RfcRequestBuilder(FnReadTables)
+            .Import("DELIMITER", "|")
+            .Import("NO_DATA",   " ")
+            .TableRow("QUERY_TABLES", new { TABNAME = "LTBK" })
+            .TableRow("QUERY_TABLES", new { TABNAME = "LTBP" })
+            .TableRow("QUERY_TABLES", new { TABNAME = "MARC" })
+            .TableRow("QUERY_TABLES", new { TABNAME = "MCHB" });
+
+        builder
+            .TableItemRow("query_FIELDS", new { TABNAME = "MARC", FIELDNAME = "DISPO" })
+            .TableItemRow("query_FIELDS", new { TABNAME = "LTBP", FIELDNAME = "TBNUM" })
+            .TableItemRow("query_FIELDS", new { TABNAME = "LTBP", FIELDNAME = "MATNR" })
+            .TableItemRow("query_FIELDS", new { TABNAME = "LTBP", FIELDNAME = "LGORT" })
+            .TableItemRow("query_FIELDS", new { TABNAME = "LTBP", FIELDNAME = "MENGE" })
+            .TableItemRow("query_FIELDS", new { TABNAME = "LTBP", FIELDNAME = "MEINS" })
+            .TableItemRow("query_FIELDS", new { TABNAME = "LTBP", FIELDNAME = "CHARG" })
+            .TableItemRow("query_FIELDS", new { TABNAME = "MCHB", FIELDNAME = "CLABS" });
+
+        builder
+            .TableItemRow("join_FIELDS", new { TAB_FROM = "LTBK", FLD_FROM = "MANDT", TAB_TO = "LTBP", FLD_TO = "MANDT" })
+            .TableItemRow("join_FIELDS", new { TAB_FROM = "LTBK", FLD_FROM = "LGNUM", TAB_TO = "LTBP", FLD_TO = "LGNUM" })
+            .TableItemRow("join_FIELDS", new { TAB_FROM = "LTBK", FLD_FROM = "TBNUM", TAB_TO = "LTBP", FLD_TO = "TBNUM" })
+            .TableItemRow("join_FIELDS", new { TAB_FROM = "LTBP", FLD_FROM = "MANDT", TAB_TO = "MARC", FLD_TO = "MANDT" })
+            .TableItemRow("join_FIELDS", new { TAB_FROM = "LTBP", FLD_FROM = "MATNR", TAB_TO = "MARC", FLD_TO = "MATNR" })
+            .TableItemRow("join_FIELDS", new { TAB_FROM = "LTBP", FLD_FROM = "WERKS", TAB_TO = "MARC", FLD_TO = "WERKS" })
+            .TableItemRow("join_FIELDS", new { TAB_FROM = "LTBP", FLD_FROM = "MANDT", TAB_TO = "MCHB", FLD_TO = "MANDT" })
+            .TableItemRow("join_FIELDS", new { TAB_FROM = "LTBP", FLD_FROM = "WERKS", TAB_TO = "MCHB", FLD_TO = "WERKS" })
+            .TableItemRow("join_FIELDS", new { TAB_FROM = "LTBP", FLD_FROM = "MATNR", TAB_TO = "MCHB", FLD_TO = "MATNR" })
+            .TableItemRow("join_FIELDS", new { TAB_FROM = "LTBP", FLD_FROM = "CHARG", TAB_TO = "MCHB", FLD_TO = "CHARG" });
+
+        builder.WhereCondition($"LTBP~LGNUM EQ '{Warehouse}'");
+        builder.WhereCondition("LTBK~STATU NE 'E'");
+        builder.WhereCondition("LTBP~BESTQ EQ ''");
+
+        return builder.ReadTable("data_display").Build();
+    }
+
+    // Intermediate row — not exposed outside this file; keeps the raw
+    // material/batch/etc. needed to build the batch value_list below and the
+    // final reason-flag logic, same "internal" scoping as
+    // OpenTransferRequirementRow but not a public API model.
+    internal sealed class TrCleanupBaseRow
+    {
+        internal string TrNumber        = "";
+        internal string Material        = "";
+        internal string StorageLocation = "";
+        internal decimal Quantity;
+        internal string Uom             = "";
+        internal string MrpController   = "";
+        internal string Batch           = "";
+        internal decimal? UnrestrictedQty; // MCHB-CLABS, null/blank == "no stock"
+    }
+
+    internal static TrCleanupBaseRow[] ParseTrCleanupBaseRows(RfcResponse response)
+    {
+        if (!response.Tables.TryGetValue("data_display", out var sapRows))
+            return [];
+
+        return SapDelimitedParser
+            .ParseRows(sapRows, '|', skipHeader: true)
+            .Where(cols => cols.Length >= TrCleanupBaseColumns.Length)
+            .Select(cols => new TrCleanupBaseRow
+            {
+                MrpController    = cols[0],
+                TrNumber         = cols[1],
+                Material         = cols[2],
+                StorageLocation  = cols[3],
+                Quantity         = decimal.TryParse(cols[4], out var qty) ? qty : 0m,
+                Uom              = cols[5],
+                Batch            = cols[6],
+                UnrestrictedQty  = decimal.TryParse(cols[7], out var clabs) ? clabs : (decimal?)null,
+            })
+            .ToArray();
+    }
+
+    // Uses the codebase's established "TABLE~FIELD IN opt" + value_list
+    // range-table mechanism (ZRFC_READ_TABLES doesn't support a literal SQL
+    // "IN (...)" where-clause) — same pattern as e.g.
+    // CustomsHelpers.BuildLikpRequest/BuildLipsRequest,
+    // PerformanceHelpers.AddInFilter.
+    internal static RfcRequest BuildTrCleanupLquaByBatchRequest(IEnumerable<string> batches)
+    {
+        var builder = new RfcRequestBuilder(FnReadTables)
+            .Import("DELIMITER", "|")
+            .Import("NO_DATA",   " ")
+            .TableRow("QUERY_TABLES", new { TABNAME = "LQUA" })
+            .TableItemRow("query_FIELDS", new { TABNAME = "LQUA", FIELDNAME = "CHARG" })
+            .TableItemRow("query_FIELDS", new { TABNAME = "LQUA", FIELDNAME = "LGTYP" })
+            .TableItemRow("query_FIELDS", new { TABNAME = "LQUA", FIELDNAME = "LGPLA" })
+            .TableItemRow("query_FIELDS", new { TABNAME = "LQUA", FIELDNAME = "GESME" });
+
+        builder.WhereCondition($"LQUA~LGNUM EQ '{Warehouse}'");
+        builder.WhereCondition("LQUA~CHARG IN opt");
+
+        foreach (var batch in batches.Distinct())
+            builder.TableItemRow("value_list", new
+            {
+                TABNAME = "LQUA", FIELDNAME = "CHARG",
+                SIGN = "I", OPTION = "EQ", LOW = SapPad.Pad(batch, 10), HIGH = ""
+            });
+
+        return builder.ReadTable("data_display").Build();
+    }
+
+    // Batch (unpadded, matching TrCleanupBaseRow.Batch/OpenTransferRequirementRow.Batch)
+    // → true if any LQUA row currently has it in a non-901 bin with qty > 0,
+    // i.e. it's already been transferred out and this TR is stale.
+    internal static HashSet<string> ParseAlreadyTransferredBatches(RfcResponse response)
+    {
+        if (!response.Tables.TryGetValue("data_display", out var sapRows))
+            return [];
+
+        return SapDelimitedParser
+            .ParseRows(sapRows, '|', skipHeader: true)
+            .Where(cols => cols.Length >= 4)
+            .Where(cols => cols[1] != "901" && decimal.TryParse(cols[3], out var q) && q > 0)
+            .Select(cols => cols[0].TrimStart('0'))
+            .ToHashSet();
+    }
+
+    internal const string ReasonSloc1710           = "sloc_1710";
+    internal const string ReasonNoStock            = "no_stock";
+    internal const string ReasonAlreadyTransferred = "already_transferred";
+
+    internal static TrCleanupCandidateRow[] BuildTrCleanupCandidateRows(
+        TrCleanupBaseRow[] baseRows, RfcResponse? lquaResponse)
+    {
+        var transferred = lquaResponse is null
+            ? []
+            : ParseAlreadyTransferredBatches(lquaResponse);
+
+        return baseRows
+            .Select(r =>
+            {
+                var reasons = new List<string>();
+                if (r.StorageLocation == "1710") reasons.Add(ReasonSloc1710);
+                if (r.UnrestrictedQty is null or 0m) reasons.Add(ReasonNoStock);
+                if (!string.IsNullOrWhiteSpace(r.Batch) && transferred.Contains(r.Batch.TrimStart('0')))
+                    reasons.Add(ReasonAlreadyTransferred);
+
+                return new TrCleanupCandidateRow
+                {
+                    TrNumber        = r.TrNumber,
+                    Material        = r.Material,
+                    Batch           = r.Batch,
+                    StorageLocation = r.StorageLocation,
+                    Quantity        = r.Quantity,
+                    Uom             = r.Uom,
+                    MrpController   = r.MrpController,
+                    Reasons         = reasons.ToArray(),
+                };
+            })
+            .Where(c => c.Reasons.Length > 0) // only flagged TRs are "candidates"
+            .ToArray();
+    }
+
     // ── Open Transfer Requirements (LTBK/LTBP) ──────────────────────────────────
     //
     // Mirrors wm_open_tr.xltm's Get_LAGP_LQUA sub exactly (its name is a
@@ -199,10 +462,16 @@ internal static class WarehouseHelpers
     // gate CheckQualityBlock enforces again per-item immediately before
     // posting, so a blocked line never shows up as pickable in the first
     // place, matching the macro's own two-layer check.
+    // CHARG appended at the end rather than interleaved with the other
+    // LTBP/LTBK fields, so the existing positional indices above (cols[0]
+    // .. cols[13]) don't have to be renumbered. A TR is one-to-one with a
+    // batch (LTBP~CHARG) — surfacing it here means Pallet/Batch never needs
+    // to be operator-entered anywhere downstream (scan flow, modal, bulk
+    // multi-select all just read row.Batch).
     internal static readonly string[] OpenTrColumns =
-        ["DISPO", "TBNUM", "MATNR", "LGORT", "MENGE", "MEINS", "BKTXT", "MBLNR", "BNAME", "BDATU", "BZEIT", "VLTYP", "VLPLA", "BWLVS"];
+        ["DISPO", "TBNUM", "MATNR", "LGORT", "MENGE", "MEINS", "BKTXT", "MBLNR", "BNAME", "BDATU", "BZEIT", "VLTYP", "VLPLA", "BWLVS", "CHARG"];
 
-    internal static RfcRequest BuildOpenTransferRequirementsRequest(string? mrpController)
+    internal static RfcRequest BuildOpenTransferRequirementsRequest(OpenTransferRequirementsQuery query)
     {
         var builder = new RfcRequestBuilder(FnReadTables)
             .Import("DELIMITER", "|")
@@ -226,7 +495,8 @@ internal static class WarehouseHelpers
             .TableItemRow("query_FIELDS", new { TABNAME = "LTBK", FIELDNAME = "BZEIT" })
             .TableItemRow("query_FIELDS", new { TABNAME = "LTBK", FIELDNAME = "VLTYP" })
             .TableItemRow("query_FIELDS", new { TABNAME = "LTBK", FIELDNAME = "VLPLA" })
-            .TableItemRow("query_FIELDS", new { TABNAME = "LTBK", FIELDNAME = "BWLVS" });
+            .TableItemRow("query_FIELDS", new { TABNAME = "LTBK", FIELDNAME = "BWLVS" })
+            .TableItemRow("query_FIELDS", new { TABNAME = "LTBP", FIELDNAME = "CHARG" });
 
         builder
             .TableItemRow("join_FIELDS", new { TAB_FROM = "LTBK", FLD_FROM = "MANDT", TAB_TO = "LTBP", FLD_TO = "MANDT" })
@@ -242,8 +512,17 @@ internal static class WarehouseHelpers
         builder.WhereCondition("LTBK~STATU NE 'E'");
         builder.WhereCondition("LTBP~BESTQ EQ ''");
 
-        if (!string.IsNullOrWhiteSpace(mrpController))
-            builder.WhereCondition($"MARC~DISPO EQ '{mrpController}'");
+        if (!string.IsNullOrWhiteSpace(query.MrpController))
+            builder.WhereCondition($"MARC~DISPO EQ '{query.MrpController}'");
+
+        if (!string.IsNullOrWhiteSpace(query.Material))
+            builder.WhereCondition($"LTBP~MATNR EQ '{SapPad.Pad(query.Material, 18)}'");
+
+        if (!string.IsNullOrWhiteSpace(query.StorageLocation))
+            builder.WhereCondition($"LTBP~LGORT EQ '{query.StorageLocation}'");
+
+        if (!string.IsNullOrWhiteSpace(query.CreatedBy))
+            builder.WhereCondition($"LTBK~BNAME EQ '{query.CreatedBy.Trim().ToUpperInvariant()}'");
 
         return builder.ReadTable("data_display").Build();
     }
@@ -270,6 +549,7 @@ internal static class WarehouseHelpers
                 CreatedDate      = cols[9],
                 CreatedTime      = cols[10],
                 MovementType     = cols[13],
+                Batch            = cols[14],
             })
             .ToArray();
     }

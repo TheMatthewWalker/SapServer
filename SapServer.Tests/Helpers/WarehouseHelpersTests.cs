@@ -179,4 +179,234 @@ public class WarehouseHelpersTests
         Assert.DoesNotContain("LGTYP", whereText);
         Assert.DoesNotContain("LGPLA", whereText);
     }
+
+    // ── Bin → storage type lookup ────────────────────────────────────────────
+
+    [Fact]
+    public void BuildBinStorageTypeLookupRequest_filters_LAGP_by_bin_only_not_storage_type()
+    {
+        var request = WarehouseHelpers.BuildBinStorageTypeLookupRequest("0000000123");
+        var whereText = string.Join(" ", request.InputTablesItems["where_clause"].Select(r => r["TEXT"]));
+
+        Assert.Contains("LAGP~LGNUM EQ '312'", whereText);
+        Assert.Contains("LAGP~LGPLA EQ '0000000123'", whereText);
+        Assert.DoesNotContain("LGTYP EQ", whereText); // unlike BuildBinCheckRequest, no storage-type filter
+
+        var fields = request.InputTablesItems["query_FIELDS"];
+        Assert.Contains(fields, f => f["TABNAME"]!.Equals("LAGP") && f["FIELDNAME"]!.Equals("LGTYP"));
+    }
+
+    [Fact]
+    public void ParseBinStorageTypeRows_skips_header_dedupes_and_sorts()
+    {
+        var response = StockResponse("SA", "SB", "SA"); // duplicate SA on purpose
+        var types = WarehouseHelpers.ParseBinStorageTypeRows(response);
+
+        Assert.Equal(["SA", "SB"], types);
+    }
+
+    [Fact]
+    public void ParseBinStorageTypeRows_is_empty_when_only_the_SAP_header_row_comes_back()
+    {
+        var response = new RfcResponse
+        {
+            Tables = new() { ["data_display"] = new() { new() { ["WA"] = "LGTYP" } } },
+        };
+        Assert.Empty(WarehouseHelpers.ParseBinStorageTypeRows(response));
+    }
+
+    // ── Extended open-TR search ──────────────────────────────────────────────
+
+    [Fact]
+    public void BuildOpenTransferRequirementsRequest_adds_no_optional_filters_when_none_supplied()
+    {
+        var request = WarehouseHelpers.BuildOpenTransferRequirementsRequest(new OpenTransferRequirementsQuery());
+        var whereText = string.Join(" ", request.InputTablesItems["where_clause"].Select(r => r["TEXT"]));
+
+        Assert.DoesNotContain("DISPO", whereText);
+        Assert.DoesNotContain("MATNR", whereText);
+        Assert.DoesNotContain("LGORT", whereText);
+        Assert.DoesNotContain("BNAME", whereText);
+    }
+
+    [Fact]
+    public void BuildOpenTransferRequirementsRequest_adds_material_sloc_and_createdby_filters_when_supplied()
+    {
+        var request = WarehouseHelpers.BuildOpenTransferRequirementsRequest(new OpenTransferRequirementsQuery
+        {
+            MrpController = "101", Material = "30005R", StorageLocation = "1710", CreatedBy = "jsmith",
+        });
+        var whereText = string.Join(" ", request.InputTablesItems["where_clause"].Select(r => r["TEXT"]));
+
+        Assert.Contains("MARC~DISPO EQ '101'", whereText);
+        Assert.Contains("LTBP~MATNR", whereText);
+        Assert.Contains("LTBP~LGORT EQ '1710'", whereText);
+        Assert.Contains("LTBK~BNAME EQ 'JSMITH'", whereText); // SAP usernames are uppercase
+    }
+
+    [Fact]
+    public void BuildOpenTransferRequirementsRequest_registers_CHARG_appended_after_the_existing_columns()
+    {
+        var request = WarehouseHelpers.BuildOpenTransferRequirementsRequest(new OpenTransferRequirementsQuery());
+        var fields = request.InputTablesItems["query_FIELDS"];
+
+        Assert.Contains(fields, f => f["TABNAME"]!.Equals("LTBP") && f["FIELDNAME"]!.Equals("CHARG"));
+        Assert.Equal("CHARG", fields[^1]["FIELDNAME"]); // last-registered, matching OpenTrColumns' appended position
+    }
+
+    [Fact]
+    public void ParseOpenTransferRequirementRows_maps_batch_from_the_appended_CHARG_column()
+    {
+        var response = StockResponse(
+            "101|4500001234|30005R|1710|12.5|EA|Doc text|5000001111|JSMITH|01.01.26|08:00:00|SA|BIN-01|999|0000123456");
+
+        var rows = WarehouseHelpers.ParseOpenTransferRequirementRows(response);
+
+        Assert.Single(rows);
+        Assert.Equal("4500001234", rows[0].TrNumber);
+        Assert.Equal("0000123456", rows[0].Batch);
+    }
+
+    // ── Delete TR (LB02) ─────────────────────────────────────────────────────
+
+    [Fact]
+    public void BuildDeleteTrRequest_matches_the_recorded_LB02_screen_sequence()
+    {
+        var request = WarehouseHelpers.BuildDeleteTrRequest("4500001234");
+
+        Assert.Equal("LB02", request.ImportParameters["TRANCODE"]);
+        Assert.Equal("S", request.ImportParameters["UPDMODE"]);
+
+        var rows = request.InputTablesItems["BDCTABLE"];
+        Assert.Equal(9, rows.Count); // 3 screens + 6 fields
+
+        Assert.Equal("SAPML02B", rows[0]["PROGRAM"]); Assert.Equal("0100", rows[0]["DYNPRO"]);
+        Assert.Equal("/00", rows[1]["FVAL"]);
+        Assert.Equal("LTBK-LGNUM", rows[2]["FNAM"]); Assert.Equal("312", rows[2]["FVAL"]);
+        Assert.Equal("LTBK-TBNUM", rows[3]["FNAM"]); Assert.Equal("4500001234", rows[3]["FVAL"]);
+        Assert.Equal("LTBP-TBPOS", rows[4]["FNAM"]); Assert.Equal("", rows[4]["FVAL"]);
+
+        Assert.Equal("SAPML02B", rows[5]["PROGRAM"]); Assert.Equal("1103", rows[5]["DYNPRO"]);
+        Assert.Equal("BDC_OKCODE", rows[6]["FNAM"]); Assert.Equal("=DLK", rows[6]["FVAL"]);
+
+        Assert.Equal("SAPLSPO1", rows[7]["PROGRAM"]); Assert.Equal("0400", rows[7]["DYNPRO"]);
+        Assert.Equal("BDC_OKCODE", rows[8]["FNAM"]); Assert.Equal("=YES", rows[8]["FVAL"]);
+    }
+
+    [Fact]
+    public void BuildDeleteTrFallbackRequest_targets_item_2_and_sets_the_LVORM_deletion_flag()
+    {
+        var request = WarehouseHelpers.BuildDeleteTrFallbackRequest("4500001234");
+        var rows = request.InputTablesItems["BDCTABLE"];
+
+        Assert.Equal(8, rows.Count); // 2 screens + 6 fields
+        Assert.Equal("LTBP-TBPOS", rows[4]["FNAM"]); Assert.Equal("2", rows[4]["FVAL"]);
+
+        Assert.Equal("SAPML02B", rows[5]["PROGRAM"]); Assert.Equal("0102", rows[5]["DYNPRO"]);
+        Assert.Equal("BDC_OKCODE", rows[6]["FNAM"]); Assert.Equal("=BU", rows[6]["FVAL"]);
+        Assert.Equal("LTBP1-LVORM", rows[7]["FNAM"]); Assert.Equal("X", rows[7]["FVAL"]);
+    }
+
+    [Fact]
+    public void IsDeleteTrItemBlocked_is_true_only_for_the_exact_E_L2_019_triple()
+    {
+        Assert.True(WarehouseHelpers.IsDeleteTrItemBlocked(
+            new BdcResponse { Type = "E", MessageClass = "L2", MessageNumber = "019" }));
+
+        Assert.False(WarehouseHelpers.IsDeleteTrItemBlocked(
+            new BdcResponse { Type = "S", MessageClass = "L2", MessageNumber = "019" }));
+        Assert.False(WarehouseHelpers.IsDeleteTrItemBlocked(
+            new BdcResponse { Type = "E", MessageClass = "L1", MessageNumber = "019" }));
+        Assert.False(WarehouseHelpers.IsDeleteTrItemBlocked(
+            new BdcResponse { Type = "E", MessageClass = "L2", MessageNumber = "020" }));
+    }
+
+    // ── TR cleanup candidates ────────────────────────────────────────────────
+
+    [Fact]
+    public void ParseTrCleanupBaseRows_maps_batch_and_unrestricted_qty_including_blank_as_null()
+    {
+        var response = StockResponse(
+            "101|4500001111|30005R|1710|10|EA|0000111111|5",
+            "101|4500002222|30006R|0001|20|EA|0000222222|");
+
+        var rows = WarehouseHelpers.ParseTrCleanupBaseRows(response);
+
+        Assert.Equal(2, rows.Length);
+        Assert.Equal("0000111111", rows[0].Batch);
+        Assert.Equal(5m, rows[0].UnrestrictedQty);
+        Assert.Null(rows[1].UnrestrictedQty); // blank CLABS parses to null, not 0
+    }
+
+    [Fact]
+    public void BuildTrCleanupLquaByBatchRequest_uses_IN_opt_and_value_list_not_a_literal_IN_clause()
+    {
+        var request = WarehouseHelpers.BuildTrCleanupLquaByBatchRequest(["123", "123", "456"]); // dupe on purpose
+        var whereText = string.Join(" ", request.InputTablesItems["where_clause"].Select(r => r["TEXT"]));
+
+        Assert.Contains("LQUA~CHARG IN opt", whereText);
+        Assert.DoesNotContain("IN (", whereText); // ZRFC_READ_TABLES doesn't support a literal SQL IN(...)
+
+        var values = request.InputTablesItems["value_list"];
+        Assert.Equal(2, values.Count); // deduped
+        Assert.Equal("I", values[0]["SIGN"]);
+        Assert.Equal("EQ", values[0]["OPTION"]);
+        Assert.Equal("0000000123", values[0]["LOW"]); // padded to 10, numeric
+    }
+
+    [Fact]
+    public void ParseAlreadyTransferredBatches_flags_only_non_901_bins_with_positive_quantity()
+    {
+        var response = StockResponse(
+            "0000111111|902|BIN-A|5",   // non-901, qty>0 -> flagged
+            "0000222222|901|BIN-B|5",   // still in 901 -> not flagged
+            "0000333333|902|BIN-C|0");  // non-901 but zero qty -> not flagged
+
+        var transferred = WarehouseHelpers.ParseAlreadyTransferredBatches(response);
+
+        Assert.Contains("111111", transferred); // TrimStart('0') convention
+        Assert.DoesNotContain("222222", transferred);
+        Assert.DoesNotContain("333333", transferred);
+    }
+
+    [Fact]
+    public void BuildTrCleanupCandidateRows_flags_all_three_reasons_independently_and_combines_without_duplication()
+    {
+        var baseRows = new[]
+        {
+            new WarehouseHelpers.TrCleanupBaseRow { TrNumber = "TR1", StorageLocation = "1710", Batch = "1", UnrestrictedQty = 5m },   // sloc only
+            new WarehouseHelpers.TrCleanupBaseRow { TrNumber = "TR2", StorageLocation = "0001", Batch = "2", UnrestrictedQty = 0m },   // no-stock only
+            new WarehouseHelpers.TrCleanupBaseRow { TrNumber = "TR3", StorageLocation = "1710", Batch = "3", UnrestrictedQty = 0m },   // sloc + no-stock (multi-reason)
+            new WarehouseHelpers.TrCleanupBaseRow { TrNumber = "TR4", StorageLocation = "0001", Batch = "4", UnrestrictedQty = 5m },   // no reason -> excluded
+        };
+        var lqua = StockResponse("0000000001|902|BIN-X|5"); // batch "1" (TR1) currently sits in a non-901 bin -> TR1 becomes multi-reason too; TR4's batch "4" has no LQUA row, so it stays excluded
+        var candidates = WarehouseHelpers.BuildTrCleanupCandidateRows(baseRows, lqua);
+
+        Assert.Equal(3, candidates.Length); // TR4 excluded — matches no reason
+        Assert.DoesNotContain(candidates, c => c.TrNumber == "TR4");
+
+        var tr1 = candidates.Single(c => c.TrNumber == "TR1");
+        Assert.Contains(WarehouseHelpers.ReasonSloc1710, tr1.Reasons);
+        Assert.Contains(WarehouseHelpers.ReasonAlreadyTransferred, tr1.Reasons);
+        Assert.DoesNotContain(WarehouseHelpers.ReasonNoStock, tr1.Reasons);
+
+        var tr3 = candidates.Single(c => c.TrNumber == "TR3");
+        Assert.Contains(WarehouseHelpers.ReasonSloc1710, tr3.Reasons);
+        Assert.Contains(WarehouseHelpers.ReasonNoStock, tr3.Reasons);
+        Assert.Equal(2, tr3.Reasons.Length); // no duplication
+    }
+
+    [Fact]
+    public void BuildTrCleanupCandidateRows_handles_a_null_lqua_response_as_no_batches_transferred()
+    {
+        var baseRows = new[]
+        {
+            new WarehouseHelpers.TrCleanupBaseRow { TrNumber = "TR1", StorageLocation = "1710", Batch = "1", UnrestrictedQty = 5m },
+        };
+
+        var candidates = WarehouseHelpers.BuildTrCleanupCandidateRows(baseRows, null);
+
+        Assert.Single(candidates);
+        Assert.DoesNotContain(WarehouseHelpers.ReasonAlreadyTransferred, candidates[0].Reasons);
+    }
 }

@@ -379,15 +379,44 @@ public sealed class WarehouseController : SapControllerBase
     [ProducesResponseType(typeof(ApiResponse<OpenTransferRequirementRow[]>), 200)]
     [ProducesResponseType(typeof(ApiResponse<object>), 403)]
     public async Task<IActionResult> GetOpenTransferRequirements(
-        [FromQuery] string? mrpController,
+        [FromQuery] OpenTransferRequirementsQuery query,
         CancellationToken ct)
     {
         await CheckPermissionAsync(GetUserId(), WarehouseHelpers.FnReadTables, ct);
 
         var response = await _pool.ExecuteAsync(
-            WarehouseHelpers.BuildOpenTransferRequirementsRequest(mrpController), ct);
+            WarehouseHelpers.BuildOpenTransferRequirementsRequest(query), ct);
         return Ok(ApiResponse<OpenTransferRequirementRow[]>.Ok(
             WarehouseHelpers.ParseOpenTransferRequirementRows(response)));
+    }
+
+    // ── GET /api/warehouse/bin-storage-types ──────────────────────────────────
+    //
+    // Given a storage bin, returns every storage type LAGP has it registered
+    // under (usually exactly one) — backs the shared "auto-derive storage
+    // type from a scanned/typed bin" QoL feature used across the LT04 scan
+    // flow, the LT04 modal, both Stock Management transfer forms, and the
+    // Transfer Orders tile. Read-only (same FnReadTables gate as GetStock),
+    // so no LOG_SUPER-style restriction — just a lookup.
+    [HttpGet("bin-storage-types")]
+    [ProducesResponseType(typeof(ApiResponse<string[]>), 200)]
+    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
+    public async Task<IActionResult> GetBinStorageTypes([FromQuery] string bin, CancellationToken ct)
+    {
+        await CheckPermissionAsync(GetUserId(), WarehouseHelpers.FnReadTables, ct);
+
+        if (string.IsNullOrWhiteSpace(bin))
+            return Ok(ApiResponse<string[]>.Ok([]));
+
+        // Padded here, before the LAGP lookup — same convention
+        // CreateTransferOrder already uses for its own BuildBinCheckRequest
+        // call: LAGP~LGPLA stores bin codes zero-padded to 10 characters, so
+        // an unpadded "123" would silently report zero matches for a bin
+        // that actually exists as "0000000123".
+        var paddedBin = SapPad.Pad(bin, 10);
+        var response = await _pool.ExecuteAsync(
+            WarehouseHelpers.BuildBinStorageTypeLookupRequest(paddedBin), ct);
+        return Ok(ApiResponse<string[]>.Ok(WarehouseHelpers.ParseBinStorageTypeRows(response)));
     }
 
     // ── POST /api/warehouse/create-lt04 ───────────────────────────────────────
@@ -425,6 +454,65 @@ public sealed class WarehouseController : SapControllerBase
         var response = await _pool.ExecuteAsync(WarehouseHelpers.BuildCreateLt04Request(body), ct);
         var result   = ProductionHelpers.ParseBdcResponse(response);
         return Ok(ApiResponse<BdcResponse>.Ok(result));
+    }
+
+    // ── POST /api/warehouse/delete-tr ─────────────────────────────────────────
+    //
+    // Replicates wm_open_tr.xlsm's ati_code.delete_tr (transaction LB02) —
+    // see WarehouseHelpers.BuildDeleteTrRequest for the full screen mapping.
+    // Gated on FnConsignment, same as CreateLt04/ConsignmentMb1b — the same
+    // underlying RFC every BDC-driven transaction in this controller uses.
+    // SapServer itself doesn't gate this any more tightly than that; the
+    // portal-role restriction (LOG_SUPER, since deleting a TR is unrecoverable)
+    // is enforced one layer up in Normanton-Nexus's routes/sap.js proxy.
+    [HttpPost("delete-tr")]
+    [ProducesResponseType(typeof(ApiResponse<BdcResponse>), 200)]
+    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
+    public async Task<IActionResult> DeleteTr([FromBody] DeleteTrRequest body, CancellationToken ct)
+    {
+        await CheckPermissionAsync(GetUserId(), WarehouseHelpers.FnConsignment, ct);
+
+        var response = await _pool.ExecuteAsync(WarehouseHelpers.BuildDeleteTrRequest(body.TrNumber), ct);
+        var result   = ProductionHelpers.ParseBdcResponse(response);
+
+        if (WarehouseHelpers.IsDeleteTrItemBlocked(result))
+        {
+            var fallback = await _pool.ExecuteAsync(WarehouseHelpers.BuildDeleteTrFallbackRequest(body.TrNumber), ct);
+            result = ProductionHelpers.ParseBdcResponse(fallback);
+        }
+
+        return Ok(ApiResponse<BdcResponse>.Ok(result));
+    }
+
+    // ── GET /api/warehouse/tr-cleanup-candidates ──────────────────────────────
+    //
+    // Automates the judgment call wm_open_tr.xlsm's operators have always
+    // made by eyeballing the macro's raw data columns — see
+    // WarehouseHelpers.BuildTrCleanupCandidateRows for the three reason
+    // conditions. Read-only (FnReadTables), so no LOG_SUPER restriction here;
+    // only the resulting bulk delete (via delete-tr) needs it.
+    [HttpGet("tr-cleanup-candidates")]
+    [ProducesResponseType(typeof(ApiResponse<TrCleanupCandidateRow[]>), 200)]
+    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
+    public async Task<IActionResult> GetTrCleanupCandidates(CancellationToken ct)
+    {
+        await CheckPermissionAsync(GetUserId(), WarehouseHelpers.FnReadTables, ct);
+
+        var baseResponse = await _pool.ExecuteAsync(WarehouseHelpers.BuildTrCleanupCandidatesBaseRequest(), ct);
+        var baseRows     = WarehouseHelpers.ParseTrCleanupBaseRows(baseResponse);
+
+        var batches = baseRows
+            .Select(r => r.Batch)
+            .Where(b => !string.IsNullOrWhiteSpace(b))
+            .Distinct()
+            .ToArray();
+
+        RfcResponse? lquaResponse = batches.Length > 0
+            ? await _pool.ExecuteAsync(WarehouseHelpers.BuildTrCleanupLquaByBatchRequest(batches), ct)
+            : null;
+
+        return Ok(ApiResponse<TrCleanupCandidateRow[]>.Ok(
+            WarehouseHelpers.BuildTrCleanupCandidateRows(baseRows, lquaResponse)));
     }
 
     // ── POST /api/warehouse/consignment-mb1b ──────────────────────────────────

@@ -187,6 +187,132 @@ public class WarehouseControllerTests
         _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Once); // only the quality check
     }
 
+    // ── Bin → storage type lookup ────────────────────────────────────────────
+
+    [Fact]
+    public async Task GetBinStorageTypes_returns_empty_array_without_calling_SAP_for_a_blank_bin()
+    {
+        _permissions.Setup(p => p.CanExecuteAsync(1, WarehouseHelpers.FnReadTables, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+
+        var result = await _controller.GetBinStorageTypes("", CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var body = Assert.IsType<ApiResponse<string[]>>(ok.Value);
+        Assert.Empty(body.Data!);
+        _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task GetBinStorageTypes_pads_a_numeric_bin_before_querying_LAGP()
+    {
+        _permissions.Setup(p => p.CanExecuteAsync(1, WarehouseHelpers.FnReadTables, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        _pool.Setup(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new RfcResponse { Tables = new() { ["data_display"] = new() { new() { ["WA"] = "header" }, new() { ["WA"] = "SA" } } } });
+
+        var result = await _controller.GetBinStorageTypes("123", CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var body = Assert.IsType<ApiResponse<string[]>>(ok.Value);
+        Assert.Equal(["SA"], body.Data!);
+        _pool.Verify(p => p.ExecuteAsync(
+            It.Is<RfcRequest>(r => r.InputTablesItems["where_clause"].Any(row => ((string)row["TEXT"]!).Contains("0000000123"))),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    // ── Delete TR ────────────────────────────────────────────────────────────
+
+    private static RfcResponse BdcMessage(string type, string msgClass, string number, string message) => new()
+    {
+        Parameters = new() { ["MESSG"] = $"{type} {msgClass} {number} {message}" },
+    };
+
+    [Fact]
+    public async Task DeleteTr_does_not_retry_when_the_first_attempt_succeeds()
+    {
+        _permissions.Setup(p => p.CanExecuteAsync(1, WarehouseHelpers.FnConsignment, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        _pool.Setup(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(BdcMessage("S", "L2", "018", "Transfer requirement deleted"));
+
+        var result = await _controller.DeleteTr(new DeleteTrRequest { TrNumber = "4500001234" }, CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(result);
+        _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task DeleteTr_retries_via_the_fallback_LVORM_request_when_the_first_attempt_is_blocked_on_item_1()
+    {
+        _permissions.Setup(p => p.CanExecuteAsync(1, WarehouseHelpers.FnConsignment, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        _pool.SetupSequence(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(BdcMessage("E", "L2", "019", "You are not allowed to delete transfer requirement item 0001"))
+            .ReturnsAsync(BdcMessage("S", "L2", "018", "Transfer requirement deleted"));
+
+        var result = await _controller.DeleteTr(new DeleteTrRequest { TrNumber = "4500001234" }, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var body = Assert.IsType<ApiResponse<BdcResponse>>(ok.Value);
+        Assert.Equal("S", body.Data!.Type); // final result reflects the fallback's outcome, not the first attempt's error
+        _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
+        _pool.Verify(p => p.ExecuteAsync(
+            It.Is<RfcRequest>(r => r.InputTablesItems["BDCTABLE"].Any(row => Equals(row.GetValueOrDefault("FNAM"), "LTBP1-LVORM"))),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task DeleteTr_does_not_retry_for_any_error_other_than_the_exact_E_L2_019_triple()
+    {
+        _permissions.Setup(p => p.CanExecuteAsync(1, WarehouseHelpers.FnConsignment, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        _pool.Setup(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(BdcMessage("E", "L2", "020", "Some other error"));
+
+        var result = await _controller.DeleteTr(new DeleteTrRequest { TrNumber = "4500001234" }, CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(result); // controller doesn't special-case unretried errors — just returns the parsed result as-is
+        _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    // ── TR cleanup candidates ────────────────────────────────────────────────
+
+    [Fact]
+    public async Task GetTrCleanupCandidates_skips_the_LQUA_call_when_no_batches_are_found()
+    {
+        _permissions.Setup(p => p.CanExecuteAsync(1, WarehouseHelpers.FnReadTables, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        _pool.Setup(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new RfcResponse()); // no data_display -> zero base rows -> zero batches
+
+        var result = await _controller.GetTrCleanupCandidates(CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(result);
+        _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Once); // only the base query
+    }
+
+    [Fact]
+    public async Task GetTrCleanupCandidates_queries_LQUA_once_for_the_distinct_batches_found_and_flags_reasons()
+    {
+        _permissions.Setup(p => p.CanExecuteAsync(1, WarehouseHelpers.FnReadTables, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        _pool.SetupSequence(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new RfcResponse
+            {
+                Tables = new()
+                {
+                    ["data_display"] = new()
+                    {
+                        new() { ["WA"] = "header" },
+                        new() { ["WA"] = "101|4500001111|30005R|1710|10|EA|0000111111|5" }, // SLoc 1710 -> flagged
+                    },
+                },
+            })
+            .ReturnsAsync(new RfcResponse()); // LQUA call — no rows, batch not already transferred
+
+        var result = await _controller.GetTrCleanupCandidates(CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var body = Assert.IsType<ApiResponse<TrCleanupCandidateRow[]>>(ok.Value);
+        Assert.Single(body.Data!);
+        Assert.Contains(WarehouseHelpers.ReasonSloc1710, body.Data![0].Reasons);
+        _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
+    }
+
     private static RfcResponse Mb1bMessage(string type, string message) => new()
     {
         Parameters = new() { ["MESSG"] = $"{type}    M7   001 {message}" },

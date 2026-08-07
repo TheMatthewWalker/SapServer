@@ -133,6 +133,20 @@ public sealed class OpenTransferRequirementRow
     public string  CreatedDate      { get; init; } = string.Empty; // LTBK-BDATU
     public string  CreatedTime      { get; init; } = string.Empty; // LTBK-BZEIT
     public string  MovementType     { get; init; } = string.Empty; // LTBK-BWLVS
+
+    // LTBP-CHARG — a TR is one-to-one with a batch, so surfacing it here
+    // means the operator never has to type Pallet/Batch anywhere in the LT04
+    // flow (scan, modal, or bulk multi-select); it's simply read off the row.
+    public string  Batch            { get; init; } = string.Empty;
+}
+
+/// <summary>Optional filters for the open-TR list. Bound from [FromQuery] parameters.</summary>
+public sealed class OpenTransferRequirementsQuery
+{
+    public string? MrpController   { get; init; }
+    public string? Material        { get; init; }
+    public string? StorageLocation { get; init; } // LGORT
+    public string? CreatedBy       { get; init; } // LTBK-BNAME
 }
 
 // ── Create LT04 (create + auto-confirm TO from an open TR) ─────────────────
@@ -160,6 +174,45 @@ public sealed class CreateLt04Request
 // ParseBdcResponse) exactly like ProductionController.Backflush does — a
 // single BDC call with one MESSG result doesn't need its own wrapper type.
 // Type == "S" is success, matching create_LT04's own Left(msg,1)="S" check.
+
+
+// ── Delete TR (LB02) ────────────────────────────────────────────────────────
+//
+// Replicates wm_open_tr.xlsm's ati_code.delete_tr sub — see
+// WarehouseHelpers.BuildDeleteTrRequest/BuildDeleteTrFallbackRequest for the
+// full screen-by-screen mapping.
+
+public sealed class DeleteTrRequest
+{
+    [Required, MinLength(1)] public string TrNumber { get; init; } = string.Empty; // LTBK-TBNUM
+}
+
+// Response: reuses BdcResponse, same as CreateLt04Request above — no bespoke
+// wrapper needed for a single BDC call with one MESSG result.
+
+
+// ── TR Cleanup Candidates ────────────────────────────────────────────────────
+//
+// Backs the "Cleanup Assistant" — an automated version of the judgment call
+// wm_open_tr.xlsm's operators have always made by eyeballing the macro's raw
+// data columns. See WarehouseHelpers.BuildTrCleanupCandidateRows for the
+// three reason conditions this evaluates.
+
+public sealed class TrCleanupCandidateRow
+{
+    public string   TrNumber        { get; init; } = string.Empty;
+    public string   Material        { get; init; } = string.Empty;
+    public string   Batch           { get; init; } = string.Empty;
+    public string   StorageLocation { get; init; } = string.Empty;
+    public decimal  Quantity        { get; init; }
+    public string   Uom             { get; init; } = string.Empty;
+    public string   MrpController   { get; init; } = string.Empty;
+
+    // "sloc_1710" | "no_stock" | "already_transferred" — a TR can carry more
+    // than one reason at once (see WarehouseHelpers.ReasonSloc1710/
+    // ReasonNoStock/ReasonAlreadyTransferred).
+    public string[] Reasons         { get; init; } = [];
+}
 
 
 // ── SetDeliveryWeight (ZDEL) ─────────────────────────────────────────────────

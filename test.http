@@ -119,8 +119,9 @@ Authorization: Bearer {{token}}
 
 
 ### GET /api/warehouse/open-transfer-requirements  (LT04 tile — lists open TRs
-### ready to be confirmed. Optional mrpController filter.)
-GET {{baseUrl}}/api/warehouse/open-transfer-requirements
+### ready to be confirmed. Optional mrpController/material/storageLocation/
+### createdBy filters. Each row now also carries Batch (LTBP-CHARG).)
+GET {{baseUrl}}/api/warehouse/open-transfer-requirements?material=B6040%2FS&storageLocation=1710&createdBy=jsmith
 Content-Type: application/json
 Authorization: Bearer {{token}}
 ###
@@ -143,5 +144,44 @@ Authorization: Bearer {{token}}
     "DestinationType": "001",
     "DestinationBin": "A-01-01",
     "PalletOrBatch": "0035108565"
+}
+###
+
+
+### GET /api/warehouse/bin-storage-types  (shared bin -> storage type lookup,
+### backs the "auto-derive storage type from a scanned bin" QoL feature.
+### Should normally return exactly one storage type for a real bin; NEEDS
+### REAL-SAP VERIFICATION — confirm LAGP~LGPLA padding/matching behaves as
+### expected against a real bin code.)
+GET {{baseUrl}}/api/warehouse/bin-storage-types?bin=A-01-01
+Content-Type: application/json
+Authorization: Bearer {{token}}
+###
+
+
+### GET /api/warehouse/tr-cleanup-candidates  (Cleanup Assistant scan — flags
+### open TRs that are SLoc 1710 / zero unrestricted stock / already
+### transferred to a non-901 bin. Read-only. NEEDS REAL-SAP VERIFICATION —
+### confirm the MCHB inner-join doesn't silently drop TR lines whose batch
+### has no MCHB row, and that the LQUA~CHARG IN opt/value_list where-clause
+### is accepted the same way CustomsHelpers' existing IN-opt calls are.)
+GET {{baseUrl}}/api/warehouse/tr-cleanup-candidates
+Content-Type: application/json
+Authorization: Bearer {{token}}
+###
+
+
+### POST /api/warehouse/delete-tr  (replicates wm_open_tr.xlsm's
+### ati_code.delete_tr — transaction LB02. DESTRUCTIVE — only run against a
+### TR that's genuinely safe to delete in whatever SAP client this hits, not
+### production. NEEDS REAL-SAP VERIFICATION — the screen/field sequence was
+### reverse-engineered from a VBA macro recording, not freshly captured, and
+### the "E L2 019" fallback retry path has never been exercised against SAP.)
+POST {{baseUrl}}/api/warehouse/delete-tr
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+    "TrNumber": "0000123456"
 }
 ###
