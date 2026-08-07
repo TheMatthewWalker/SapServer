@@ -31,13 +31,27 @@ public sealed record Kna1Request
     public List<string> Customers { get; init; } = [];
 }
 
+public sealed record VbrkRequest
+{
+    public List<string> Invoices { get; init; } = [];
+}
+
+public sealed record ConsignmentPriceLine(string Customer, string Material);
+
+public sealed record ConsignmentPriceRequest
+{
+    public List<ConsignmentPriceLine> Lines { get; init; } = [];
+}
+
 // ── Response models ───────────────────────────────────────────────────────────
 
 public sealed record LipsRow(string DeliveryNumber, string ItemNumber, string MaterialNumber, string Quantity);
 public sealed record LikpRow(string DeliveryNumber, string Incoterms, string ConsigneeCode);
-public sealed record VbfaRow(string DeliveryNumber, string ItemNumber, string InvoiceNumber, string InvoiceItem, string StatisticalValue);
+public sealed record VbfaRow(string DeliveryNumber, string ItemNumber, string InvoiceNumber, string InvoiceItem, string StatisticalValue, string InvoiceDate);
 public sealed record MarcRow(string MaterialNumber, string CommodityCode, string CountryOfOrigin);
-public sealed record Kna1Row(string CustomerCode, string Name, string Street, string City, string PostCode, string DestinationCountry, string TransportZone, string Incoterms = "");
+public sealed record Kna1Row(string CustomerCode, string Name, string Street, string City, string PostCode, string DestinationCountry, string TransportZone, string VatNumber = "", string Incoterms = "");
+public sealed record VbrkRow(string InvoiceNumber, string Currency);
+public sealed record ConsignmentPriceRow(string CustomerCode, string MaterialNumber, string Rate, string Currency, string PricingUnit);
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -48,15 +62,21 @@ internal static class CustomsHelpers
 
     private static readonly string[] LipsColumns = ["VBELN", "POSNR", "MATNR", "KCMENG"];
     private static readonly string[] LikpColumns = ["VBELN", "INCO1", "KUNNR"];
-    // VBELV/POSNV are included for client-side filtering and echoed back in the response
-    private static readonly string[] VbfaColumns = ["VBELV", "POSNV", "VBELN", "POSNN", "RFWRT"];
+    // VBELV/POSNV are included for client-side filtering and echoed back in the response.
+    // ERDAT ("created on") is the workbook macro's own source for Invoice Date on the
+    // CUSTOMS report (confirmed against its VBFA_Lookup routine's field list: VBELN,
+    // POSNN, RFWRT, ERDAT — labelled "invoice"/"item"/"value"/"date" respectively).
+    private static readonly string[] VbfaColumns = ["VBELV", "POSNV", "VBELN", "POSNN", "RFWRT", "ERDAT"];
     private static readonly string[] MarcColumns  = ["MATNR", "STAWN", "HERKL"];
     // KUNNR/LAND1 were the original fields (customer number + country); NAME1/STRAS/
     // ORT01/PSTLZ/LZONE were added to auto-fill the local Destinations table when a
     // picksheet references a customer we don't have on file yet — see the Node-side
     // /sap-sync route in deliverymain.js. LZONE (SAP transportation zone) maps to
     // our destinationZone field.
-    private static readonly string[] Kna1Columns  = ["KUNNR", "NAME1", "STRAS", "ORT01", "PSTLZ", "LAND1", "LZONE"];
+    // STCEG is the EU VAT registration number (VAT ID) held on the customer master —
+    // the live-SAP source for CUSTOMS report VAT No., checked before falling back to
+    // the admin-maintained CustomsVatNumberOverrides table on the Node side.
+    private static readonly string[] Kna1Columns  = ["KUNNR", "NAME1", "STRAS", "ORT01", "PSTLZ", "LAND1", "LZONE", "STCEG"];
     // KNVV (customer master sales data) — INCO1 is the customer's default Incoterms
     // code for this sales org, used to pre-fill Destinations.defaultIncoterms on
     // auto-create alongside the KNA1 fields above. Scoped to our one sales org
@@ -186,7 +206,7 @@ internal static class CustomsHelpers
             .ParseRows(rows, '|', skipHeader: true)
             .Where(cols => cols.Length >= VbfaColumns.Length
                         && filter.Contains((SapPad.Pad(cols[0], 10), SapPad.Pad(cols[1], 6))))
-            .Select(cols => new VbfaRow(cols[0], cols[1], cols[2], cols[3], cols[4]))
+            .Select(cols => new VbfaRow(cols[0], cols[1], cols[2], cols[3], cols[4], cols[5]))
             .ToArray();
     }
 
@@ -267,7 +287,117 @@ internal static class CustomsHelpers
                 City:               cols[3],
                 PostCode:           cols[4],
                 DestinationCountry: cols[5],
-                TransportZone:      cols[6]))
+                TransportZone:      cols[6],
+                VatNumber:          cols[7]))
+            .ToArray();
+    }
+
+    // ── VBRK ──────────────────────────────────────────────────────────────────
+    // Only VBELN/WAERK — the workbook macro's own evidence for this lookup is a
+    // single ambiguous comment block (never confirmed as an actually-executed
+    // RFC_READ_TABLE call, unlike every other lookup in this file), so FKDAT
+    // (invoice date — originally added here speculatively) was dropped in favour
+    // of VBFA.ERDAT above, which IS confirmed against real executable macro code.
+    // WAERK is kept regardless: it is the objectively correct SAP field for a
+    // billing document's currency, so this call is a safe, useful addition even
+    // though it may not byte-for-byte replicate whatever the macro itself does.
+
+    private static readonly string[] VbrkColumns = ["VBELN", "WAERK"];
+
+    internal static RfcRequest BuildVbrkRequest(VbrkRequest req)
+    {
+        var builder = new RfcRequestBuilder(FnReadTables)
+            .Import("DELIMITER", "|")
+            .Import("NO_DATA",   " ")
+            .TableRow("QUERY_TABLES", new { TABNAME = "VBRK" });
+
+        foreach (var f in VbrkColumns)
+            builder.TableItemRow("query_FIELDS", new { TABNAME = "VBRK", FIELDNAME = f });
+
+        builder.WhereCondition("VBRK~VBELN IN opt");
+
+        foreach (var i in req.Invoices)
+            builder.TableItemRow("value_list", new
+            {
+                TABNAME = "VBRK", FIELDNAME = "VBELN",
+                SIGN = "I", OPTION = "EQ", LOW = SapPad.Pad(i, 10), HIGH = ""
+            });
+
+        return builder.ReadTable("data_display").Build();
+    }
+
+    internal static VbrkRow[] ParseVbrkRows(RfcResponse response)
+    {
+        if (!response.Tables.TryGetValue("data_display", out var rows))
+            return [];
+
+        return SapDelimitedParser
+            .ParseRows(rows, '|', skipHeader: true)
+            .Where(cols => cols.Length >= VbrkColumns.Length)
+            .Select(cols => new VbrkRow(cols[0], cols[1]))
+            .ToArray();
+    }
+
+    // ── Consignment pricing (A005/KONP) ──────────────────────────────────────
+    // For consignment customers, goods ship without a commercial invoice (a
+    // manual/proforma document is used for transport) — VBFA has nothing to
+    // return for those delivery lines. The source Excel macro's GetConsignmentValue
+    // routine falls back to SAP's standard pricing-condition lookup for exactly
+    // this case: A005 (customer/material condition access table) joined to KONP
+    // (condition item — KBETR rate, KONWA currency, KPEIN pricing unit) via
+    // KNUMH, filtered to the currently-valid record (DATBI GT today). Sales
+    // Value = KBETR * quantity / KPEIN.
+    //
+    // Unlike every other lookup in this file, this batches via an OR'd set of
+    // literal EQ pairs rather than an IN opt/value_list — the macro's own SAP
+    // calls build single literal KUNNR EQ '..' AND MATNR EQ '..' conditions per
+    // pair (looped one at a time), and there's no evidence the underlying
+    // ZRFC_READ_TABLES Z-RFC supports two independent IN opt filters on two
+    // different fields in the same call, so this replicates the macro's literal
+    // approach instead of risking an unverified batching mechanism. No KSCHL
+    // (condition type) filter either — the macro's own calls don't filter on
+    // it; if more than one condition record matches a pair, ParseConsignmentPriceRows
+    // keeps only the first.
+
+    internal static RfcRequest BuildConsignmentPriceRequest(ConsignmentPriceRequest req)
+    {
+        var builder = new RfcRequestBuilder(FnReadTables)
+            .Import("DELIMITER", "|")
+            .Import("NO_DATA",   " ")
+            .TableRow("QUERY_TABLES", new { TABNAME = "A005" })
+            .TableRow("QUERY_TABLES", new { TABNAME = "KONP" })
+            .TableItemRow("join_FIELDS", new { TAB_FROM = "A005", FLD_FROM = "KNUMH", TAB_TO = "KONP", FLD_TO = "KNUMH" })
+            .TableItemRow("query_FIELDS", new { TABNAME = "A005", FIELDNAME = "KUNNR" })
+            .TableItemRow("query_FIELDS", new { TABNAME = "A005", FIELDNAME = "MATNR" })
+            .TableItemRow("query_FIELDS", new { TABNAME = "KONP", FIELDNAME = "KBETR" })
+            .TableItemRow("query_FIELDS", new { TABNAME = "KONP", FIELDNAME = "KONWA" })
+            .TableItemRow("query_FIELDS", new { TABNAME = "KONP", FIELDNAME = "KPEIN" });
+
+        var pairs = req.Lines
+            .Select(l => $"(A005~KUNNR EQ '{SapPad.Pad(l.Customer, 10)}' AND A005~MATNR EQ '{SapPad.Pad(l.Material, 18)}')")
+            .ToArray();
+
+        if (pairs.Length > 0)
+            builder.WhereCondition($"({string.Join(" OR ", pairs)})");
+
+        builder.WhereCondition($"A005~DATBI GT '{DateTime.Now:yyyyMMdd}'");
+
+        return builder.ReadTable("data_display").Build();
+    }
+
+    internal static ConsignmentPriceRow[] ParseConsignmentPriceRows(RfcResponse response)
+    {
+        if (!response.Tables.TryGetValue("data_display", out var rows))
+            return [];
+
+        var columnCount = 5; // KUNNR, MATNR, KBETR, KONWA, KPEIN
+
+        return SapDelimitedParser
+            .ParseRows(rows, '|', skipHeader: true)
+            .Where(cols => cols.Length >= columnCount)
+            .Select(cols => new ConsignmentPriceRow(cols[0], cols[1], cols[2], cols[3], cols[4]))
+            .GroupBy(r => (r.CustomerCode, r.MaterialNumber))
+            .Select(g => g.First()) // keep only the first condition record per pair
             .ToArray();
     }
 

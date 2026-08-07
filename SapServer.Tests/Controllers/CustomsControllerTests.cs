@@ -85,4 +85,38 @@ public class CustomsControllerTests
         // the endpoint still returns 200 with whatever KNA1 already produced.
         Assert.IsType<OkObjectResult>(result);
     }
+
+    [Fact]
+    public async Task Vbrk_short_circuits_on_an_empty_invoices_list()
+    {
+        var result = await _controller.Vbrk(new VbrkRequest { Invoices = [] }, CancellationToken.None);
+        Assert.Empty(Assert.IsType<ApiResponse<VbrkRow[]>>(Assert.IsType<OkObjectResult>(result).Value).Data!);
+        _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Vbrk_queries_the_pool_for_a_non_empty_list()
+    {
+        _pool.Setup(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>())).ReturnsAsync(new RfcResponse());
+        var result = await _controller.Vbrk(new VbrkRequest { Invoices = ["0004500099999"] }, CancellationToken.None);
+        Assert.IsType<OkObjectResult>(result);
+        _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task ConsignmentPrice_short_circuits_on_an_empty_lines_list()
+    {
+        var result = await _controller.ConsignmentPrice(new ConsignmentPriceRequest { Lines = [] }, CancellationToken.None);
+        Assert.Empty(Assert.IsType<ApiResponse<ConsignmentPriceRow[]>>(Assert.IsType<OkObjectResult>(result).Value).Data!);
+        _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ConsignmentPrice_queries_the_pool_for_a_non_empty_list()
+    {
+        _pool.Setup(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>())).ReturnsAsync(new RfcResponse());
+        var result = await _controller.ConsignmentPrice(new ConsignmentPriceRequest { Lines = [new ConsignmentPriceLine("363533", "CP1166")] }, CancellationToken.None);
+        Assert.IsType<OkObjectResult>(result);
+        _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
 }

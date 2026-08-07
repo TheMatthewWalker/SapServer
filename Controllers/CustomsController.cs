@@ -120,5 +120,43 @@ public sealed class CustomsController : SapControllerBase
         return Ok(ApiResponse<Kna1Row[]>.Ok(kna1Rows));
     }
 
+    // No CheckPermissionAsync gate here, matching this controller's other four
+    // endpoints (lips/likp/vbfa/marc/kna1) and the same precedent documented in
+    // WarehouseController's picksheet-stock and ConsignmentController: these are
+    // only ever called via the Node-side shared service token (userId 0), so
+    // there's no per-user identity for PermissionService to check — the real
+    // gate is requirePermission('LOG_CUSTOMS_REPORT') on the Normanton-Nexus route.
+    [HttpPost("vbrk")]
+    [ProducesResponseType(typeof(ApiResponse<VbrkRow[]>), 200)]
+    public async Task<IActionResult> Vbrk([FromBody] VbrkRequest request, CancellationToken ct)
+    {
+        if (request.Invoices.Count == 0)
+            return Ok(ApiResponse<VbrkRow[]>.Ok([]));
+
+        var rfcRequest = CustomsHelpers.BuildVbrkRequest(request);
+
+        var response = await _pool.ExecuteAsync(rfcRequest, ct);
+        return Ok(ApiResponse<VbrkRow[]>.Ok(CustomsHelpers.ParseVbrkRows(response)));
+    }
+
+    // Same no-CheckPermissionAsync precedent as this controller's other endpoints
+    // (see the comment above Vbrk) — service-token-only call.
+    //
+    // Consignment-customer fallback: used when VBFA has no billing document for
+    // a delivery line (goods shipped without a commercial invoice). Looks up a
+    // customs sales price via SAP's standard pricing-condition tables instead —
+    // see CustomsHelpers.BuildConsignmentPriceRequest for the full rationale.
+    [HttpPost("consignment-price")]
+    [ProducesResponseType(typeof(ApiResponse<ConsignmentPriceRow[]>), 200)]
+    public async Task<IActionResult> ConsignmentPrice([FromBody] ConsignmentPriceRequest request, CancellationToken ct)
+    {
+        if (request.Lines.Count == 0)
+            return Ok(ApiResponse<ConsignmentPriceRow[]>.Ok([]));
+
+        var rfcRequest = CustomsHelpers.BuildConsignmentPriceRequest(request);
+
+        var response = await _pool.ExecuteAsync(rfcRequest, ct);
+        return Ok(ApiResponse<ConsignmentPriceRow[]>.Ok(CustomsHelpers.ParseConsignmentPriceRows(response)));
+    }
 
 }

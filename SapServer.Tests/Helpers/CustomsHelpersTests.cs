@@ -62,9 +62,9 @@ public class CustomsHelpersTests
             {
                 ["data_display"] = new()
                 {
-                    new() { ["WA"] = "VBELV|POSNV|VBELN|POSNN|RFWRT" },
-                    new() { ["WA"] = "0080001234|000010|4500099999|000010|150.00" }, // matches requested (delivery, item)
-                    new() { ["WA"] = "0080001234|000020|4500099998|000020|75.00" },  // same delivery, different item — not requested
+                    new() { ["WA"] = "VBELV|POSNV|VBELN|POSNN|RFWRT|ERDAT" },
+                    new() { ["WA"] = "0080001234|000010|4500099999|000010|150.00|20260515" }, // matches requested (delivery, item)
+                    new() { ["WA"] = "0080001234|000020|4500099998|000020|75.00|20260516" },  // same delivery, different item — not requested
                 }
             }
         };
@@ -73,6 +73,7 @@ public class CustomsHelpersTests
 
         Assert.Single(rows);
         Assert.Equal("4500099999", rows[0].InvoiceNumber);
+        Assert.Equal("20260515", rows[0].InvoiceDate);
     }
 
     [Fact]
@@ -84,8 +85,8 @@ public class CustomsHelpersTests
             {
                 ["data_display"] = new()
                 {
-                    new() { ["WA"] = "KUNNR|NAME1|STRAS|ORT01|PSTLZ|LAND1|LZONE" },
-                    new() { ["WA"] = "0000012345|Acme Ltd|1 Main St|Normanton|WF6 1TN|GB|Z1" },
+                    new() { ["WA"] = "KUNNR|NAME1|STRAS|ORT01|PSTLZ|LAND1|LZONE|STCEG" },
+                    new() { ["WA"] = "0000012345|Acme Ltd|1 Main St|Normanton|WF6 1TN|GB|Z1|GB123456789" },
                 }
             }
         };
@@ -96,6 +97,88 @@ public class CustomsHelpersTests
         Assert.Equal("Acme Ltd", rows[0].Name);
         Assert.Equal("GB", rows[0].DestinationCountry);
         Assert.Equal("Z1", rows[0].TransportZone);
+        Assert.Equal("GB123456789", rows[0].VatNumber);
+    }
+
+    [Fact]
+    public void BuildVbrkRequest_filters_on_padded_invoice_numbers()
+    {
+        var request = CustomsHelpers.BuildVbrkRequest(new VbrkRequest { Invoices = ["4500099999"] });
+        var whereText = string.Join(" ", request.InputTablesItems["where_clause"].Select(r => r["TEXT"]));
+
+        Assert.Contains("VBRK~VBELN IN opt", whereText);
+        Assert.Equal("4500099999", request.InputTablesItems["value_list"][0]["LOW"]);
+    }
+
+    [Fact]
+    public void ParseVbrkRows_skips_header_and_maps_columns()
+    {
+        var response = new RfcResponse
+        {
+            Tables = new()
+            {
+                ["data_display"] = new()
+                {
+                    new() { ["WA"] = "VBELN|WAERK" },
+                    new() { ["WA"] = "4500099999|EUR" },
+                }
+            }
+        };
+
+        var rows = CustomsHelpers.ParseVbrkRows(response);
+
+        Assert.Single(rows);
+        Assert.Equal("4500099999", rows[0].InvoiceNumber);
+        Assert.Equal("EUR", rows[0].Currency);
+    }
+
+    [Fact]
+    public void BuildConsignmentPriceRequest_ORs_exact_match_customer_material_pairs_and_filters_valid_conditions()
+    {
+        var request = CustomsHelpers.BuildConsignmentPriceRequest(new ConsignmentPriceRequest
+        {
+            Lines = [new ConsignmentPriceLine("363533", "CP1166")],
+        });
+
+        var whereText = string.Join(" ", request.InputTablesItems["where_clause"].Select(r => r["TEXT"]));
+
+        Assert.Contains("A005~KUNNR EQ '0000363533'", whereText);
+        Assert.Contains("A005~MATNR EQ 'CP1166'", whereText);
+        Assert.Contains("A005~DATBI GT '", whereText);
+    }
+
+    [Fact]
+    public void BuildConsignmentPriceRequest_with_no_lines_still_filters_on_validity_date_only()
+    {
+        var request = CustomsHelpers.BuildConsignmentPriceRequest(new ConsignmentPriceRequest());
+        var whereText = string.Join(" ", request.InputTablesItems["where_clause"].Select(r => r["TEXT"]));
+
+        Assert.DoesNotContain("KUNNR EQ", whereText);
+        Assert.Contains("A005~DATBI GT '", whereText);
+    }
+
+    [Fact]
+    public void ParseConsignmentPriceRows_skips_header_maps_columns_and_dedupes_to_first_record_per_pair()
+    {
+        var response = new RfcResponse
+        {
+            Tables = new()
+            {
+                ["data_display"] = new()
+                {
+                    new() { ["WA"] = "KUNNR|MATNR|KBETR|KONWA|KPEIN" },
+                    new() { ["WA"] = "0000363533|CP1166|12.50|EUR|1" },
+                    new() { ["WA"] = "0000363533|CP1166|99.00|EUR|1" }, // second condition record for the same pair — ignored
+                }
+            }
+        };
+
+        var rows = CustomsHelpers.ParseConsignmentPriceRows(response);
+
+        Assert.Single(rows);
+        Assert.Equal("12.50", rows[0].Rate);
+        Assert.Equal("EUR", rows[0].Currency);
+        Assert.Equal("1", rows[0].PricingUnit);
     }
 
     [Fact]
