@@ -649,7 +649,7 @@ internal static class WarehouseHelpers
             .Screen("SAPMM07M", "0400")
                 .Field("BDC_OKCODE",    "/00")
                 .Field("RM07M-MTSNR",   body.DeliveryNote ?? "")
-                .Field("MKPF-BKTXT",    body.Header ?? "")
+                .Field("MKPF-BKTXT",    body.Header?.Substring(0, Math.Min(10, body.Header.Length)) ?? "")
                 .Field("RM07M-BWARTWA", "411")
                 .Field("RM07M-SOBKZ",   "K")
                 .Field("RM07M-WERKS",   Plant)
