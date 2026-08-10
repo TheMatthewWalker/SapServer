@@ -550,7 +550,7 @@ internal static class WarehouseHelpers
             .TableItemRow("join_FIELDS", new { TAB_FROM = "LTBK", FLD_FROM = "MBLNR", TAB_TO = "MKPF", FLD_TO = "MBLNR" });
 
         builder.WhereCondition($"LTBP~LGNUM EQ '{Warehouse}'");
-        builder.WhereCondition("LTBK~STATU NE 'E'");
+        builder.WhereCondition("LTBK~STATU <> 'E'");
         builder.WhereCondition("LTBP~BESTQ EQ ''");
 
         if (!string.IsNullOrWhiteSpace(query.MrpController))
