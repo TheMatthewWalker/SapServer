@@ -172,7 +172,7 @@ Copy `appsettings.example.json` → `appsettings.json` and fill in all values:
   },
   "Auth": {
     "JwtSecret":           "min-32-char-random-secret-shared-with-sql2005-bridge",
-    "JwtIssuer":           "sql2005-bridge",
+    "JwtIssuer":           "normanton-nexus",
     "JwtAudience":         "sap-server",
     "SqlConnectionString": "Server=GATEWAYHO;Database=kongsberg;..."
   },
@@ -202,7 +202,7 @@ app.post('/api/sap/token', requireLogin, (req, res) => {
   };
   const token = jwt.sign(payload, process.env.SAP_JWT_SECRET, {
     expiresIn: '8h',
-    issuer:    'sql2005-bridge',
+    issuer:    'normanton-nexus',
     audience:  'sap-server',
   });
   res.json({ token });

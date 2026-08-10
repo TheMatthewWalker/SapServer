@@ -10,7 +10,7 @@ public sealed class AuthOptions
     /// </summary>
     public string JwtSecret { get; init; } = string.Empty;
 
-    public string JwtIssuer   { get; init; } = "sql2005-bridge";
+    public string JwtIssuer   { get; init; } = "normanton-nexus";
     public string JwtAudience { get; init; } = "sap-server";
 
     /// <summary>

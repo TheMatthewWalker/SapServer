@@ -23,7 +23,7 @@ namespace SapServer.Tests.Infrastructure;
 public sealed class SapServerTestFactory : WebApplicationFactory<Program>
 {
     public const string JwtSecret = "test-only-jwt-secret-at-least-32-characters-long";
-    private const string JwtIssuer = "sql2005-bridge";
+    private const string JwtIssuer = "normanton-nexus";
     private const string JwtAudience = "sap-server";
 
     public Mock<ISapConnectionPool> PoolMock { get; } = new();
