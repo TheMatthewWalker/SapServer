@@ -226,17 +226,29 @@ internal static class WarehouseHelpers
 
     // ── Delete TR (LB02) ─────────────────────────────────────────────────────
     //
-    // Replicates wm_open_tr.xlsm's ati_code.delete_tr sub exactly (recovered
-    // via MS-OVBA decompression of the workbook's vbaProject.bin — the
-    // warehouse team's Excel macro this whole TR-management feature is
-    // modernising). Primary path hard-deletes item "" (all items) via =DLK +
-    // the SAPLSPO1 confirm popup. SAP sometimes refuses with
-    // "E L2 019  You are not allowed to delete transfer requirement item
-    // 0001" when the TR has a second line already partially processed — the
-    // macro's own fallback re-targets TBPOS "2" specifically and sets the
-    // LVORM deletion-indicator flag instead of a hard delete, rather than
-    // giving up. See IsDeleteTrItemBlocked/WarehouseController.DeleteTr for
-    // the retry wiring.
+    // Replicates wm_open_tr.xlsm's ati_code.delete_tr sub (recovered via
+    // MS-OVBA decompression of the workbook's vbaProject.bin — the warehouse
+    // team's Excel macro this whole TR-management feature is modernising).
+    // Hard-deletes item "" (all items) via =DLK + the SAPLSPO1 confirm popup.
+    //
+    // SAP sometimes refuses with "E L2 019  You are not allowed to delete
+    // transfer requirement item 0001" when the TR has a second line already
+    // partially processed. The macro's own fallback for this (re-target
+    // TBPOS "2" on screen SAPML02B/0102 and set a field it calls
+    // "LTBP1-LVORM") is NOT ported here — confirmed against this real SAP
+    // system that LTBP1-LVORM does not exist on dynpro SAPML02B/0102 at all
+    // ("Field LTBP1-LVORM does not exist in dynpro SAPML02B 0102"), and the
+    // decompiled macro source at that exact point is corrupted enough that
+    // the true intended field/screen can't be reconstructed with confidence.
+    // Since the macro wrapped this whole path in "On Error Resume Next", the
+    // realistic explanation is this fallback branch was already silently
+    // broken/dead in the original macro and nobody ever noticed. Rather than
+    // guess at a second unverified BDC screen mapping, WarehouseController.
+    // DeleteTr surfaces the "E L2 019" refusal directly (see
+    // IsDeleteTrItemBlocked) so the operator knows this TR needs a manual
+    // LB02 delete — a confirmed, correctly-recorded fallback can be added
+    // once someone with SAP GUI access captures the real screen sequence
+    // (e.g. via SHDB).
     internal static RfcRequest BuildDeleteTrRequest(string trNumber) =>
         BdcBuilder.For("LB02")
             .Screen("SAPML02B", "0100")
@@ -250,25 +262,54 @@ internal static class WarehouseHelpers
                 .Field("BDC_OKCODE", "=YES")
             .Build();
 
-    internal static RfcRequest BuildDeleteTrFallbackRequest(string trNumber) =>
-        BdcBuilder.For("LB02")
-            .Screen("SAPML02B", "0100")
-                .Field("BDC_OKCODE", "/00")
-                .Field("LTBK-LGNUM", Warehouse)
-                .Field("LTBK-TBNUM", trNumber)
-                .Field("LTBP-TBPOS", "2")
-            .Screen("SAPML02B", "0102")
-                .Field("BDC_OKCODE",  "=BU")
-                .Field("LTBP1-LVORM", "X")
-            .Build();
-
     // True only for the exact "E L2 019" refusal — checked on the parsed
     // Type/MessageClass/MessageNumber triple (ProductionHelpers.
     // ParseBdcResponse already regex-splits MESSG into these), same idiom
     // PerformanceController already uses for its own S/M3/801 check, so
-    // whitespace differences in SAP's own message text can't break the retry.
+    // whitespace differences in SAP's own message text can't break this.
     internal static bool IsDeleteTrItemBlocked(BdcResponse result) =>
         result.Type == "E" && result.MessageClass == "L2" && result.MessageNumber == "019";
+
+    // ── Delete TR verification ───────────────────────────────────────────────
+    //
+    // A BDC "success" can't be trusted at face value: this exact delete flow
+    // was observed reporting Type "S" for "Field LTBP1-LVORM does not exist
+    // in dynpro SAPML02B 0102" (SAP message class "00" — a BDC-processor/
+    // framework message, not a business-transaction result) even though
+    // nothing was actually deleted. ParseBdcResponse's regex has no way to
+    // tell a real business success apart from a framework message that
+    // happens to carry type 'S'. Rather than special-case message class "00"
+    // (fragile — there's no guarantee every framework failure uses it, or
+    // that every class "00" message is bad), WarehouseController.DeleteTr
+    // re-queries LTBP after every delete attempt and only reports success if
+    // the TR is actually gone — the same "verify the concrete outcome, don't
+    // trust the raw message" approach CreateStockAdjustment already uses
+    // (checking for a real MATERIALDOCUMENT rather than trusting SAP's
+    // message alone).
+    internal static RfcRequest BuildTrExistsRequest(string trNumber)
+    {
+        var builder = new RfcRequestBuilder(FnReadTables)
+            .Import("DELIMITER", "|")
+            .Import("NO_DATA",   " ")
+            .TableRow("QUERY_TABLES", new { TABNAME = "LTBP" })
+            .TableItemRow("query_FIELDS", new { TABNAME = "LTBP", FIELDNAME = "TBNUM" });
+
+        builder
+            .WhereCondition($"LTBP~LGNUM EQ '{Warehouse}'")
+            .WhereCondition($"LTBP~TBNUM EQ '{trNumber}'");
+
+        return builder.ReadTable("data_display").Build();
+    }
+
+    internal static bool TrStillExists(RfcResponse response)
+    {
+        if (!response.Tables.TryGetValue("data_display", out var sapRows))
+            return false;
+
+        // skipHeader: true — same ZRFC_READ_TABLES column-header gotcha as
+        // BinExists/every other data_display parse in this file.
+        return SapDelimitedParser.ParseRows(sapRows, '|', skipHeader: true).Count > 0;
+    }
 
     // ── TR Cleanup Candidates (LTBK/LTBP/MARC/MCHB → LQUA) ──────────────────
     //

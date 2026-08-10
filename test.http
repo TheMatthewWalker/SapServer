@@ -1,5 +1,5 @@
 @baseUrl = http://127.0.0.1:5200
-@token = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzcWwyMDA1LWJyaWRnZSIsImF1ZCI6InNhcC1zZXJ2ZXIiLCJzdWIiOiJkZXYiLCJ1c2VySWQiOjEsInJvbGUiOiJhZG1pbiIsImlhdCI6MTc4NTMzOTA1MiwiZXhwIjoxNzg1MzQyNjUyfQ.iVXR2Aie3WHsiRlH0IAgl-qKwn-wrz2Ftaou4dgk7Sc
+@token = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzcWwyMDA1LWJyaWRnZSIsImF1ZCI6InNhcC1zZXJ2ZXIiLCJzdWIiOiJkZXYiLCJ1c2VySWQiOjEsInJvbGUiOiJhZG1pbiIsImlhdCI6MTc4NjM1NjAzNSwiZXhwIjoxNzg2MzU5NjM1fQ.4Etbd5gzWoJobIoPHG7JmZtxUcyhW03ni8feVXwJDuM
 
 
 
@@ -9,7 +9,7 @@ Content-Type: application/json
 Authorization: Bearer {{token}}
 
 {
-    "FunctionName": "L_TO_CREATE_TR"
+    "FunctionName": "BAPI_MATERIAL_SAVEDATA"
 }
 ###
 
@@ -174,9 +174,12 @@ Authorization: Bearer {{token}}
 ### POST /api/warehouse/delete-tr  (replicates wm_open_tr.xlsm's
 ### ati_code.delete_tr — transaction LB02. DESTRUCTIVE — only run against a
 ### TR that's genuinely safe to delete in whatever SAP client this hits, not
-### production. NEEDS REAL-SAP VERIFICATION — the screen/field sequence was
-### reverse-engineered from a VBA macro recording, not freshly captured, and
-### the "E L2 019" fallback retry path has never been exercised against SAP.)
+### production. Verifies the TR is actually gone from LTBP afterward before
+### reporting success (a "E L2 019" refusal returns 422 immediately with no
+### retry — the macro's own item-1-protected fallback doesn't port to this
+### system; SAP confirmed the field it referenced doesn't exist on that
+### dynpro here). A TR needing that fallback currently needs a manual LB02
+### delete.)
 POST {{baseUrl}}/api/warehouse/delete-tr
 Content-Type: application/json
 Authorization: Bearer {{token}}

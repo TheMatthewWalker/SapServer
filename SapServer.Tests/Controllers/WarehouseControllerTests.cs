@@ -226,49 +226,75 @@ public class WarehouseControllerTests
         Parameters = new() { ["MESSG"] = $"{type} {msgClass} {number} {message}" },
     };
 
+    private static RfcResponse ExistsCheckResponse(bool trStillExists) => trStillExists
+        ? new RfcResponse { Tables = new() { ["data_display"] = new() { new() { ["WA"] = "TBNUM" }, new() { ["WA"] = "4500001234" } } } }
+        : new RfcResponse { Tables = new() { ["data_display"] = new() { new() { ["WA"] = "TBNUM" } } } }; // header only -> gone
+
     [Fact]
-    public async Task DeleteTr_does_not_retry_when_the_first_attempt_succeeds()
+    public async Task DeleteTr_returns_200_when_the_delete_succeeds_and_the_exists_check_confirms_the_TR_is_gone()
     {
         _permissions.Setup(p => p.CanExecuteAsync(1, WarehouseHelpers.FnConsignment, It.IsAny<CancellationToken>())).ReturnsAsync(true);
-        _pool.Setup(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(BdcMessage("S", "L2", "018", "Transfer requirement deleted"));
+        _pool.SetupSequence(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(BdcMessage("S", "L2", "018", "Transfer requirement deleted"))
+            .ReturnsAsync(ExistsCheckResponse(trStillExists: false));
 
         var result = await _controller.DeleteTr(new DeleteTrRequest { TrNumber = "4500001234" }, CancellationToken.None);
 
         Assert.IsType<OkObjectResult>(result);
-        _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Once);
+        _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Exactly(2)); // delete + verify
     }
 
     [Fact]
-    public async Task DeleteTr_retries_via_the_fallback_LVORM_request_when_the_first_attempt_is_blocked_on_item_1()
-    {
-        _permissions.Setup(p => p.CanExecuteAsync(1, WarehouseHelpers.FnConsignment, It.IsAny<CancellationToken>())).ReturnsAsync(true);
-        _pool.SetupSequence(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(BdcMessage("E", "L2", "019", "You are not allowed to delete transfer requirement item 0001"))
-            .ReturnsAsync(BdcMessage("S", "L2", "018", "Transfer requirement deleted"));
-
-        var result = await _controller.DeleteTr(new DeleteTrRequest { TrNumber = "4500001234" }, CancellationToken.None);
-
-        var ok = Assert.IsType<OkObjectResult>(result);
-        var body = Assert.IsType<ApiResponse<BdcResponse>>(ok.Value);
-        Assert.Equal("S", body.Data!.Type); // final result reflects the fallback's outcome, not the first attempt's error
-        _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
-        _pool.Verify(p => p.ExecuteAsync(
-            It.Is<RfcRequest>(r => r.InputTablesItems["BDCTABLE"].Any(row => Equals(row.GetValueOrDefault("FNAM"), "LTBP1-LVORM"))),
-            It.IsAny<CancellationToken>()), Times.Once);
-    }
-
-    [Fact]
-    public async Task DeleteTr_does_not_retry_for_any_error_other_than_the_exact_E_L2_019_triple()
+    public async Task DeleteTr_returns_422_immediately_when_blocked_on_item_1_without_attempting_a_verification_or_retry()
     {
         _permissions.Setup(p => p.CanExecuteAsync(1, WarehouseHelpers.FnConsignment, It.IsAny<CancellationToken>())).ReturnsAsync(true);
         _pool.Setup(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(BdcMessage("E", "L2", "020", "Some other error"));
+            .ReturnsAsync(BdcMessage("E", "L2", "019", "You are not allowed to delete transfer requirement item 0001"));
 
         var result = await _controller.DeleteTr(new DeleteTrRequest { TrNumber = "4500001234" }, CancellationToken.None);
 
-        Assert.IsType<OkObjectResult>(result); // controller doesn't special-case unretried errors — just returns the parsed result as-is
+        var unprocessable = Assert.IsType<UnprocessableEntityObjectResult>(result);
+        var body = Assert.IsType<ApiResponse<BdcResponse>>(unprocessable.Value);
+        Assert.False(body.Success);
+        // Only the primary delete attempt — no unverified fallback BDC and no
+        // exists-check, since the refusal is already a definitive answer.
         _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    // Regression test for the exact bug reported in production: SAP's BDC
+    // processor reported Type "S" for "Field LTBP1-LVORM does not exist in
+    // dynpro SAPML02B 0102" (a message-class "00" framework failure, not a
+    // real business result) even though nothing was deleted — the endpoint
+    // returned success:true for a TR that was never actually removed.
+    [Fact]
+    public async Task DeleteTr_returns_422_when_SAP_reports_a_non_blocked_S_type_message_but_the_TR_still_exists()
+    {
+        _permissions.Setup(p => p.CanExecuteAsync(1, WarehouseHelpers.FnConsignment, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        _pool.SetupSequence(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(BdcMessage("S", "00", "349", "Field LTBP1-LVORM does not exist in dynpro SAPML02B 0102"))
+            .ReturnsAsync(ExistsCheckResponse(trStillExists: true));
+
+        var result = await _controller.DeleteTr(new DeleteTrRequest { TrNumber = "4500001234" }, CancellationToken.None);
+
+        var unprocessable = Assert.IsType<UnprocessableEntityObjectResult>(result);
+        var body = Assert.IsType<ApiResponse<BdcResponse>>(unprocessable.Value);
+        Assert.False(body.Success);
+        Assert.Contains("still exists", body.Error!.Message);
+        _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
+    }
+
+    [Fact]
+    public async Task DeleteTr_returns_422_when_a_different_SAP_error_is_reported_and_the_TR_still_exists()
+    {
+        _permissions.Setup(p => p.CanExecuteAsync(1, WarehouseHelpers.FnConsignment, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        _pool.SetupSequence(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(BdcMessage("E", "L2", "020", "Some other error"))
+            .ReturnsAsync(ExistsCheckResponse(trStillExists: true));
+
+        var result = await _controller.DeleteTr(new DeleteTrRequest { TrNumber = "4500001234" }, CancellationToken.None);
+
+        Assert.IsType<UnprocessableEntityObjectResult>(result);
+        _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
     }
 
     // ── TR cleanup candidates ────────────────────────────────────────────────

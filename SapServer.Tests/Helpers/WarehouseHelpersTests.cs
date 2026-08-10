@@ -294,20 +294,6 @@ public class WarehouseHelpersTests
     }
 
     [Fact]
-    public void BuildDeleteTrFallbackRequest_targets_item_2_and_sets_the_LVORM_deletion_flag()
-    {
-        var request = WarehouseHelpers.BuildDeleteTrFallbackRequest("4500001234");
-        var rows = request.InputTablesItems["BDCTABLE"];
-
-        Assert.Equal(8, rows.Count); // 2 screens + 6 fields
-        Assert.Equal("LTBP-TBPOS", rows[4]["FNAM"]); Assert.Equal("2", rows[4]["FVAL"]);
-
-        Assert.Equal("SAPML02B", rows[5]["PROGRAM"]); Assert.Equal("0102", rows[5]["DYNPRO"]);
-        Assert.Equal("BDC_OKCODE", rows[6]["FNAM"]); Assert.Equal("=BU", rows[6]["FVAL"]);
-        Assert.Equal("LTBP1-LVORM", rows[7]["FNAM"]); Assert.Equal("X", rows[7]["FVAL"]);
-    }
-
-    [Fact]
     public void IsDeleteTrItemBlocked_is_true_only_for_the_exact_E_L2_019_triple()
     {
         Assert.True(WarehouseHelpers.IsDeleteTrItemBlocked(
@@ -319,6 +305,33 @@ public class WarehouseHelpersTests
             new BdcResponse { Type = "E", MessageClass = "L1", MessageNumber = "019" }));
         Assert.False(WarehouseHelpers.IsDeleteTrItemBlocked(
             new BdcResponse { Type = "E", MessageClass = "L2", MessageNumber = "020" }));
+    }
+
+    [Fact]
+    public void BuildTrExistsRequest_filters_LTBP_by_TR_number()
+    {
+        var request = WarehouseHelpers.BuildTrExistsRequest("4500001234");
+        var whereText = string.Join(" ", request.InputTablesItems["where_clause"].Select(r => r["TEXT"]));
+
+        Assert.Contains("LTBP~LGNUM EQ '312'", whereText);
+        Assert.Contains("LTBP~TBNUM EQ '4500001234'", whereText);
+    }
+
+    [Fact]
+    public void TrStillExists_is_false_when_only_the_SAP_header_row_comes_back()
+    {
+        var response = new RfcResponse
+        {
+            Tables = new() { ["data_display"] = new() { new() { ["WA"] = "TBNUM" } } }, // header only, no real hit
+        };
+        Assert.False(WarehouseHelpers.TrStillExists(response));
+    }
+
+    [Fact]
+    public void TrStillExists_is_true_when_a_real_row_follows_the_header()
+    {
+        var response = StockResponse("4500001234"); // header + one real row
+        Assert.True(WarehouseHelpers.TrStillExists(response));
     }
 
     // ── TR cleanup candidates ────────────────────────────────────────────────

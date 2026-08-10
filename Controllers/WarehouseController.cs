@@ -465,9 +465,22 @@ public sealed class WarehouseController : SapControllerBase
     // SapServer itself doesn't gate this any more tightly than that; the
     // portal-role restriction (LOG_SUPER, since deleting a TR is unrecoverable)
     // is enforced one layer up in Normanton-Nexus's routes/sap.js proxy.
+    //
+    // Two things a naive "just trust the BDC message" implementation gets
+    // wrong here, both fixed below:
+    //  1. SAP sometimes refuses with "E L2 019 You are not allowed to delete
+    //     transfer requirement item 0001" — surfaced directly as a 422
+    //     rather than retried with an unconfirmed fallback screen mapping
+    //     (see WarehouseHelpers.BuildDeleteTrRequest's comment for why).
+    //  2. Even a non-blocked response can't be trusted at face value — this
+    //     flow was observed reporting Type "S" for a framework-level BDC
+    //     failure (a field that doesn't exist on the target dynpro) that
+    //     deleted nothing. Every non-blocked attempt is verified by
+    //     re-querying LTBP before reporting success.
     [HttpPost("delete-tr")]
     [ProducesResponseType(typeof(ApiResponse<BdcResponse>), 200)]
     [ProducesResponseType(typeof(ApiResponse<object>), 403)]
+    [ProducesResponseType(typeof(ApiResponse<object>), 422)]
     public async Task<IActionResult> DeleteTr([FromBody] DeleteTrRequest body, CancellationToken ct)
     {
         await CheckPermissionAsync(GetUserId(), WarehouseHelpers.FnConsignment, ct);
@@ -477,8 +490,17 @@ public sealed class WarehouseController : SapControllerBase
 
         if (WarehouseHelpers.IsDeleteTrItemBlocked(result))
         {
-            var fallback = await _pool.ExecuteAsync(WarehouseHelpers.BuildDeleteTrFallbackRequest(body.TrNumber), ct);
-            result = ProductionHelpers.ParseBdcResponse(fallback);
+            var msg = $"SAP refused to delete TR {body.TrNumber}: {result.Message}. This TR needs a manual LB02 delete.";
+            return UnprocessableEntity(ApiResponse<BdcResponse>.Fail("422", msg,
+                new BdcResponse { Type = "E", Message = msg, RawMessage = result.RawMessage }));
+        }
+
+        var existsCheck = await _pool.ExecuteAsync(WarehouseHelpers.BuildTrExistsRequest(body.TrNumber), ct);
+        if (WarehouseHelpers.TrStillExists(existsCheck))
+        {
+            var msg = $"SAP reported \"{result.Message}\" but TR {body.TrNumber} still exists — the delete did not take effect.";
+            return UnprocessableEntity(ApiResponse<BdcResponse>.Fail("422", msg,
+                new BdcResponse { Type = "E", Message = msg, RawMessage = result.RawMessage }));
         }
 
         return Ok(ApiResponse<BdcResponse>.Ok(result));
