@@ -371,16 +371,20 @@ internal static class CustomsHelpers
             .TableItemRow("query_FIELDS", new { TABNAME = "A005", FIELDNAME = "MATNR" })
             .TableItemRow("query_FIELDS", new { TABNAME = "KONP", FIELDNAME = "KBETR" })
             .TableItemRow("query_FIELDS", new { TABNAME = "KONP", FIELDNAME = "KONWA" })
-            .TableItemRow("query_FIELDS", new { TABNAME = "KONP", FIELDNAME = "KPEIN" });
+            .TableItemRow("query_FIELDS", new { TABNAME = "KONP", FIELDNAME = "KPEIN" })
+            .WhereCondition($"A005~DATBI GT '{DateTime.Now:yyyyMMdd}'")
+            .WhereCondition($"A005~MATNR IN opt'");
 
-        var pairs = req.Lines
-            .Select(l => $"(A005~KUNNR EQ '{SapPad.Pad(l.Customer, 10)}' AND A005~MATNR EQ '{SapPad.Pad(l.Material, 18)}')")
-            .ToArray();
-
-        if (pairs.Length > 0)
-            builder.WhereCondition($"({string.Join(" OR ", pairs)})");
-
-        builder.WhereCondition($"A005~DATBI GT '{DateTime.Now:yyyyMMdd}'");
+        foreach (var l in req.Lines)
+            builder.TableItemRow("value_list", new
+            {
+                TABNAME = "A005",
+                FIELDNAME = "MATNR",
+                SIGN = "I",
+                OPTION = "EQ",
+                LOW = SapPad.Pad(l.Material, 18),
+                HIGH = ""
+            });        
 
         return builder.ReadTable("data_display").Build();
     }
