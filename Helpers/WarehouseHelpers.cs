@@ -550,7 +550,7 @@ internal static class WarehouseHelpers
             .TableItemRow("join_FIELDS", new { TAB_FROM = "LTBK", FLD_FROM = "MBLNR", TAB_TO = "MKPF", FLD_TO = "MBLNR" });
 
         builder.WhereCondition($"LTBP~LGNUM EQ '{Warehouse}'");
-        builder.WhereCondition("LTBK~STATU <> 'E'"); // Remove TR's already processed
+        builder.WhereCondition("LTBP~ELIKZ <> 'X'"); // Remove TR's already processed
         builder.WhereCondition("LTBK~TRART <> 'E'"); // Remove TR's relating to GR.
         builder.WhereCondition("LTBP~BESTQ EQ ''"); // Only show TR's for unrestricted stock (not quality blocked)
 
@@ -559,9 +559,6 @@ internal static class WarehouseHelpers
 
         if (!string.IsNullOrWhiteSpace(query.Material))
             builder.WhereCondition($"LTBP~MATNR EQ '{SapPad.Pad(query.Material, 18)}'");
-
-        if (!string.IsNullOrWhiteSpace(query.StorageLocation))
-            builder.WhereCondition($"LTBP~LGORT EQ '{query.StorageLocation}'");
 
         if (!string.IsNullOrWhiteSpace(query.CreatedBy))
             builder.WhereCondition($"LTBK~BNAME EQ '{query.CreatedBy.Trim().ToUpperInvariant()}'");
@@ -702,7 +699,7 @@ internal static class WarehouseHelpers
                 .Field("MSEGK-LIFNR",    SapPad.Pad(body.SpecialStockNumber, 10))
                 .Field("MSEGK-UMLGO",    body.StorageLocation)
                 .Field("MSEG-MATNR(01)", SapPad.Pad(body.Material, 18))
-                .Field("MSEG-ERFMG(01)", body.Quantity.ToString())
+                .Field("MSEG-ERFMG(01)", body.Quantity)
             .Screen("SAPMM07M", "0421")
                 .Field("BDC_OKCODE", "=BU")
             .Build();
