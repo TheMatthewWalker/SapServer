@@ -550,8 +550,9 @@ internal static class WarehouseHelpers
             .TableItemRow("join_FIELDS", new { TAB_FROM = "LTBK", FLD_FROM = "MBLNR", TAB_TO = "MKPF", FLD_TO = "MBLNR" });
 
         builder.WhereCondition($"LTBP~LGNUM EQ '{Warehouse}'");
-        builder.WhereCondition("LTBK~TRART <> 'E'"); // Updated field to correctly filter GR TR's. TRART, not STATU.
-        builder.WhereCondition("LTBP~BESTQ EQ ''");
+        builder.WhereCondition("LTBK~STATU <> 'E'"); // Remove TR's already processed
+        builder.WhereCondition("LTBK~TRART <> 'E'"); // Remove TR's relating to GR.
+        builder.WhereCondition("LTBP~BESTQ EQ ''"); // Only show TR's for unrestricted stock (not quality blocked)
 
         if (!string.IsNullOrWhiteSpace(query.MrpController))
             builder.WhereCondition($"MARC~DISPO EQ '{query.MrpController}'");
