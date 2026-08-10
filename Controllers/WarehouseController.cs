@@ -564,10 +564,22 @@ public sealed class WarehouseController : SapControllerBase
         // record a delivery that never happened in SAP.
         if (!result.Success)
         {
-            var msg = new[] { result.Mb1bMessage, result.ToNonConsignMessage, result.ToConsignMessage }
-                .FirstOrDefault(m => m.StartsWith("E ", StringComparison.Ordinal))
-                ?? "SAP rejected the consignment issue.";
-            return UnprocessableEntity(ApiResponse<ConsignmentMb1bResponse>.Fail("422", msg, result));
+            var messages = new List<string>();
+
+            if (!string.IsNullOrWhiteSpace(result.Mb1bMessage))
+                messages.Add($"MB1B: {result.Mb1bMessage}");
+
+            if (!string.IsNullOrWhiteSpace(result.ToNonConsignMessage))
+                messages.Add($"To Non-Consign: {result.ToNonConsignMessage}");
+
+            if (!string.IsNullOrWhiteSpace(result.ToConsignMessage))
+                messages.Add($"To Consign: {result.ToConsignMessage}");
+
+            return UnprocessableEntity(
+                ApiResponse<ConsignmentMb1bResponse>.Fail(
+                    "422",
+                    string.Join(" | ", messages),
+                    result));
         }
 
         return Ok(ApiResponse<ConsignmentMb1bResponse>.Ok(result));
