@@ -46,6 +46,7 @@ CodeCoverage/
 appsettings.Development.json
 appsettings.Production.json
 appsettings.json
+Properties/launchSettings.json
 libs/
 
 # MSBuild Binary and Structured Log
