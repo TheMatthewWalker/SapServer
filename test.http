@@ -1,5 +1,5 @@
 @baseUrl = http://127.0.0.1:5200
-@token = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzcWwyMDA1LWJyaWRnZSIsImF1ZCI6InNhcC1zZXJ2ZXIiLCJzdWIiOiJkZXYiLCJ1c2VySWQiOjEsInJvbGUiOiJhZG1pbiIsImlhdCI6MTc4NjM1NjAzNSwiZXhwIjoxNzg2MzU5NjM1fQ.4Etbd5gzWoJobIoPHG7JmZtxUcyhW03ni8feVXwJDuM
+@token = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJub3JtYW50b24tbmV4dXMiLCJhdWQiOiJzYXAtc2VydmVyIiwic3ViIjoiZGV2IiwidXNlcklkIjoxLCJyb2xlIjoiYWRtaW4iLCJpYXQiOjE3ODYzNTk3MDgsImV4cCI6MTc4NjM2MzMwOH0.cZjSJbNsCWlzz-NyJHtVL9KW8T9di77ykxIqMrKZ-uM
 
 
 
@@ -10,6 +10,70 @@ Authorization: Bearer {{token}}
 
 {
     "FunctionName": "BAPI_MATERIAL_SAVEDATA"
+}
+###
+
+
+### GET /api/function/params
+POST {{baseUrl}}/api/customs/LIPS
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+    "deliveries": [
+        "82899968",
+        "82906951",
+        "82899977",
+        "82900039",
+        "82909859",
+        "82900031",
+        "82912766",
+        "82899990",
+        "82899959",
+        "82899960",
+        "82899967",
+        "82905220",
+        "82911003",
+        "82900051",
+        "82914347",
+        "82915427",
+        "82914778",
+        "82909045",
+        "82912151",
+        "82916436",
+        "82900055",
+        "82900057",
+        "82915401",
+        "82915411",
+        "82915418",
+        "82900042",
+        "82915408",
+        "82917617",
+        "82908551",
+        "82918767",
+        "82915417",
+        "82918766",
+        "82918739",
+        "82919237",
+        "82912152",
+        "82915387",
+        "82915396",
+        "82918738",
+        "82917753",
+        "82917755",
+        "82918732",
+        "82920636",
+        "82918762",
+        "82915428",
+        "82915410",
+        "82920631",
+        "82920638",
+        "82918744",
+        "82918736",
+        "82918751",
+        "82900026",
+        "82919947"
+    ]
 }
 ###
 

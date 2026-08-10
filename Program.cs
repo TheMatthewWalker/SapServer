@@ -31,9 +31,9 @@ var authOpts = builder.Configuration
     ?? throw new InvalidOperationException("Auth configuration section is missing.");
 
 // ---------------------------------------------------------------------------
-// Authentication — JWT Bearer tokens issued by sql2005-bridge.
+// Authentication — JWT Bearer tokens issued by normanton-nexus.
 // In Development with Auth:DevBypassAuth=true, a passthrough scheme is used
-// instead so the API can be exercised without sql2005-bridge.
+// instead so the API can be exercised without normanton-nexus.
 // ---------------------------------------------------------------------------
 bool devBypass = builder.Environment.IsDevelopment() && authOpts.DevBypassAuth;
 
@@ -78,7 +78,7 @@ else
 builder.Services.AddAuthorization();
 
 // ---------------------------------------------------------------------------
-// CORS — allow requests only from the sql2005-bridge frontend origin(s)
+// CORS — allow requests only from the normanton-nexus frontend origin(s)
 // ---------------------------------------------------------------------------
 builder.Services.AddCors(opts =>
     opts.AddDefaultPolicy(policy =>
