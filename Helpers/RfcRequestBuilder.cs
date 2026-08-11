@@ -1,4 +1,7 @@
+using SapServer.Controllers;
 using SapServer.Models;
+using SapServer.Services.Interfaces;
+using Serilog.Core;
 using System.Reflection;
 
 namespace SapServer.Helpers;
@@ -129,7 +132,7 @@ public sealed class RfcRequestBuilder
     }
 
     public RfcRequestBuilder Debug()
-    {
+    {   
         Console.WriteLine();
         Console.WriteLine("=== RFC REQUEST DEBUG ===");
         Console.WriteLine($"Function: {_functionName}");
