@@ -145,7 +145,9 @@ public sealed class CustomsController : SapControllerBase
     // Consignment-customer fallback: used when VBFA has no billing document for
     // a delivery line (goods shipped without a commercial invoice). Looks up a
     // customs sales price via SAP's standard pricing-condition tables instead —
-    // see CustomsHelpers.BuildConsignmentPriceRequest for the full rationale.
+    // two separate calls (A005 for the condition record, then KONP for the
+    // rate/currency/pricing unit), joined here rather than in SAP — see
+    // CustomsHelpers.BuildA005Request for the full rationale.
     [HttpPost("consignment-price")]
     [ProducesResponseType(typeof(ApiResponse<ConsignmentPriceRow[]>), 200)]
     public async Task<IActionResult> ConsignmentPrice([FromBody] ConsignmentPriceRequest request, CancellationToken ct)
@@ -153,10 +155,27 @@ public sealed class CustomsController : SapControllerBase
         if (request.Lines.Count == 0)
             return Ok(ApiResponse<ConsignmentPriceRow[]>.Ok([]));
 
-        var rfcRequest = CustomsHelpers.BuildConsignmentPriceRequest(request);
+        var a005Request  = CustomsHelpers.BuildA005Request(request);
+        var a005Response = await _pool.ExecuteAsync(a005Request, ct);
+        var a005Rows     = CustomsHelpers.ParseA005Rows(a005Response);
 
-        var response = await _pool.ExecuteAsync(rfcRequest, ct);
-        return Ok(ApiResponse<ConsignmentPriceRow[]>.Ok(CustomsHelpers.ParseConsignmentPriceRows(response)));
+        if (a005Rows.Length == 0)
+            return Ok(ApiResponse<ConsignmentPriceRow[]>.Ok([]));
+
+        var konpRequest  = CustomsHelpers.BuildKonpRequest(a005Rows.Select(r => r.ConditionRecord));
+        var konpResponse = await _pool.ExecuteAsync(konpRequest, ct);
+        var konpByRecord = CustomsHelpers.ParseKonpRows(konpResponse);
+
+        var result = a005Rows
+            .Where(a => konpByRecord.ContainsKey(a.ConditionRecord))
+            .Select(a =>
+            {
+                var konp = konpByRecord[a.ConditionRecord];
+                return new ConsignmentPriceRow(a.CustomerCode, a.MaterialNumber, konp.Rate, konp.Currency, konp.PricingUnit);
+            })
+            .ToArray();
+
+        return Ok(ApiResponse<ConsignmentPriceRow[]>.Ok(result));
     }
 
 }

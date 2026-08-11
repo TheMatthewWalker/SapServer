@@ -133,9 +133,9 @@ public class CustomsHelpersTests
     }
 
     [Fact]
-    public void BuildConsignmentPriceRequest_ORs_exact_match_customer_material_pairs_and_filters_valid_conditions()
+    public void BuildA005Request_ORs_exact_match_customer_material_pairs_and_filters_valid_conditions()
     {
-        var request = CustomsHelpers.BuildConsignmentPriceRequest(new ConsignmentPriceRequest
+        var request = CustomsHelpers.BuildA005Request(new ConsignmentPriceRequest
         {
             Lines = [new ConsignmentPriceLine("363533", "CP1166")],
         });
@@ -148,9 +148,9 @@ public class CustomsHelpersTests
     }
 
     [Fact]
-    public void BuildConsignmentPriceRequest_with_no_lines_still_filters_on_validity_date_only()
+    public void BuildA005Request_with_no_lines_still_filters_on_validity_date_only()
     {
-        var request = CustomsHelpers.BuildConsignmentPriceRequest(new ConsignmentPriceRequest());
+        var request = CustomsHelpers.BuildA005Request(new ConsignmentPriceRequest());
         var whereText = string.Join(" ", request.InputTablesItems["where_clause"].Select(r => r["TEXT"]));
 
         Assert.DoesNotContain("KUNNR EQ", whereText);
@@ -158,7 +158,7 @@ public class CustomsHelpersTests
     }
 
     [Fact]
-    public void ParseConsignmentPriceRows_skips_header_maps_columns_and_dedupes_to_first_record_per_pair()
+    public void ParseA005Rows_skips_header_maps_columns_and_dedupes_to_first_record_per_pair()
     {
         var response = new RfcResponse
         {
@@ -166,19 +166,53 @@ public class CustomsHelpersTests
             {
                 ["data_display"] = new()
                 {
-                    new() { ["WA"] = "KUNNR|MATNR|KBETR|KONWA|KPEIN" },
-                    new() { ["WA"] = "0000363533|CP1166|12.50|EUR|1" },
-                    new() { ["WA"] = "0000363533|CP1166|99.00|EUR|1" }, // second condition record for the same pair — ignored
+                    new() { ["WA"] = "KUNNR|MATNR|KNUMH" },
+                    new() { ["WA"] = "0000363533|CP1166|0000123456" },
+                    new() { ["WA"] = "0000363533|CP1166|0000999999" }, // second condition record for the same pair — ignored
                 }
             }
         };
 
-        var rows = CustomsHelpers.ParseConsignmentPriceRows(response);
+        var rows = CustomsHelpers.ParseA005Rows(response);
 
         Assert.Single(rows);
-        Assert.Equal("12.50", rows[0].Rate);
-        Assert.Equal("EUR", rows[0].Currency);
-        Assert.Equal("1", rows[0].PricingUnit);
+        Assert.Equal("0000363533", rows[0].CustomerCode);
+        Assert.Equal("CP1166", rows[0].MaterialNumber);
+        Assert.Equal("0000123456", rows[0].ConditionRecord);
+    }
+
+    [Fact]
+    public void BuildKonpRequest_filters_on_a_deduped_padded_KNUMH_list_with_no_join()
+    {
+        var request = CustomsHelpers.BuildKonpRequest(["123456", "123456", "999999"]);
+
+        var whereText = string.Join(" ", request.InputTablesItems["where_clause"].Select(r => r["TEXT"]));
+        Assert.Contains("KONP~KNUMH IN opt", whereText);
+        Assert.DoesNotContain("join_FIELDS", request.InputTablesItems.Keys);
+
+        var lows = request.InputTablesItems["value_list"].Select(r => r["LOW"]).ToArray();
+        Assert.Equal(["0000123456", "0000999999"], lows); // deduped
+    }
+
+    [Fact]
+    public void ParseKonpRows_skips_header_and_keys_by_condition_record()
+    {
+        var response = new RfcResponse
+        {
+            Tables = new()
+            {
+                ["data_display"] = new()
+                {
+                    new() { ["WA"] = "KNUMH|KBETR|KONWA|KPEIN" },
+                    new() { ["WA"] = "0000123456|12,50|EUR|1" },
+                }
+            }
+        };
+
+        var dict = CustomsHelpers.ParseKonpRows(response);
+
+        Assert.True(dict.ContainsKey("0000123456"));
+        Assert.Equal(("12,50", "EUR", "1"), dict["0000123456"]);
     }
 
     [Fact]

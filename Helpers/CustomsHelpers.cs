@@ -343,66 +343,109 @@ internal static class CustomsHelpers
     // manual/proforma document is used for transport) — VBFA has nothing to
     // return for those delivery lines. The source Excel macro's GetConsignmentValue
     // routine falls back to SAP's standard pricing-condition lookup for exactly
-    // this case: A005 (customer/material condition access table) joined to KONP
-    // (condition item — KBETR rate, KONWA currency, KPEIN pricing unit) via
-    // KNUMH, filtered to the currently-valid record (DATBI GT today). Sales
-    // Value = KBETR * quantity / KPEIN.
+    // this case: A005 (customer/material condition access table) for the
+    // condition record (KNUMH), then KONP (condition item — KBETR rate, KONWA
+    // currency, KPEIN pricing unit) keyed by that KNUMH. Sales Value = KBETR *
+    // quantity / KPEIN.
     //
-    // Unlike every other lookup in this file, this batches via an OR'd set of
-    // literal EQ pairs rather than an IN opt/value_list — the macro's own SAP
-    // calls build single literal KUNNR EQ '..' AND MATNR EQ '..' conditions per
-    // pair (looped one at a time), and there's no evidence the underlying
-    // ZRFC_READ_TABLES Z-RFC supports two independent IN opt filters on two
-    // different fields in the same call, so this replicates the macro's literal
-    // approach instead of risking an unverified batching mechanism. No KSCHL
-    // (condition type) filter either — the macro's own calls don't filter on
-    // it; if more than one condition record matches a pair, ParseConsignmentPriceRows
-    // keeps only the first.
+    // Confirmed directly against the macro's actual behavior: this is NOT a
+    // single RFC_READ_TABLE call with a SAP-side join — it's two separate,
+    // unjoined queries (find the condition record, then find the value),
+    // joined here in memory instead. An earlier version of this code used a
+    // single joined call (A005 TAB_FROM/TAB_TO KONP via join_FIELDS); that
+    // was never confirmed to work against the real ZRFC_READ_TABLES Z-RFC and
+    // was returning nothing in production — this two-step version replicates
+    // what the macro itself actually does.
+    //
+    // Step 1 (A005) batches via an OR'd set of literal EQ pairs rather than an
+    // IN opt/value_list — the macro's own SAP calls build single literal
+    // KUNNR EQ '..' AND MATNR EQ '..' conditions per pair (looped one at a
+    // time), and there's no evidence the underlying Z-RFC supports two
+    // independent IN opt filters on two different fields in the same call.
+    // Step 2 (KONP) is a normal IN opt/value_list on KNUMH, same pattern as
+    // every other VBELN-keyed lookup in this file. No KSCHL (condition type)
+    // filter on step 1 either — the macro's own calls don't filter on it; if
+    // more than one condition record matches a pair, ParseA005Rows keeps only
+    // the first.
 
-    internal static RfcRequest BuildConsignmentPriceRequest(ConsignmentPriceRequest req)
+    private static readonly string[] A005Columns = ["KUNNR", "MATNR", "KNUMH"];
+    private static readonly string[] KonpColumns  = ["KNUMH", "KBETR", "KONWA", "KPEIN"];
+
+    internal static RfcRequest BuildA005Request(ConsignmentPriceRequest req)
     {
         var builder = new RfcRequestBuilder(FnReadTables)
             .Import("DELIMITER", "|")
             .Import("NO_DATA",   " ")
-            .TableRow("QUERY_TABLES", new { TABNAME = "A005" })
-            .TableRow("QUERY_TABLES", new { TABNAME = "KONP" })
-            .TableItemRow("join_FIELDS", new { TAB_FROM = "A005", FLD_FROM = "KNUMH", TAB_TO = "KONP", FLD_TO = "KNUMH" })
-            .TableItemRow("query_FIELDS", new { TABNAME = "A005", FIELDNAME = "KUNNR" })
-            .TableItemRow("query_FIELDS", new { TABNAME = "A005", FIELDNAME = "MATNR" })
-            .TableItemRow("query_FIELDS", new { TABNAME = "KONP", FIELDNAME = "KBETR" })
-            .TableItemRow("query_FIELDS", new { TABNAME = "KONP", FIELDNAME = "KONWA" })
-            .TableItemRow("query_FIELDS", new { TABNAME = "KONP", FIELDNAME = "KPEIN" })
-            .WhereCondition($"A005~DATBI GT '{DateTime.Now:yyyyMMdd}'")
-            .WhereCondition($"A005~MATNR IN opt'");
+            .TableRow("QUERY_TABLES", new { TABNAME = "A005" });
 
-        foreach (var l in req.Lines)
-            builder.TableItemRow("value_list", new
-            {
-                TABNAME = "A005",
-                FIELDNAME = "MATNR",
-                SIGN = "I",
-                OPTION = "EQ",
-                LOW = SapPad.Pad(l.Material, 18),
-                HIGH = ""
-            });        
+        foreach (var f in A005Columns)
+            builder.TableItemRow("query_FIELDS", new { TABNAME = "A005", FIELDNAME = f });
+
+        var pairs = req.Lines
+            .Select(l => $"(A005~KUNNR EQ '{SapPad.Pad(l.Customer, 10)}' AND A005~MATNR EQ '{SapPad.Pad(l.Material, 18)}')")
+            .ToArray();
+
+        if (pairs.Length > 0)
+            builder.WhereCondition($"({string.Join(" OR ", pairs)})");
+
+        builder.WhereCondition($"A005~DATBI GT '{DateTime.Now:yyyyMMdd}'");
 
         return builder.ReadTable("data_display").Build();
     }
 
-    internal static ConsignmentPriceRow[] ParseConsignmentPriceRows(RfcResponse response)
+    // (CustomerCode, MaterialNumber, ConditionRecord) — one row per pair, first
+    // condition record found kept if more than one matches.
+    internal static (string CustomerCode, string MaterialNumber, string ConditionRecord)[] ParseA005Rows(RfcResponse response)
     {
         if (!response.Tables.TryGetValue("data_display", out var rows))
             return [];
 
-        var columnCount = 5; // KUNNR, MATNR, KBETR, KONWA, KPEIN
-
         return SapDelimitedParser
             .ParseRows(rows, '|', skipHeader: true)
-            .Where(cols => cols.Length >= columnCount)
-            .Select(cols => new ConsignmentPriceRow(cols[0], cols[1], cols[2], cols[3], cols[4]))
+            .Where(cols => cols.Length >= A005Columns.Length)
+            .Select(cols => (CustomerCode: cols[0], MaterialNumber: cols[1], ConditionRecord: cols[2]))
             .GroupBy(r => (r.CustomerCode, r.MaterialNumber))
-            .Select(g => g.First()) // keep only the first condition record per pair
+            .Select(g => g.First())
             .ToArray();
+    }
+
+    internal static RfcRequest BuildKonpRequest(IEnumerable<string> conditionRecords)
+    {
+        var builder = new RfcRequestBuilder(FnReadTables)
+            .Import("DELIMITER", "|")
+            .Import("NO_DATA",   " ")
+            .TableRow("QUERY_TABLES", new { TABNAME = "KONP" });
+
+        foreach (var f in KonpColumns)
+            builder.TableItemRow("query_FIELDS", new { TABNAME = "KONP", FIELDNAME = f });
+
+        builder.WhereCondition("KONP~KNUMH IN opt");
+
+        foreach (var k in conditionRecords.Distinct())
+            builder.TableItemRow("value_list", new
+            {
+                TABNAME = "KONP", FIELDNAME = "KNUMH",
+                SIGN = "I", OPTION = "EQ", LOW = SapPad.Pad(k, 10), HIGH = ""
+            });
+
+        return builder.ReadTable("data_display").Build();
+    }
+
+    // ConditionRecord (KNUMH) -> (Rate, Currency, PricingUnit)
+    internal static Dictionary<string, (string Rate, string Currency, string PricingUnit)> ParseKonpRows(RfcResponse response)
+    {
+        var dict = new Dictionary<string, (string, string, string)>();
+
+        if (!response.Tables.TryGetValue("data_display", out var rows))
+            return dict;
+
+        foreach (var cols in SapDelimitedParser.ParseRows(rows, '|', skipHeader: true))
+        {
+            if (cols.Length < KonpColumns.Length) continue;
+            dict.TryAdd(cols[0], (cols[1], cols[2], cols[3]));
+        }
+
+        return dict;
     }
 
     // ── KNVV ──────────────────────────────────────────────────────────────────
