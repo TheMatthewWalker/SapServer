@@ -1,9 +1,60 @@
 @baseUrl = http://localhost:5200
-@token = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJub3JtYW50b24tbmV4dXMiLCJhdWQiOiJzYXAtc2VydmVyIiwic3ViIjoiZGV2IiwidXNlcklkIjoxLCJyb2xlIjoiYWRtaW4iLCJpYXQiOjE3ODY0MzQ1NjYsImV4cCI6MTc4NjQzODE2Nn0.lsnUXNHsgya1L7RdUiaLeYio6Y7dGTTDfve6h9_Ldy4
+@token = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJub3JtYW50b24tbmV4dXMiLCJhdWQiOiJzYXAtc2VydmVyIiwic3ViIjoiZGV2IiwidXNlcklkIjoxLCJyb2xlIjoiYWRtaW4iLCJpYXQiOjE3ODY0NDU1NjksImV4cCI6MTc4NjQ0OTE2OX0.32imONa4eact2lvVNslzaYrrTuJpEifEPAoZXLSBLMM
 
 
 
-### POST /api/warehouse/consignment-mb1b
+### POST /api/warehouse/consignment-mb1b?dryRun=true  (returns the built
+### BAPI_GOODSMVT_CREATE RfcRequest without touching the pool — sanity-check
+### field names/values before ever hitting SAP.)
+POST {{baseUrl}}/api/warehouse/consignment-mb1b?dryRun=true
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+    "StorageLocation": "1710",
+    "Material": "30007R",
+    "Quantity": 1.0,
+    "SpecialStockNumber": "0000200604",
+    "SourceType": "RO",
+    "SourceBin": "CANOPY",
+    "DestinationType": "SA",
+    "DestinationBin": "PTFE",
+    "Header": "Consignment"
+}
+###
+
+
+### POST /api/warehouse/consignment-mb1b  (TESTRUN — MB1B leg only, via
+### BAPI_GOODSMVT_CREATE GM_CODE "04". GM_CODE "04" is UNTESTED against this
+### SAP system — "01" (GoodsReceiptHelper, movement 101) was confirmed
+### broken here, "06" (StockAdjustmentHelper, movement 711) was confirmed
+### working. Run this TESTRUN call first; if it comes back with a sensible
+### RETURN message instead of a generic RFC failure, "04" is at least
+### reachable and validating input. Only then try a real posting below on a
+### throwaway material/vendor/quantity — a real TESTRUN=false call here also
+### fires the two LT01 legs for real.)
+POST {{baseUrl}}/api/warehouse/consignment-mb1b
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+    "StorageLocation": "1710",
+    "Material": "30007R",
+    "Quantity": 1.0,
+    "SpecialStockNumber": "0000200604",
+    "SourceType": "RO",
+    "SourceBin": "CANOPY",
+    "DestinationType": "SA",
+    "DestinationBin": "PTFE",
+    "Header": "Consignment",
+    "TestRun": true
+}
+###
+
+
+### POST /api/warehouse/consignment-mb1b  (real call — only run once the
+### TESTRUN above comes back clean. Creates a real material document and
+### two real transfer orders.)
 POST {{baseUrl}}/api/warehouse/consignment-mb1b
 Content-Type: application/json
 Authorization: Bearer {{token}}
@@ -32,68 +83,52 @@ Authorization: Bearer {{token}}
 }
 ###
 
-### POST /api/function/params
-POST {{baseUrl}}/api/customs/LIPS
+### POST /api/customs/consignment-price
+POST {{baseUrl}}/api/customs/consignment-price
 Content-Type: application/json
 Authorization: Bearer {{token}}
 
 {
-    "deliveries": [
-        "82899968",
-        "82906951",
-        "82899977",
-        "82900039",
-        "82909859",
-        "82900031",
-        "82912766",
-        "82899990",
-        "82899959",
-        "82899960",
-        "82899967",
-        "82905220",
-        "82911003",
-        "82900051",
-        "82914347",
-        "82915427",
-        "82914778",
-        "82909045",
-        "82912151",
-        "82916436",
-        "82900055",
-        "82900057",
-        "82915401",
-        "82915411",
-        "82915418",
-        "82900042",
-        "82915408",
-        "82917617",
-        "82908551",
-        "82918767",
-        "82915417",
-        "82918766",
-        "82918739",
-        "82919237",
-        "82912152",
-        "82915387",
-        "82915396",
-        "82918738",
-        "82917753",
-        "82917755",
-        "82918732",
-        "82920636",
-        "82918762",
-        "82915428",
-        "82915410",
-        "82920631",
-        "82920638",
-        "82918744",
-        "82918736",
-        "82918751",
-        "82900026",
-        "82919947"
+    "Lines": [
+        {
+            "Material": "TSAL4-8B01C62/S"
+        },
+        {
+            "Material": "TSAL4-8B01C62/S"
+        },
+        {
+            "Material": "TSAL4-8B01C62/S"
+        },
+        {
+            "Material": "TSAL6-0B01/S"
+        },
+        {
+            "Material": "TSAL6-0B01/S"
+        },
+        {
+            "Material": "TSAL8-0B01/S"
+        },
+        {
+            "Material": "TSAL8-0B01/S"
+        },
+        {
+            "Material": "TSAL6-0B01/S"
+        },
+        {
+            "Material": "TSAL6-0B01/S"
+        },
+        {
+            "Material": "TSAL6-0B01/S"
+        },
+        {
+            "Material": "TSAL8-0B01/S"
+        },
+        {
+            "Material": "TSAL6-0B01/S"
+        }
     ]
-}
-###
+    }
+
 
 
 ### POST /api/purchasing/reverse-goods-receipt  (reverse a single cost line's GR via MBST)

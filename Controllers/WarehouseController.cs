@@ -545,17 +545,48 @@ public sealed class WarehouseController : SapControllerBase
     [ProducesResponseType(typeof(ApiResponse<object>), 422)]
     public async Task<IActionResult> ConsignmentMb1b(
         [FromBody] ConsignmentMb1bRequest body,
+        [FromQuery] bool dryRun,
         CancellationToken ct)
     {
         await CheckPermissionAsync(GetUserId(), WarehouseHelpers.FnConsignment, ct);
 
-        //_logger.LogInformation(
-        //"User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "consignment-mb1b");
+        var mb1bRequest = WarehouseHelpers.BuildMb1bRequest(body);
 
-        var mb1b   = await _pool.ExecuteAsync(WarehouseHelpers.BuildMb1bRequest(body),          ct);
-        var toNonC = await _pool.ExecuteAsync(WarehouseHelpers.BuildToNonConsignRequest(body),   ct);
-        var toC    = await _pool.ExecuteAsync(WarehouseHelpers.BuildToConsignRequest(body),      ct);
-        var result = WarehouseHelpers.ParseConsignmentResponse(mb1b, toNonC, toC);
+        if (dryRun)
+            return Ok(ApiResponse<RfcRequest>.Ok(mb1bRequest));
+
+        // MB1B is now a real BAPI (BAPI_GOODSMVT_CREATE) rather than a BDC —
+        // it needs a pinned worker so the commit/rollback below runs on the
+        // same SAP session as the BAPI call itself, same pattern as
+        // CreateStockAdjustment/PurchasingController.CreatePurchaseOrder.
+        // The two LT01 legs stay on ordinary ExecuteAsync calls (via
+        // L_TO_CREATE_SINGLE) — that RFC commits itself, same as the plain
+        // transfer-order endpoint already relies on.
+        var worker   = _pool.AcquireWorker();
+        var mb1bData = await _pool.ExecuteOnWorkerAsync(worker, mb1bRequest, ct);
+
+        if (body.TestRun)
+        {
+            // A test run never creates a real material document — nothing
+            // to commit, and nothing sensible to build the two transfer
+            // orders against, so stop here (mirrors CreateStockAdjustment's
+            // TestRun handling).
+            await _pool.ExecuteOnWorkerAsync(worker, CommitHelper.BuildBapiRollback(), ct);
+            return Ok(ApiResponse<ConsignmentMb1bResponse>.Ok(WarehouseHelpers.ParseMb1bOnly(mb1bData)));
+        }
+
+        await _pool.ExecuteOnWorkerAsync(worker, WarehouseHelpers.Mb1bSucceeded(mb1bData)
+            ? CommitHelper.BuildBapiCommit()
+            : CommitHelper.BuildBapiRollback(), ct);
+
+        // Both LT01 legs still run unconditionally, same as before the BDC
+        // replacement — a rejected MB1B (deficit stock, etc.) is reported
+        // alongside whatever the transfer-order legs did rather than
+        // short-circuited, so the combined message always reflects every
+        // leg's real outcome.
+        var toNonC = await _pool.ExecuteAsync(WarehouseHelpers.BuildToNonConsignRequest(body), ct);
+        var toC    = await _pool.ExecuteAsync(WarehouseHelpers.BuildToConsignRequest(body),    ct);
+        var result = WarehouseHelpers.ParseConsignmentResponse(mb1bData, toNonC, toC);
 
         // Any leg reporting an SAP error (deficit stock, missing
         // authorization, etc.) means the consignment issue never actually

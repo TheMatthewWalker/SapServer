@@ -1,3 +1,4 @@
+using System.Globalization;
 using SapServer.Models;
 using SapServer.Models.Bapi;
 
@@ -7,9 +8,23 @@ internal static class WarehouseHelpers
 {
     internal const string FnReadTables  = "ZRFC_READ_TABLES";
     internal const string FnCreateTo    = "L_TO_CREATE_SINGLE";
+    // Permission code is unchanged (still "consignment"-scoped in
+    // SapDepartmentPermissions) even though MB1B no longer runs through
+    // Z_RFC_CALL_TRANSACTION — see BuildMb1bRequest.
     internal const string FnConsignment = "Z_RFC_CALL_TRANSACTION";
     internal const string Warehouse     = "312";
     internal const string Plant         = "3012";
+
+    // T158G: GM_CODE "04" = transaction MB1B, "Transfer posting" — the code
+    // path BAPI_GOODSMVT_CREATE uses for movement 411 (own stock <-> vendor
+    // consignment). A different GM_CODE branch than StockAdjustmentHelper's
+    // confirmed-working "06" (MB1C, 711/712/717/718) or GoodsReceiptHelper's
+    // confirmed-broken "01" (MB01, 101) — this one is UNTESTED against this
+    // SAP system. See ConsignmentMb1bRequest.TestRun and
+    // WarehouseController.ConsignmentMb1b's dryRun param: test this via
+    // test.http (TESTRUN, then a real posting on a throwaway
+    // material/vendor) before trusting it the way the 711 case was.
+    internal const string GmCodeTransferPosting = "04";
 
     // Column order must exactly match query_FIELDS registration order below
     internal static readonly string[] LquaColumns =
@@ -682,27 +697,60 @@ internal static class WarehouseHelpers
     }
 
     // ── Consignment MB1B ──────────────────────────────────────────────────────
+    //
+    // Was a BDC recording of transaction MB1B (see git history for the old
+    // screen-field mapping) — replaced with the real BAPI_GOODSMVT_CREATE
+    // (GM_CODE "04", movement 411 K) per the user, after a live Nexus
+    // consignment issue failed against this exact combination while a
+    // hand-typed test.http call for the same data succeeded, pointing at BDC
+    // screen-state fragility rather than a data/formatting bug. Field names
+    // are taken from BAPI2017_GM_ITEM_CREATE's real component list (MATERIAL,
+    // PLANT, STGE_LOC, MOVE_TYPE, SPEC_STOCK, VENDOR, ENTRY_QNT, MOVE_STLOC,
+    // MOVE_PLANT), mirroring the old BDC field mapping 1:1:
+    //   RM07M-LGORT/MSEGK-UMLGO (issuing == receiving storage location, same
+    //     physical location — this is a stock-category change, not a
+    //     physical move) -> STGE_LOC / MOVE_STLOC
+    //   RM07M-SOBKZ "K"         -> SPEC_STOCK "K"
+    //   MSEGK-LIFNR             -> VENDOR
+    //   MSEG-MATNR(01)          -> MATERIAL
+    //   MSEG-ERFMG(01)          -> ENTRY_QNT
+    //   MKPF-BKTXT "Consignment"-> GOODSMVT_HEADER-HEADER_TXT "Consignment"
+    //     (body.Header was already ignored by the old BDC too — MKPF-BKTXT
+    //     was hardcoded there as well, so this preserves that, not a new gap)
+    internal static RfcRequest BuildMb1bRequest(ConsignmentMb1bRequest body)
+    {
+        var today = DateTime.Now.ToString("yyyyMMdd", CultureInfo.InvariantCulture);
 
-    internal static RfcRequest BuildMb1bRequest(ConsignmentMb1bRequest body) =>
-        BdcBuilder.For("MB1B")
-            .Screen("SAPMM07M", "0400")
-                .Field("BDC_OKCODE",    "/00")
-                .Field("RM07M-MTSNR",   "")
-                .Field("MKPF-BKTXT",    "Consignment")
-                .Field("RM07M-BWARTWA", "411")
-                .Field("RM07M-SOBKZ",   "K")
-                .Field("RM07M-WERKS",   Plant)
-                .Field("RM07M-LGORT",   body.StorageLocation)
-                .Field("XFULL",         "")
-            .Screen("SAPMM07M", "0421")
-                .Field("BDC_OKCODE",     "/00")
-                .Field("MSEGK-LIFNR",    SapPad.Pad(body.SpecialStockNumber, 10))
-                .Field("MSEGK-UMLGO",    body.StorageLocation)
-                .Field("MSEG-MATNR(01)", SapPad.Pad(body.Material, 18))
-                .Field("MSEG-ERFMG(01)", body.Quantity.ToString())
-            .Screen("SAPMM07M", "0421")
-                .Field("BDC_OKCODE", "=BU")
-            .Build();
+        var builder = new RfcRequestBuilder(StockAdjustmentHelper.FnGoodsMvtCreate)
+            .StructImport("GOODSMVT_HEADER", new
+            {
+                PSTNG_DATE = today,
+                DOC_DATE   = today,
+                HEADER_TXT = "Consignment",
+            })
+            .StructImport("GOODSMVT_CODE", new { GM_CODE = GmCodeTransferPosting })
+            .Import("TESTRUN", body.TestRun ? "X" : "");
+
+        builder.TableRow("GOODSMVT_ITEM", new Dictionary<string, object?>
+        {
+            ["MATERIAL"]   = SapPad.Pad(body.Material, 18),
+            ["PLANT"]      = Plant,
+            ["STGE_LOC"]   = body.StorageLocation,
+            ["MOVE_TYPE"]  = "411",
+            ["SPEC_STOCK"] = "K",
+            ["VENDOR"]     = SapPad.Pad(body.SpecialStockNumber, 10),
+            ["ENTRY_QNT"]  = body.Quantity,
+            ["MOVE_STLOC"] = body.StorageLocation,
+            ["MOVE_PLANT"] = Plant,
+        });
+
+        builder
+            .ReadParam("MATERIALDOCUMENT")
+            .ReadParam("MATDOCUMENTYEAR")
+            .ReadTable("RETURN", "TYPE", "MESSAGE");
+
+        return builder.Build();
+    }
 
     // SourceBin/DestinationBin here come straight from the user-typed bin
     // fields in the consignment transfer UI (warehouse.js), same as the
@@ -712,72 +760,118 @@ internal static class WarehouseHelpers
     // codes, and an unpadded value here would silently write a bin SAP
     // doesn't recognise into the BDC screen rather than raising a clear
     // error at all.
+    //
+    // Both LT01 legs below were also BDC recordings, replaced with
+    // L_TO_CREATE_SINGLE — the same real RFC BuildTransferOrderRequest
+    // already uses for the plain transfer-order endpoint, per the user.
+    // That RFC already exposes I_SOBKZ/I_SONUM for exactly this special-stock
+    // case (see BuildTransferOrderRequest above), so this is a straight
+    // field-for-field port of the old LTAP-*/RL03T-* BDC values onto their
+    // I_* import-parameter equivalents, not a new design.
     internal static RfcRequest BuildToNonConsignRequest(ConsignmentMb1bRequest body) =>
-        BdcBuilder.For("LT01")
-            .Screen("SAPML03T", "0101")
-                .Field("BDC_OKCODE",  "/00")
-                .Field("LTAK-LGNUM",  Warehouse)
-                .Field("LTAK-BWLVS",  "999")
-                .Field("LTAP-MATNR",  SapPad.Pad(body.Material, 18))
-                .Field("RL03T-ANFME", body.Quantity.ToString())
-                .Field("LTAP-WERKS",  Plant)
-                .Field("LTAP-LGORT",  body.StorageLocation)
-                .Field("LTAP-ZEUGN",  "")
-                .Field("LTAP-CHARG",  "")
-                .Field("LTAP-SOBKZ",  "")
-                .Field("RL03T-LSONR", "")
-            .Screen("SAPML03T", "0102")
-                .Field("BDC_OKCODE",  "/00")
-                .Field("RL03T-SQUIT", "X")
-                .Field("LTAP-VLTYP",  "922")
-                .Field("LTAP-VLPLA",  "BLOCK")
-                .Field("LTAP-NLTYP",  body.DestinationType)
-                .Field("LTAP-NLPLA",  SapPad.Pad(body.DestinationBin, 10))
+        new RfcRequestBuilder(FnCreateTo)
+            .Import("I_LGNUM", Warehouse)
+            .Import("I_WERKS", Plant)
+            .Import("I_LGORT", body.StorageLocation)
+            .Import("I_SQUIT", "X")
+            .Import("I_BWLVS", "999")
+            .Import("I_MATNR", SapPad.Pad(body.Material, 18))
+            .Import("I_ANFME", body.Quantity)
+            .Import("I_VLTYP", "922")
+            .Import("I_VLPLA", "BLOCK")
+            .Import("I_NLTYP", body.DestinationType)
+            .Import("I_NLPLA", SapPad.Pad(body.DestinationBin, 10))
+            .ReadParam("E_TANUM")
+            .ReadTable("RETURN", "TYPE", "MESSAGE")
             .Build();
 
     internal static RfcRequest BuildToConsignRequest(ConsignmentMb1bRequest body) =>
-        BdcBuilder.For("LT01")
-            .Screen("SAPML03T", "0101")
-                .Field("BDC_OKCODE",  "/00")
-                .Field("LTAK-LGNUM",  Warehouse)
-                .Field("LTAK-BWLVS",  "999")
-                .Field("LTAP-MATNR",  SapPad.Pad(body.Material, 18))
-                .Field("RL03T-ANFME", body.Quantity.ToString())
-                .Field("LTAP-WERKS",  Plant)
-                .Field("LTAP-LGORT",  body.StorageLocation)
-                .Field("LTAP-ZEUGN",  "")
-                .Field("LTAP-CHARG",  "")
-                .Field("LTAP-SOBKZ",  "K")
-                .Field("RL03T-LSONR", SapPad.Pad(body.SpecialStockNumber, 16))
-            .Screen("SAPML03T", "0102")
-                .Field("BDC_OKCODE",  "/00")
-                .Field("RL03T-SQUIT", "X")
-                .Field("LTAP-VLTYP",  body.SourceType)
-                .Field("LTAP-VLPLA",  SapPad.Pad(body.SourceBin, 10))
-                .Field("LTAP-NLTYP",  "922")
-                .Field("LTAP-NLPLA",  "BLOCK")
+        new RfcRequestBuilder(FnCreateTo)
+            .Import("I_LGNUM", Warehouse)
+            .Import("I_WERKS", Plant)
+            .Import("I_LGORT", body.StorageLocation)
+            .Import("I_SQUIT", "X")
+            .Import("I_BWLVS", "999")
+            .Import("I_MATNR", SapPad.Pad(body.Material, 18))
+            .Import("I_ANFME", body.Quantity)
+            .Import("I_SOBKZ", "K")
+            .Import("I_SONUM", SapPad.Pad(body.SpecialStockNumber, 16))
+            .Import("I_VLTYP", body.SourceType)
+            .Import("I_VLPLA", SapPad.Pad(body.SourceBin, 10))
+            .Import("I_NLTYP", "922")
+            .Import("I_NLPLA", "BLOCK")
+            .ReadParam("E_TANUM")
+            .ReadTable("RETURN", "TYPE", "MESSAGE")
             .Build();
+
+    /// <summary>Parses just the MB1B (BAPI_GOODSMVT_CREATE) leg — used for the TestRun path, which never reaches the LT01 legs.</summary>
+    internal static ConsignmentMb1bResponse ParseMb1bOnly(RfcResponse mb1b)
+    {
+        var (success, message) = SummarizeGoodsMvtResult(mb1b);
+        return new ConsignmentMb1bResponse { Success = success, Mb1bMessage = message };
+    }
+
+    internal static bool Mb1bSucceeded(RfcResponse mb1b) => SummarizeGoodsMvtResult(mb1b).Success;
 
     internal static ConsignmentMb1bResponse ParseConsignmentResponse(
         RfcResponse mb1b, RfcResponse toNonConsign, RfcResponse toConsign)
     {
-        // Same MESSG "<type> <class> <number> <text>" convention every other
-        // BDC call in this file uses — Type "E" means SAP rejected that leg
-        // (e.g. deficit stock), even though the RFC call itself returned
-        // normally. Previously this only kept the raw message text and threw
-        // the type away, so a failed MB1B looked identical to a successful
-        // one to every caller — see ConsignmentMb1b in WarehouseController.
-        var mb1bResult   = ProductionHelpers.ParseBdcResponse(mb1b);
-        var toNonCResult = ProductionHelpers.ParseBdcResponse(toNonConsign);
-        var toCResult    = ProductionHelpers.ParseBdcResponse(toConsign);
+        // Type "E"/"A" in any leg's RETURN table means SAP rejected that leg
+        // (e.g. deficit stock), even though the RFC/BAPI call itself
+        // returned normally. Keep checking every leg independently rather
+        // than trusting an overall "it didn't throw" — a failed leg that
+        // still looked like a success previously masked a consignment issue
+        // that never actually posted; see WarehouseController.ConsignmentMb1b.
+        var (mb1bSuccess, mb1bMessage)     = SummarizeGoodsMvtResult(mb1b);
+        var (toNonCSuccess, toNonCMessage) = SummarizeTransferOrderResult(toNonConsign);
+        var (toCSuccess, toCMessage)       = SummarizeTransferOrderResult(toConsign);
 
         return new ConsignmentMb1bResponse
         {
-            Success             = mb1bResult.Type != "E" && toNonCResult.Type != "E" && toCResult.Type != "E",
-            Mb1bMessage         = mb1bResult.RawMessage,
-            ToNonConsignMessage = toNonCResult.RawMessage,
-            ToConsignMessage    = toCResult.RawMessage
+            Success             = mb1bSuccess && toNonCSuccess && toCSuccess,
+            Mb1bMessage         = mb1bMessage,
+            ToNonConsignMessage = toNonCMessage,
+            ToConsignMessage    = toCMessage
         };
+    }
+
+    // BAPI_GOODSMVT_CREATE: business errors surface as TYPE "E"/"A" rows in
+    // RETURN with the RFC call itself still returning normally (same
+    // convention as StockAdjustmentHelper.ParseStockAdjustmentResponse) — no
+    // material document number means no posting happened, regardless of
+    // what RETURN says.
+    private static (bool Success, string Message) SummarizeGoodsMvtResult(RfcResponse response)
+    {
+        var messages = ReturnTableHelper.ExtractMessages(response, "RETURN");
+        var matDoc    = ReturnTableHelper.GetParam(response, "MATERIALDOCUMENT") ?? "";
+        var success   = !string.IsNullOrWhiteSpace(matDoc) && !ReturnTableHelper.HasBlockingError(messages);
+
+        if (success)
+            return (true, $"S Document {matDoc} posted");
+
+        var blocking = messages.FirstOrDefault(m => m.Type is "E" or "A");
+        return (false, blocking is not null
+            ? $"{blocking.Type} {blocking.Message}"
+            : "E MB1B posting did not create a material document.");
+    }
+
+    // L_TO_CREATE_SINGLE: same RETURN-table convention as
+    // ParseTransferOrderResponse, but — unlike that endpoint — a blocking
+    // "E"/"A" message here is treated as a real failure rather than assumed
+    // benign, since this consignment flow specifically needs every leg's
+    // outcome checked (see ParseConsignmentResponse above).
+    private static (bool Success, string Message) SummarizeTransferOrderResult(RfcResponse response)
+    {
+        var messages = ReturnTableHelper.ExtractMessages(response, "RETURN");
+        var blocking  = messages.FirstOrDefault(m => m.Type is "E" or "A");
+
+        if (blocking is not null)
+            return (false, $"{blocking.Type} {blocking.Message}");
+
+        var tanum = ReturnTableHelper.GetParam(response, "E_TANUM") ?? "";
+        return (true, string.IsNullOrWhiteSpace(tanum)
+            ? "S " + string.Join("; ", messages.Select(m => $"{m.Type} {m.Message}"))
+            : $"S Transfer order {tanum} created");
     }
 
     // ── Set Delivery Weight (ZDEL) ────────────────────────────────────────────

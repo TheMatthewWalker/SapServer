@@ -339,12 +339,7 @@ public class WarehouseControllerTests
         _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
     }
 
-    private static RfcResponse Mb1bMessage(string type, string message) => new()
-    {
-        Parameters = new() { ["MESSG"] = $"{type}    M7   001 {message}" },
-    };
-
-    private static ConsignmentMb1bRequest SampleConsignmentBody() => new()
+    private static ConsignmentMb1bRequest SampleConsignmentBody(bool testRun = false) => new()
     {
         Material = "30005R",
         Quantity = 5,
@@ -355,22 +350,40 @@ public class WarehouseControllerTests
         SourceBin = "B01",
         DestinationType = "SA",
         DestinationBin = "B02",
+        TestRun = testRun,
+    };
+
+    // MB1B is now BAPI_GOODSMVT_CREATE (pinned worker, ExecuteOnWorkerAsync);
+    // the two LT01 legs are now L_TO_CREATE_SINGLE (ordinary ExecuteAsync).
+    private static RfcResponse GoodsMvtResponse(string? materialDocument, string type = "S", string message = "Document posted") => new()
+    {
+        Parameters = materialDocument is null ? new() : new() { ["MATERIALDOCUMENT"] = materialDocument },
+        Tables = new() { ["RETURN"] = new() { new() { ["TYPE"] = type, ["MESSAGE"] = message } } },
+    };
+
+    private static RfcResponse ToLegResponse(string? tanum, string type = "S", string message = "Transfer order created") => new()
+    {
+        Parameters = tanum is null ? new() : new() { ["E_TANUM"] = tanum },
+        Tables = new() { ["RETURN"] = new() { new() { ["TYPE"] = type, ["MESSAGE"] = message } } },
     };
 
     [Fact]
     public async Task ConsignmentMb1b_returns_200_when_all_three_legs_succeed()
     {
         _permissions.Setup(p => p.CanExecuteAsync(1, WarehouseHelpers.FnConsignment, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        _pool.Setup(p => p.ExecuteOnWorkerAsync(It.IsAny<SapWorkerHandle>(), It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(GoodsMvtResponse("4973814993"));
         _pool.SetupSequence(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Mb1bMessage("S", "MB1B posted"))
-            .ReturnsAsync(Mb1bMessage("S", "Moved to non-consign"))
-            .ReturnsAsync(Mb1bMessage("S", "Moved to consign"));
+            .ReturnsAsync(ToLegResponse("0000504057"))
+            .ReturnsAsync(ToLegResponse("0000504058"));
 
-        var result = await _controller.ConsignmentMb1b(SampleConsignmentBody(), CancellationToken.None);
+        var result = await _controller.ConsignmentMb1b(SampleConsignmentBody(), dryRun: false, CancellationToken.None);
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var body = Assert.IsType<ApiResponse<ConsignmentMb1bResponse>>(ok.Value);
         Assert.True(body.Data!.Success);
+        _pool.Verify(p => p.ExecuteOnWorkerAsync(It.IsAny<SapWorkerHandle>(),
+            It.Is<RfcRequest>(r => r.FunctionName == "BAPI_TRANSACTION_COMMIT"), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     // Regression test for the Staging Post bug: SapServer previously always
@@ -379,37 +392,72 @@ public class WarehouseControllerTests
     // stock, missing authorization, etc.) looked identical to a real one to
     // every caller (routes/staging.js's Mark Delivered flow chief among
     // them) — the consignment stock never actually left SAP even though the
-    // portal recorded the delivery as successful.
+    // portal recorded the delivery as successful. Still holds after the
+    // BAPI_GOODSMVT_CREATE switch.
     [Fact]
     public async Task ConsignmentMb1b_returns_422_when_the_MB1B_leg_is_rejected_by_SAP()
     {
         _permissions.Setup(p => p.CanExecuteAsync(1, WarehouseHelpers.FnConsignment, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        _pool.Setup(p => p.ExecuteOnWorkerAsync(It.IsAny<SapWorkerHandle>(), It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(GoodsMvtResponse(null, "E", "Deficit of SL stock 5 PC : 30005R 1000 SA B02"));
         _pool.SetupSequence(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Mb1bMessage("E", "Deficit of SL stock 5 PC : 30005R 1000 SA B02"))
-            .ReturnsAsync(Mb1bMessage("S", "Moved to non-consign"))
-            .ReturnsAsync(Mb1bMessage("S", "Moved to consign"));
+            .ReturnsAsync(ToLegResponse("0000504057"))
+            .ReturnsAsync(ToLegResponse("0000504058"));
 
-        var result = await _controller.ConsignmentMb1b(SampleConsignmentBody(), CancellationToken.None);
+        var result = await _controller.ConsignmentMb1b(SampleConsignmentBody(), dryRun: false, CancellationToken.None);
 
         var unprocessable = Assert.IsType<UnprocessableEntityObjectResult>(result);
         var body = Assert.IsType<ApiResponse<ConsignmentMb1bResponse>>(unprocessable.Value);
         Assert.False(body.Success);
         Assert.False(body.Data!.Success);
         Assert.Contains("Deficit of SL stock", body.Error!.Message);
+        _pool.Verify(p => p.ExecuteOnWorkerAsync(It.IsAny<SapWorkerHandle>(),
+            It.Is<RfcRequest>(r => r.FunctionName == "BAPI_TRANSACTION_ROLLBACK"), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
     public async Task ConsignmentMb1b_returns_422_when_either_LT01_leg_is_rejected_by_SAP()
     {
         _permissions.Setup(p => p.CanExecuteAsync(1, WarehouseHelpers.FnConsignment, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        _pool.Setup(p => p.ExecuteOnWorkerAsync(It.IsAny<SapWorkerHandle>(), It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(GoodsMvtResponse("4973814993"));
         _pool.SetupSequence(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Mb1bMessage("S", "MB1B posted"))
-            .ReturnsAsync(Mb1bMessage("S", "Moved to non-consign"))
-            .ReturnsAsync(Mb1bMessage("E", "Bin does not exist"));
+            .ReturnsAsync(ToLegResponse("0000504057"))
+            .ReturnsAsync(ToLegResponse(null, "E", "Bin does not exist"));
 
-        var result = await _controller.ConsignmentMb1b(SampleConsignmentBody(), CancellationToken.None);
+        var result = await _controller.ConsignmentMb1b(SampleConsignmentBody(), dryRun: false, CancellationToken.None);
 
         Assert.IsType<UnprocessableEntityObjectResult>(result);
+    }
+
+    [Fact]
+    public async Task ConsignmentMb1b_dryRun_returns_the_built_MB1B_request_without_acquiring_a_worker()
+    {
+        _permissions.Setup(p => p.CanExecuteAsync(1, WarehouseHelpers.FnConsignment, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+
+        var result = await _controller.ConsignmentMb1b(SampleConsignmentBody(), dryRun: true, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var body = Assert.IsType<ApiResponse<RfcRequest>>(ok.Value);
+        Assert.Equal(StockAdjustmentHelper.FnGoodsMvtCreate, body.Data!.FunctionName);
+        _pool.Verify(p => p.AcquireWorker(), Times.Never);
+    }
+
+    [Fact]
+    public async Task ConsignmentMb1b_TestRun_rolls_back_and_never_touches_the_LT01_legs()
+    {
+        _permissions.Setup(p => p.CanExecuteAsync(1, WarehouseHelpers.FnConsignment, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        _pool.Setup(p => p.ExecuteOnWorkerAsync(It.IsAny<SapWorkerHandle>(), It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(GoodsMvtResponse("4973814993"));
+
+        var result = await _controller.ConsignmentMb1b(SampleConsignmentBody(testRun: true), dryRun: false, CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(result);
+        _pool.Verify(p => p.ExecuteOnWorkerAsync(It.IsAny<SapWorkerHandle>(),
+            It.Is<RfcRequest>(r => r.FunctionName == "BAPI_TRANSACTION_ROLLBACK"), It.IsAny<CancellationToken>()), Times.Once);
+        _pool.Verify(p => p.ExecuteOnWorkerAsync(It.IsAny<SapWorkerHandle>(),
+            It.Is<RfcRequest>(r => r.FunctionName == "BAPI_TRANSACTION_COMMIT"), It.IsAny<CancellationToken>()), Times.Never);
+        _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]

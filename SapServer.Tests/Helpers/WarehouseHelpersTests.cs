@@ -93,21 +93,39 @@ public class WarehouseHelpersTests
         Assert.Equal("S", result.Messages[0].Type);
     }
 
-    private static RfcResponse Mb1bMessage(string type, string message) => new()
+    // MB1B is now BAPI_GOODSMVT_CREATE — success/failure comes from
+    // MATERIALDOCUMENT + a RETURN table, not a BDC MESSG param.
+    private static RfcResponse GoodsMvtResponse(string? materialDocument, params (string Type, string Message)[] returnRows) => new()
     {
-        Parameters = new() { ["MESSG"] = $"{type}    M7   001 {message}" },
+        Parameters = materialDocument is null ? new() : new() { ["MATERIALDOCUMENT"] = materialDocument },
+        Tables = new()
+        {
+            ["RETURN"] = returnRows.Select(r => new Dictionary<string, object?> { ["TYPE"] = r.Type, ["MESSAGE"] = r.Message }).ToList(),
+        },
+    };
+
+    // The two LT01 legs are now L_TO_CREATE_SINGLE — same E_TANUM + RETURN
+    // shape as ParseTransferOrderResponse's own test above.
+    private static RfcResponse ToLegResponse(string? tanum, params (string Type, string Message)[] returnRows) => new()
+    {
+        Parameters = tanum is null ? new() : new() { ["E_TANUM"] = tanum },
+        Tables = new()
+        {
+            ["RETURN"] = returnRows.Select(r => new Dictionary<string, object?> { ["TYPE"] = r.Type, ["MESSAGE"] = r.Message }).ToList(),
+        },
     };
 
     [Fact]
-    public void ParseConsignmentResponse_succeeds_when_all_three_legs_report_a_non_error_type()
+    public void ParseConsignmentResponse_succeeds_when_all_three_legs_report_success()
     {
         var result = WarehouseHelpers.ParseConsignmentResponse(
-            Mb1bMessage("S", "MB1B posted"),
-            Mb1bMessage("S", "Moved to non-consign"),
-            Mb1bMessage("S", "Moved to consign"));
+            GoodsMvtResponse("4973814993", ("S", "Document posted")),
+            ToLegResponse("0000504057", ("S", "Transfer order created")),
+            ToLegResponse("0000504058", ("S", "Transfer order created")));
 
         Assert.True(result.Success);
-        Assert.Equal("S    M7   001 MB1B posted", result.Mb1bMessage);
+        Assert.Equal("S Document 4973814993 posted", result.Mb1bMessage);
+        Assert.Equal("S Transfer order 0000504057 created", result.ToNonConsignMessage);
     }
 
     // Regression test: previously ParseConsignmentResponse only kept the raw
@@ -115,32 +133,45 @@ public class WarehouseHelpersTests
     // (deficit stock, missing authorization, etc.) was indistinguishable
     // from a successful one to WarehouseController.ConsignmentMb1b — the
     // consignment stock never actually left SAP even though the endpoint
-    // reported success.
+    // reported success. Still holds after the BAPI_GOODSMVT_CREATE switch:
+    // no MATERIALDOCUMENT means no posting happened, regardless of RETURN.
     [Fact]
     public void ParseConsignmentResponse_fails_when_the_MB1B_leg_reports_an_SAP_error()
     {
         var result = WarehouseHelpers.ParseConsignmentResponse(
-            Mb1bMessage("E", "Deficit of SL stock 5 PC : 30005R 1000 SA B02"),
-            Mb1bMessage("S", "Moved to non-consign"),
-            Mb1bMessage("S", "Moved to consign"));
+            GoodsMvtResponse(null, ("E", "Deficit of SL stock 5 PC : 30005R 1000 SA B02")),
+            ToLegResponse("0000504057", ("S", "Transfer order created")),
+            ToLegResponse("0000504058", ("S", "Transfer order created")));
 
         Assert.False(result.Success);
+        Assert.Equal("E Deficit of SL stock 5 PC : 30005R 1000 SA B02", result.Mb1bMessage);
     }
 
     [Fact]
     public void ParseConsignmentResponse_fails_when_either_LT01_leg_reports_an_SAP_error()
     {
         var toNonConsignFails = WarehouseHelpers.ParseConsignmentResponse(
-            Mb1bMessage("S", "MB1B posted"),
-            Mb1bMessage("E", "Bin does not exist"),
-            Mb1bMessage("S", "Moved to consign"));
+            GoodsMvtResponse("4973814993", ("S", "Document posted")),
+            ToLegResponse(null, ("E", "Bin does not exist")),
+            ToLegResponse("0000504058", ("S", "Transfer order created")));
         Assert.False(toNonConsignFails.Success);
 
         var toConsignFails = WarehouseHelpers.ParseConsignmentResponse(
-            Mb1bMessage("S", "MB1B posted"),
-            Mb1bMessage("S", "Moved to non-consign"),
-            Mb1bMessage("E", "Bin does not exist"));
+            GoodsMvtResponse("4973814993", ("S", "Document posted")),
+            ToLegResponse("0000504057", ("S", "Transfer order created")),
+            ToLegResponse(null, ("E", "Bin does not exist")));
         Assert.False(toConsignFails.Success);
+    }
+
+    [Fact]
+    public void ParseMb1bOnly_reflects_just_the_MB1B_leg_for_the_TestRun_path()
+    {
+        var result = WarehouseHelpers.ParseMb1bOnly(GoodsMvtResponse(null, ("E", "TESTRUN — no document created")));
+
+        Assert.False(result.Success);
+        Assert.Equal("E TESTRUN — no document created", result.Mb1bMessage);
+        Assert.Equal("", result.ToNonConsignMessage);
+        Assert.Equal("", result.ToConsignMessage);
     }
 
     [Fact]

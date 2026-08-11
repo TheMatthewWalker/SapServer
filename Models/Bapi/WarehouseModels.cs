@@ -96,6 +96,14 @@ public sealed class ConsignmentMb1bRequest
     [Required, MinLength(1)] public string  DestinationType { get; init; } = string.Empty; // LGTYP → LTAP-NLTYP (non-consign dest) / LTAP-VLTYP (consign source)
     [Required, MinLength(1)] public string  DestinationBin  { get; init; } = string.Empty; // LGPLA → LTAP-NLPLA (non-consign dest) / LTAP-VLPLA (consign source)
                              public string  DeliveryNote    { get; init; } = string.Empty; // RM07M-MTSNR (optional)
+
+    /// <summary>
+    /// If true, asks SAP to simulate the MB1B posting (GOODSMVT_HEADER/TESTRUN "X")
+    /// without actually creating a material document — the two LT01 legs are
+    /// skipped entirely in this case, same reasoning as StockAdjustmentRequest.TestRun:
+    /// posting real transfer orders against a simulated MB1B doc would be meaningless.
+    /// </summary>
+    public bool TestRun { get; init; }
 }
 
 public sealed class ConsignmentMb1bResponse
