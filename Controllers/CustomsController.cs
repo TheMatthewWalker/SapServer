@@ -157,7 +157,7 @@ public sealed class CustomsController : SapControllerBase
 
         var a005Request  = CustomsHelpers.BuildA005Request(request);
         var a005Response = await _pool.ExecuteAsync(a005Request, ct);
-        var a005Rows     = CustomsHelpers.ParseA005Rows(a005Response);
+        var a005Rows     = CustomsHelpers.ParseA005Rows(a005Response, request);
 
         if (a005Rows.Length == 0)
             return Ok(ApiResponse<ConsignmentPriceRow[]>.Ok([]));

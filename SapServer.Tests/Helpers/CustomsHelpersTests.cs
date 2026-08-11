@@ -133,32 +133,37 @@ public class CustomsHelpersTests
     }
 
     [Fact]
-    public void BuildA005Request_ORs_exact_match_customer_material_pairs_and_filters_valid_conditions()
+    public void BuildA005Request_filters_on_a_deduped_material_value_list_with_no_customer_or_date_filter()
     {
+        // No customer/date filtering server-side — ZRFC_READ_TABLES ANDs every
+        // WHERE row together regardless of literal "OR" text, so there is no
+        // way to express "(customer=X AND material=Y) OR (...)" against it.
+        // Customer filtering happens in C# (ParseA005Rows); date/validity
+        // filtering is dropped entirely for now (GT against a date field via
+        // this Z-RFC is unconfirmed).
         var request = CustomsHelpers.BuildA005Request(new ConsignmentPriceRequest
         {
-            Lines = [new ConsignmentPriceLine("363533", "CP1166")],
+            Lines = [new ConsignmentPriceLine("363533", "CP1166"), new ConsignmentPriceLine("999999", "CP1166")],
         });
 
         var whereText = string.Join(" ", request.InputTablesItems["where_clause"].Select(r => r["TEXT"]));
+        Assert.Contains("A005~MATNR IN opt", whereText);
+        Assert.DoesNotContain("KUNNR", whereText);
+        Assert.DoesNotContain("DATBI", whereText);
 
-        Assert.Contains("A005~KUNNR EQ '0000363533'", whereText);
-        Assert.Contains("A005~MATNR EQ 'CP1166'", whereText);
-        Assert.Contains("A005~DATBI GT '", whereText);
+        var lows = request.InputTablesItems["value_list"].Select(r => r["LOW"]).ToArray();
+        Assert.Equal(["CP1166"], lows); // deduped — both lines share the same material
     }
 
     [Fact]
-    public void BuildA005Request_with_no_lines_still_filters_on_validity_date_only()
+    public void BuildA005Request_with_no_lines_sends_no_value_list_rows()
     {
         var request = CustomsHelpers.BuildA005Request(new ConsignmentPriceRequest());
-        var whereText = string.Join(" ", request.InputTablesItems["where_clause"].Select(r => r["TEXT"]));
-
-        Assert.DoesNotContain("KUNNR EQ", whereText);
-        Assert.Contains("A005~DATBI GT '", whereText);
+        Assert.False(request.InputTablesItems.ContainsKey("value_list"));
     }
 
     [Fact]
-    public void ParseA005Rows_skips_header_maps_columns_and_dedupes_to_first_record_per_pair()
+    public void ParseA005Rows_filters_to_the_requested_pairs_and_dedupes_to_first_record_per_pair()
     {
         var response = new RfcResponse
         {
@@ -169,11 +174,13 @@ public class CustomsHelpersTests
                     new() { ["WA"] = "KUNNR|MATNR|KNUMH" },
                     new() { ["WA"] = "0000363533|CP1166|0000123456" },
                     new() { ["WA"] = "0000363533|CP1166|0000999999" }, // second condition record for the same pair — ignored
+                    new() { ["WA"] = "0000999998|CP1166|0000111111" }, // a different customer's condition record for the same material — not requested, filtered out
                 }
             }
         };
+        var req = new ConsignmentPriceRequest { Lines = [new ConsignmentPriceLine("363533", "CP1166")] };
 
-        var rows = CustomsHelpers.ParseA005Rows(response);
+        var rows = CustomsHelpers.ParseA005Rows(response, req);
 
         Assert.Single(rows);
         Assert.Equal("0000363533", rows[0].CustomerCode);

@@ -354,19 +354,42 @@ internal static class CustomsHelpers
     // joined here in memory instead. An earlier version of this code used a
     // single joined call (A005 TAB_FROM/TAB_TO KONP via join_FIELDS); that
     // was never confirmed to work against the real ZRFC_READ_TABLES Z-RFC and
-    // was returning nothing in production — this two-step version replicates
-    // what the macro itself actually does.
+    // was returning nothing in production.
     //
-    // Step 1 (A005) batches via an OR'd set of literal EQ pairs rather than an
-    // IN opt/value_list — the macro's own SAP calls build single literal
-    // KUNNR EQ '..' AND MATNR EQ '..' conditions per pair (looped one at a
-    // time), and there's no evidence the underlying Z-RFC supports two
-    // independent IN opt filters on two different fields in the same call.
-    // Step 2 (KONP) is a normal IN opt/value_list on KNUMH, same pattern as
-    // every other VBELN-keyed lookup in this file. No KSCHL (condition type)
-    // filter on step 1 either — the macro's own calls don't filter on it; if
-    // more than one condition record matches a pair, ParseA005Rows keeps only
-    // the first.
+    // A second attempted version batched step 1 via an OR'd set of literal
+    // EQ pairs in one WHERE row (relying on WhereClauseBuilder's automatic
+    // 72-char continuation split) — also wrong: ZRFC_READ_TABLES ANDs every
+    // WHERE row together regardless of literal "OR" text in it, so there is
+    // no way to express "(customer=X AND material=Y) OR (customer=Z AND
+    // material=W)" as free WHERE text against this Z-RFC at all. The only
+    // way to get "any of several values" here is the IN opt/value_list
+    // mechanism, and that only filters a SINGLE field per value_list — it
+    // cannot express an OR across a (customer, material) pair either.
+    //
+    // So step 1 filters A005 by MATNR only (IN opt/value_list, same pattern
+    // as every other multi-value lookup in this file, e.g. BuildMarcRequest),
+    // deliberately NOT filtering by customer at all — that filtering happens
+    // in C#, in ParseA005Rows, against the actual (customer, material) pairs
+    // requested.
+    //
+    // Worth knowing if this single-field IN opt/value_list still comes back
+    // empty: ConsignmentHelpers.BuildVendorGrRequest's header comment
+    // documents a 2026-07-30 case where IN opt/value_list ALSO failed
+    // against this same Z-RFC (for MSEG~BWART, and worse when stacked with a
+    // second IN-opt condition on MATNR at the same time) — the working fix
+    // there was to abandon multi-value filtering for that field entirely and
+    // issue one RFC call per single value with a plain EQ, merging results
+    // in C#. This A005 call only stacks one IN-opt condition (MATNR alone,
+    // matching the already-confirmed-working MATNR precedent in
+    // CostingHelper.BuildCostSheetRequest) rather than two at once, so it's
+    // a closer match to the working case than the failing one — but if it
+    // still returns nothing, the same one-call-per-material EQ fallback is
+    // the next thing to try here too.
+    //
+    // No DATBI (validity) filter either for now — GT against a
+    // date field via this Z-RFC is unconfirmed; drop it until step 1 is
+    // confirmed to return real data at all, then revisit. Step 2 (KONP) is
+    // a normal IN opt/value_list on KNUMH, already correct.
 
     private static readonly string[] A005Columns = ["KUNNR", "MATNR", "KNUMH"];
     private static readonly string[] KonpColumns  = ["KNUMH", "KBETR", "KONWA", "KPEIN"];
@@ -381,28 +404,37 @@ internal static class CustomsHelpers
         foreach (var f in A005Columns)
             builder.TableItemRow("query_FIELDS", new { TABNAME = "A005", FIELDNAME = f });
 
-        var pairs = req.Lines
-            .Select(l => $"(A005~KUNNR EQ '{SapPad.Pad(l.Customer, 10)}' AND A005~MATNR EQ '{SapPad.Pad(l.Material, 18)}')")
-            .ToArray();
+        builder.WhereCondition("A005~MATNR IN opt");
 
-        if (pairs.Length > 0)
-            builder.WhereCondition($"({string.Join(" OR ", pairs)})");
-
-        builder.WhereCondition($"A005~DATBI GT '{DateTime.Now:yyyyMMdd}'");
+        foreach (var m in req.Lines.Select(l => l.Material).Distinct())
+            builder.TableItemRow("value_list", new
+            {
+                TABNAME = "A005", FIELDNAME = "MATNR",
+                SIGN = "I", OPTION = "EQ", LOW = SapPad.Pad(m, 18), HIGH = ""
+            });
 
         return builder.ReadTable("data_display").Build();
     }
 
-    // (CustomerCode, MaterialNumber, ConditionRecord) — one row per pair, first
-    // condition record found kept if more than one matches.
-    internal static (string CustomerCode, string MaterialNumber, string ConditionRecord)[] ParseA005Rows(RfcResponse response)
+    // Filters the (unfiltered-by-customer) A005 result down to just the
+    // (customer, material) pairs actually requested, matching ParseVbfaRows'
+    // pad-both-sides-then-HashSet-lookup pattern. (CustomerCode, MaterialNumber,
+    // ConditionRecord) — one row per pair, first condition record kept if more
+    // than one matches (no validity/date filter applied here — see rationale
+    // above).
+    internal static (string CustomerCode, string MaterialNumber, string ConditionRecord)[] ParseA005Rows(RfcResponse response, ConsignmentPriceRequest req)
     {
         if (!response.Tables.TryGetValue("data_display", out var rows))
             return [];
 
+        var wanted = req.Lines
+            .Select(l => (SapPad.Pad(l.Customer, 10), SapPad.Pad(l.Material, 18)))
+            .ToHashSet();
+
         return SapDelimitedParser
             .ParseRows(rows, '|', skipHeader: true)
-            .Where(cols => cols.Length >= A005Columns.Length)
+            .Where(cols => cols.Length >= A005Columns.Length
+                        && wanted.Contains((SapPad.Pad(cols[0], 10), SapPad.Pad(cols[1], 18))))
             .Select(cols => (CustomerCode: cols[0], MaterialNumber: cols[1], ConditionRecord: cols[2]))
             .GroupBy(r => (r.CustomerCode, r.MaterialNumber))
             .Select(g => g.First())
