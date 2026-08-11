@@ -230,8 +230,12 @@ public class WarehouseHelpersTests
     }
 
     [Fact]
-    public void BuildOpenTransferRequirementsRequest_adds_material_sloc_and_createdby_filters_when_supplied()
+    public void BuildOpenTransferRequirementsRequest_adds_material_and_createdby_filters_when_supplied()
     {
+        // StorageLocation is deliberately NOT filtered in the WHERE clause
+        // (dropped from BuildOpenTransferRequirementsRequest) — the query
+        // model still carries it, but it's not applied to the SAP-side
+        // filter here.
         var request = WarehouseHelpers.BuildOpenTransferRequirementsRequest(new OpenTransferRequirementsQuery
         {
             MrpController = "101", Material = "30005R", StorageLocation = "1710", CreatedBy = "jsmith",
@@ -240,7 +244,7 @@ public class WarehouseHelpersTests
 
         Assert.Contains("MARC~DISPO EQ '101'", whereText);
         Assert.Contains("LTBP~MATNR", whereText);
-        Assert.Contains("LTBP~LGORT EQ '1710'", whereText);
+        Assert.DoesNotContain("LGORT", whereText);
         Assert.Contains("LTBK~BNAME EQ 'JSMITH'", whereText); // SAP usernames are uppercase
     }
 
