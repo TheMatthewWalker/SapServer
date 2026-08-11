@@ -1,6 +1,25 @@
-@baseUrl = http://127.0.0.1:5200
-@token = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJub3JtYW50b24tbmV4dXMiLCJhdWQiOiJzYXAtc2VydmVyIiwic3ViIjoiZGV2IiwidXNlcklkIjoxLCJyb2xlIjoiYWRtaW4iLCJpYXQiOjE3ODYzNTk3MDgsImV4cCI6MTc4NjM2MzMwOH0.cZjSJbNsCWlzz-NyJHtVL9KW8T9di77ykxIqMrKZ-uM
+@baseUrl = http://localhost:5200
+@token = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJub3JtYW50b24tbmV4dXMiLCJhdWQiOiJzYXAtc2VydmVyIiwic3ViIjoiZGV2IiwidXNlcklkIjoxLCJyb2xlIjoiYWRtaW4iLCJpYXQiOjE3ODY0MzQ1NjYsImV4cCI6MTc4NjQzODE2Nn0.lsnUXNHsgya1L7RdUiaLeYio6Y7dGTTDfve6h9_Ldy4
 
+
+
+### POST /api/warehouse/consignment-mb1b
+POST {{baseUrl}}/api/warehouse/consignment-mb1b
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+    "StorageLocation": "1710",
+    "Material": "30007R",
+    "Quantity": 1.0,
+    "SpecialStockNumber": "0000200604",
+    "SourceType": "RO",
+    "SourceBin": "CANOPY",
+    "DestinationType": "SA",
+    "DestinationBin": "PTFE",
+    "Header": "Consignment"
+}
+###
 
 
 ### GET /api/function/params
@@ -13,8 +32,7 @@ Authorization: Bearer {{token}}
 }
 ###
 
-
-### GET /api/function/params
+### POST /api/function/params
 POST {{baseUrl}}/api/customs/LIPS
 Content-Type: application/json
 Authorization: Bearer {{token}}
