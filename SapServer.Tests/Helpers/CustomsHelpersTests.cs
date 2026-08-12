@@ -40,6 +40,42 @@ public class CustomsHelpersTests
     }
 
     [Fact]
+    public void BuildLikpRequest_filters_on_a_padded_delivery_list()
+    {
+        var request = CustomsHelpers.BuildLikpRequest(new LikpRequest { Deliveries = ["80001234"] });
+        var whereText = string.Join(" ", request.InputTablesItems["where_clause"].Select(r => r["TEXT"]));
+
+        Assert.Contains("LIKP~VBELN IN opt", whereText);
+        Assert.Equal("0080001234", request.InputTablesItems["value_list"][0]["LOW"]);
+    }
+
+    [Fact]
+    public void ParseLikpRows_maps_WADAT_IST_to_GoodsIssueDate()
+    {
+        // WADAT_IST (actual goods issue date) is the report's Invoice Date
+        // fallback for consignment shipments, which have no VBFA billing
+        // document (and so no ERDAT) to fall back on instead.
+        var response = new RfcResponse
+        {
+            Tables = new()
+            {
+                ["data_display"] = new()
+                {
+                    new() { ["WA"] = "VBELN|INCO1|KUNNR|WADAT_IST" },
+                    new() { ["WA"] = "0080001234|DDP|0000363533|15.05.2026" }, // DD.MM.YYYY — confirmed live character-mode date format
+                }
+            }
+        };
+
+        var rows = CustomsHelpers.ParseLikpRows(response);
+
+        Assert.Single(rows);
+        Assert.Equal("DDP", rows[0].Incoterms);
+        Assert.Equal("0000363533", rows[0].ConsigneeCode);
+        Assert.Equal("15.05.2026", rows[0].GoodsIssueDate);
+    }
+
+    [Fact]
     public void BuildVbfaRequest_filters_to_billing_document_flow_records_and_dedupes_deliveries()
     {
         var request = CustomsHelpers.BuildVbfaRequest(new VbfaRequest

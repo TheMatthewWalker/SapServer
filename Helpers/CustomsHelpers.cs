@@ -46,7 +46,7 @@ public sealed record ConsignmentPriceRequest
 // ── Response models ───────────────────────────────────────────────────────────
 
 public sealed record LipsRow(string DeliveryNumber, string ItemNumber, string MaterialNumber, string Quantity);
-public sealed record LikpRow(string DeliveryNumber, string Incoterms, string ConsigneeCode);
+public sealed record LikpRow(string DeliveryNumber, string Incoterms, string ConsigneeCode, string GoodsIssueDate);
 public sealed record VbfaRow(string DeliveryNumber, string ItemNumber, string InvoiceNumber, string InvoiceItem, string StatisticalValue, string InvoiceDate);
 public sealed record MarcRow(string MaterialNumber, string CommodityCode, string CountryOfOrigin);
 public sealed record Kna1Row(string CustomerCode, string Name, string Street, string City, string PostCode, string DestinationCountry, string TransportZone, string VatNumber = "", string Incoterms = "");
@@ -61,7 +61,12 @@ internal static class CustomsHelpers
     private const string Plant        = "3012";
 
     private static readonly string[] LipsColumns = ["VBELN", "POSNR", "MATNR", "KCMENG"];
-    private static readonly string[] LikpColumns = ["VBELN", "INCO1", "KUNNR"];
+    // WADAT_IST (actual goods issue date) is the report's Invoice Date
+    // fallback for consignment shipments — there's no VBFA billing document
+    // for those (see the consignment-pricing section below), so there's no
+    // ERDAT to fall back on either; the delivery's own goods-issue date is
+    // the closest meaningful "when did this actually ship" date available.
+    private static readonly string[] LikpColumns = ["VBELN", "INCO1", "KUNNR", "WADAT_IST"];
     // VBELV/POSNV are included for client-side filtering and echoed back in the response.
     // ERDAT ("created on") is the workbook macro's own source for Invoice Date on the
     // CUSTOMS report (confirmed against its VBFA_Lookup routine's field list: VBELN,
@@ -161,7 +166,7 @@ internal static class CustomsHelpers
         return SapDelimitedParser
             .ParseRows(rows, '|', skipHeader: true)
             .Where(cols => cols.Length >= LikpColumns.Length)
-            .Select(cols => new LikpRow(cols[0], cols[1], cols[2]))
+            .Select(cols => new LikpRow(cols[0], cols[1], cols[2], cols[3]))
             .ToArray();
     }
 
