@@ -157,7 +157,23 @@ public sealed class CustomsController : SapControllerBase
 
         var a005Request  = CustomsHelpers.BuildA005Request(request);
         var a005Response = await _pool.ExecuteAsync(a005Request, ct);
-        var a005Rows     = CustomsHelpers.ParseA005Rows(a005Response, request);
+
+        // Log the raw A005 result BEFORE any C# filtering/parsing — the
+        // question this is meant to answer is "did SAP send anything back
+        // at all", which the parsed/filtered row count alone can't
+        // distinguish from "SAP sent rows but our pair-matching didn't hit
+        // them" (e.g. a padding mismatch).
+        var a005RawRows = a005Response.Tables.TryGetValue("data_display", out var rawA005) ? rawA005 : [];
+        _logger.LogInformation(
+            "Consignment price A005 query for {MaterialCount} distinct material(s) returned {RawRowCount} raw row(s): {RawRows}",
+            request.Lines.Select(l => l.Material).Distinct().Count(),
+            a005RawRows.Count,
+            string.Join(" | ", a005RawRows.Select(r => r.GetValueOrDefault("WA"))));
+
+        var a005Rows = CustomsHelpers.ParseA005Rows(a005Response, request);
+        _logger.LogInformation(
+            "Consignment price A005 query matched {MatchedCount} of {RequestedCount} requested (customer, material) pair(s) after C# filtering",
+            a005Rows.Length, request.Lines.Count);
 
         if (a005Rows.Length == 0)
             return Ok(ApiResponse<ConsignmentPriceRow[]>.Ok([]));
@@ -165,6 +181,10 @@ public sealed class CustomsController : SapControllerBase
         var konpRequest  = CustomsHelpers.BuildKonpRequest(a005Rows.Select(r => r.ConditionRecord));
         var konpResponse = await _pool.ExecuteAsync(konpRequest, ct);
         var konpByRecord = CustomsHelpers.ParseKonpRows(konpResponse);
+
+        _logger.LogInformation(
+            "Consignment price KONP query for {ConditionRecordCount} condition record(s) matched {KonpMatchCount} rate/currency/pricing-unit row(s)",
+            a005Rows.Select(r => r.ConditionRecord).Distinct().Count(), konpByRecord.Count);
 
         var result = a005Rows
             .Where(a => konpByRecord.ContainsKey(a.ConditionRecord))
