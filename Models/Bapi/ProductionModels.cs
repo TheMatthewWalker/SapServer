@@ -178,6 +178,67 @@ public sealed class ProducedBatchRow
 }
 
 
+// ── Concession Goods Movement (BAPI_GOODSMVT_CREATE) ──────────────────────
+//
+// Posts the ACTUAL components consumed by a job whose traceability was
+// overridden by an approved Normanton-Nexus concession, instead of relying
+// on ZF40N's automatic BOM-driven backflush (which would still consume
+// whatever the BOM says, not what was really used). One call posts EVERY
+// component explicitly — correct ones included, not just the substituted
+// one — per Normanton-Nexus's "full replacement" design: this avoids
+// ZF40N's own automatic backflush also silently consuming the original
+// wrong BOM material on top of this explicit posting.
+//
+// UNCONFIRMED against this SAP system for this specific use case. Reuses
+// GM_CODE "06" ("goods movements without reference") — the only GM_CODE
+// confirmed working here so far (StockAdjustmentHelper/MixingScrapHelper,
+// movements 711/551) — but the movement type below has NOT itself been
+// exercised through this BAPI/GM_CODE combination before. Verify via
+// test.http before trusting this in production; if it doesn't work, the
+// established fallback in this codebase is a BDC recording instead (see
+// GoodsReceiptHelper.cs's header comment for what that looked like the
+// last time this exact BAPI failed here).
+public sealed class GoodsMovementComponent
+{
+    [Required, Length(1, 18)] public string  Material        { get; init; } = string.Empty; // -> GOODSMVT_ITEM-MATERIAL
+    [Range(0.001, double.MaxValue, ErrorMessage = "Quantity must be greater than zero.")]
+                             public decimal Quantity          { get; init; }                  // -> GOODSMVT_ITEM-ENTRY_QNT
+                             public string  Unit               { get; init; } = string.Empty; // -> GOODSMVT_ITEM-ENTRY_UOM
+                             public string? StorageLocation    { get; init; }                  // -> GOODSMVT_ITEM-STGE_LOC; controller resolves via MARC-LGPRO if blank (mirrors PostMixingScrap)
+}
+
+public sealed class GoodsMovementRequest
+{
+    /// <summary>The finished good this job produced — reference only (GOODSMVT_HEADER carries no MATNR itself), for logging/traceability.</summary>
+    [Required, MinLength(1)] public string Material { get; init; } = string.Empty;
+
+    /// <summary>Batch ref, shown against the resulting material document. Maps to GOODSMVT_HEADER-REF_DOC_NO (max 16 chars).</summary>
+    [Required, MinLength(1)] public string Header    { get; init; } = string.Empty;
+
+    [Required, MinLength(1)] public List<GoodsMovementComponent> Components { get; init; } = [];
+
+    /// <summary>
+    /// Movement type applied to every component line — GOODSMVT_ITEM-MOVE_TYPE.
+    /// Suggested default "201" (goods issue, cost center) — UNCONFIRMED, see
+    /// class header comment. Deliberately a request field, not a hardcoded
+    /// constant, so a different value can be tried via test.http without a
+    /// code change once the correct one for this use case is known.
+    /// </summary>
+    public string MovementType { get; init; } = "201";
+
+    /// <summary>If true, asks SAP to simulate the posting (GOODSMVT_HEADER/TESTRUN "X") without creating a real material document.</summary>
+    public bool TestRun { get; init; }
+}
+
+public sealed class GoodsMovementResponse
+{
+    public string MaterialDocument     { get; init; } = string.Empty;
+    public string MaterialDocumentYear { get; init; } = string.Empty;
+    public bool   Success              { get; init; }
+    public List<SapReturnMessage> Messages { get; init; } = [];
+}
+
+
 // ── Combined Drumming Backflush + ZPRODBATCH/ZBATCHPACK Maintenance ──────────
 // Drumming Entry's one point of difference from every other production
 // process: a finished drum/box must also get a row in two custom SAP tables

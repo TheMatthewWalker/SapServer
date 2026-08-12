@@ -305,3 +305,64 @@ Authorization: Bearer {{token}}
     "TrNumber": "0000123456"
 }
 ###
+
+
+### POST /api/production/goods-movement-backflush?dryRun=true  (returns the
+### built BAPI_GOODSMVT_CREATE RfcRequest without touching the pool —
+### sanity-check field names/values before ever hitting SAP.)
+POST {{baseUrl}}/api/production/goods-movement-backflush?dryRun=true
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+    "Material": "TCEL9-9CBT",
+    "Header": "CO00000123",
+    "MovementType": "201",
+    "Components": [
+        { "Material": "30007R", "Quantity": 12.5, "Unit": "KG", "StorageLocation": "1710" },
+        { "Material": "40012X", "Quantity": 3.2,  "Unit": "KG" }
+    ]
+}
+###
+
+
+### POST /api/production/goods-movement-backflush  (TESTRUN — SAP simulates
+### the posting. GM_CODE "06" is confirmed working on this system
+### (StockAdjustmentHelper/MixingScrapHelper) but MovementType "201" is
+### UNCONFIRMED for this use case — see GoodsMovementRequest's header
+### comment in ProductionModels.cs. Run this first; if it comes back with a
+### sensible RETURN message instead of a generic RFC failure, "201" is at
+### least reachable and validating input. Only then try a real posting below
+### on throwaway materials/quantities.)
+POST {{baseUrl}}/api/production/goods-movement-backflush
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+    "Material": "TCEL9-9CBT",
+    "Header": "CO00000123",
+    "MovementType": "201",
+    "TestRun": true,
+    "Components": [
+        { "Material": "30007R", "Quantity": 12.5, "Unit": "KG", "StorageLocation": "1710" }
+    ]
+}
+###
+
+
+### POST /api/production/goods-movement-backflush  (real call — only run
+### once the TESTRUN above comes back clean. Creates a real material
+### document.)
+POST {{baseUrl}}/api/production/goods-movement-backflush
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+    "Material": "TCEL9-9CBT",
+    "Header": "CO00000123",
+    "MovementType": "201",
+    "Components": [
+        { "Material": "30007R", "Quantity": 12.5, "Unit": "KG", "StorageLocation": "1710" }
+    ]
+}
+###

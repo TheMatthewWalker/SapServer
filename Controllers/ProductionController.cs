@@ -398,6 +398,80 @@ public sealed class ProductionController : SapControllerBase
     }
 
 
+// ── POST /api/production/goods-movement-backflush ────────────────────────
+//
+// Normanton-Nexus's concession path: when a job's traceability was
+// approved to proceed despite not matching this material's BOM, this posts
+// every component explicitly (correct ones included, not just the
+// substituted one) via BAPI_GOODSMVT_CREATE, instead of the normal
+// automatic ZF40N backflush. See GoodsMovementHelper.cs/GoodsMovementRequest
+// (ProductionModels.cs) for the full rationale and the "UNCONFIRMED for
+// this use case — verify via test.http" caveat this carries.
+//
+// Like PostMixingScrap, this is a real BAPI and needs an explicit
+// BAPI_TRANSACTION_COMMIT/ROLLBACK on the same pinned worker afterward, or
+// nothing actually persists in SAP.
+
+    [HttpPost("goods-movement-backflush")]
+    [ProducesResponseType(typeof(ApiResponse<GoodsMovementResponse>), 200)]
+    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
+    [ProducesResponseType(typeof(ApiResponse<object>), 422)]
+    public async Task<IActionResult> PostGoodsMovementBackflush(
+
+        [FromBody] GoodsMovementRequest body,
+        [FromQuery] bool dryRun,
+        CancellationToken ct)
+    {
+        await CheckPermissionAsync(GetUserId(), ProductionHelpers.FnCreate, ct);
+
+        // Resolve a storage location (MARC-LGPRO) for any component that
+        // didn't already carry one from the BOM snapshot Node sent —
+        // mirrors PostMixingScrap's single-material fallback, just once per
+        // distinct material across every component line.
+        var resolvedStorageLocations = new Dictionary<string, string>();
+        foreach (var material in body.Components.Select(c => c.Material).Distinct())
+        {
+            if (!string.IsNullOrWhiteSpace(body.Components.First(c => c.Material == material).StorageLocation))
+                continue;
+            try
+            {
+                var slocArray = await _pool.ExecuteAsync(ProductionHelpers.BuildStorageLocation(material), ct);
+                var sloc = ProductionHelpers.ParseSingleSapResult(slocArray);
+                if (!string.IsNullOrWhiteSpace(sloc)) resolvedStorageLocations[material] = sloc;
+            }
+            catch { /* leave unresolved — BuildGoodsMovementRequest omits STGE_LOC and lets SAP reject it with a real message if it's required */ }
+        }
+
+        var request = GoodsMovementHelper.BuildGoodsMovementRequest(body, resolvedStorageLocations);
+
+        if (dryRun)
+            return Ok(ApiResponse<RfcRequest>.Ok(request));
+
+        var worker = _pool.AcquireWorker();
+
+        var data     = await _pool.ExecuteOnWorkerAsync(worker, request, ct);
+        var response = GoodsMovementHelper.ParseGoodsMovementResponse(data);
+
+        _logger.LogInformation($"Concession goods movement for {body.Material} ({body.Header}): {body.Components.Count} component(s) || MatDoc {response.MaterialDocument}");
+
+        if (body.TestRun)
+        {
+            await _pool.ExecuteOnWorkerAsync(worker, CommitHelper.BuildBapiRollback(), ct);
+            return Ok(ApiResponse<GoodsMovementResponse>.Ok(response));
+        }
+
+        if (!response.Success)
+        {
+            await _pool.ExecuteOnWorkerAsync(worker, CommitHelper.BuildBapiRollback(), ct);
+            return UnprocessableEntity(ApiResponse<GoodsMovementResponse>.Fail(
+                "422", "SAP rejected the concession goods movement. Transaction rolled back.", response));
+        }
+
+        await _pool.ExecuteOnWorkerAsync(worker, CommitHelper.BuildBapiCommit(), ct);
+        return Ok(ApiResponse<GoodsMovementResponse>.Ok(response));
+    }
+
+
 // ── POST /api/production/scrap/reverse ──────────────────────────────────
 
     [HttpPost("scrap/reverse")]
