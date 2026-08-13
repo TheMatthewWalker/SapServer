@@ -16,17 +16,32 @@ public sealed class StockQuery
     public string? ExcludeStorageType { get; init; }
     public string? Bin             { get; init; }
     public string? Batch           { get; init; }
-    // LGORT. CAUTION for the Stock Count feature's Production Count (storage
-    // location 1716, inventory-managed only, no WM/bin concept): LQUA is a
-    // WM (bin-managed) table and generally only holds stock for WM-managed
-    // storage locations — UNVERIFIED whether 1716 rows appear in LQUA at all
-    // via this filter. Check against a real SAP system before wiring
-    // Production Count's stock pull to GetStock/BuildStockRequest; if 1716
-    // genuinely doesn't appear here, it needs a different IM stock table
-    // (e.g. MARD) via the same ZRFC_READ_TABLES mechanism instead.
-    public string? StorageLocation { get; init; }
+    public string? StorageLocation { get; init; } // LGORT
     public string? StockCategory   { get; init; } // BESTQ
     public int     RowCount        { get; init; } = 9999;
+}
+
+// ── IM (inventory-managed-only) stock — MARD ────────────────────────────────
+//
+// Confirmed against the real SAP system: storage location 1716 (Production
+// Count) has no WM/bin concept and does not appear in LQUA at all — use MARD
+// (plant/storage-location-level unrestricted stock, LABST) instead, via the
+// same ZRFC_READ_TABLES mechanism. No StorageType/Bin fields here — MARD has
+// no such concept.
+public sealed class ImStockQuery
+{
+    public string? Material        { get; init; }
+    [Required] public string StorageLocation { get; init; } = string.Empty; // LGORT
+    public int     RowCount        { get; init; } = 9999;
+}
+
+/// <summary>A single row from the MARD table — unrestricted-use stock (LABST) for one material at one plant/storage location.</summary>
+public sealed class ImStockRow
+{
+    public string  Plant           { get; init; } = string.Empty; // WERKS
+    public string  StorageLocation { get; init; } = string.Empty; // LGORT
+    public string  Material        { get; init; } = string.Empty; // MATNR
+    public decimal AvailableQty    { get; init; }                  // LABST
 }
 
 /// <summary>A single quant row from the LQUA table.</summary>

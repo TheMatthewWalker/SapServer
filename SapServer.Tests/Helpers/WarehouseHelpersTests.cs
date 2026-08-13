@@ -211,6 +211,57 @@ public class WarehouseHelpersTests
         Assert.DoesNotContain("LGPLA", whereText);
     }
 
+    // ── IM stock (MARD) — Production Count, storage location 1716 ───────────────
+
+    [Fact]
+    public void BuildImStockRequest_filters_by_plant_and_storage_location()
+    {
+        var request = WarehouseHelpers.BuildImStockRequest(new ImStockQuery { StorageLocation = "1716" });
+        var whereText = string.Join(" ", request.InputTablesItems["where_clause"].Select(r => r["TEXT"]));
+
+        Assert.Contains("MARD~WERKS EQ '3012'", whereText);
+        Assert.Contains("MARD~LGORT EQ '1716'", whereText);
+        Assert.DoesNotContain("MATNR", whereText);
+    }
+
+    [Fact]
+    public void BuildImStockRequest_adds_material_condition_when_supplied()
+    {
+        var request = WarehouseHelpers.BuildImStockRequest(new ImStockQuery { StorageLocation = "1716", Material = "30005R" });
+        var whereText = string.Join(" ", request.InputTablesItems["where_clause"].Select(r => r["TEXT"]));
+
+        Assert.Contains("MARD~MATNR", whereText);
+    }
+
+    [Fact]
+    public void ParseImStockRows_maps_MARD_columns_in_order()
+    {
+        var response = StockResponse("3012|1716|30005R|42.5");
+
+        var rows = WarehouseHelpers.ParseImStockRows(response);
+
+        Assert.Single(rows);
+        Assert.Equal("3012", rows[0].Plant);
+        Assert.Equal("1716", rows[0].StorageLocation);
+        Assert.Equal("30005R", rows[0].Material);
+        Assert.Equal(42.5m, rows[0].AvailableQty);
+    }
+
+    [Fact]
+    public void ParseImStockRows_unparsable_quantity_defaults_to_zero_rather_than_throwing()
+    {
+        var response = StockResponse("3012|1716|30005R|not-a-number");
+        var rows = WarehouseHelpers.ParseImStockRows(response);
+        Assert.Equal(0m, rows[0].AvailableQty);
+    }
+
+    [Fact]
+    public void ParseImStockRows_skips_the_SAP_header_row()
+    {
+        var response = StockResponse(); // no data rows, header only
+        Assert.Empty(WarehouseHelpers.ParseImStockRows(response));
+    }
+
     [Fact]
     public void BuildStockRequest_adds_an_LGTYP_NE_condition_for_ExcludeStorageType()
     {

@@ -57,6 +57,39 @@ public class WarehouseControllerTests
     }
 
     [Fact]
+    public async Task GetImStock_throws_permission_exception_when_denied()
+    {
+        _permissions.Setup(p => p.CanExecuteAsync(1, WarehouseHelpers.FnReadTables, It.IsAny<CancellationToken>())).ReturnsAsync(false);
+
+        await Assert.ThrowsAsync<SapPermissionException>(() => _controller.GetImStock(new ImStockQuery { StorageLocation = "1716" }, CancellationToken.None));
+        _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task GetImStock_returns_parsed_MARD_rows_when_permitted()
+    {
+        _permissions.Setup(p => p.CanExecuteAsync(1, WarehouseHelpers.FnReadTables, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        _pool.Setup(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new RfcResponse
+            {
+                Tables = new()
+                {
+                    ["data_display"] = new()
+                    {
+                        new() { ["WA"] = "header" },
+                        new() { ["WA"] = "3012|1716|30005R|42.5" },
+                    },
+                },
+            });
+
+        var result = Assert.IsType<OkObjectResult>(await _controller.GetImStock(new ImStockQuery { StorageLocation = "1716" }, CancellationToken.None));
+        var body = Assert.IsType<ApiResponse<ImStockRow[]>>(result.Value);
+        Assert.Single(body.Data!);
+        Assert.Equal("30005R", body.Data![0].Material);
+        Assert.Equal(42.5m, body.Data![0].AvailableQty);
+    }
+
+    [Fact]
     public async Task CreateTransferOrder_fails_fast_with_422_when_the_destination_bin_does_not_exist_and_never_calls_L_TO_CREATE_SINGLE()
     {
         _permissions.Setup(p => p.CanExecuteAsync(1, WarehouseHelpers.FnCreateTo, It.IsAny<CancellationToken>())).ReturnsAsync(true);

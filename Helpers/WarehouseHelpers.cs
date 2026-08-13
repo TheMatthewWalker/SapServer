@@ -119,6 +119,54 @@ internal static class WarehouseHelpers
             .OrderBy(r => r.StorageType).ThenBy(r => r.Bin)
             .ToArray();
 
+    // ── IM stock (MARD) — Production Count, storage location 1716 ───────────────
+    //
+    // Confirmed against the real SAP system: 1716 has no WM/bin concept and
+    // never appears in LQUA — MARD~LABST (unrestricted-use stock) is the
+    // real source. Same ZRFC_READ_TABLES/data_display/skipHeader pattern as
+    // BuildStockRequest/ParseStockRows above, just a different table.
+    internal static readonly string[] MardColumns = ["WERKS", "LGORT", "MATNR", "LABST"];
+
+    internal static RfcRequest BuildImStockRequest(ImStockQuery query)
+    {
+        var builder = new RfcRequestBuilder(FnReadTables)
+            .Import("DELIMITER", "|")
+            .Import("ROWCOUNT",  query.RowCount)
+            .Import("NO_DATA",   " ")
+            .TableRow("QUERY_TABLES", new { TABNAME = "MARD" });
+
+        foreach (var field in MardColumns)
+            builder.TableItemRow("query_FIELDS", new { TABNAME = "MARD", FIELDNAME = field });
+
+        builder.WhereCondition($"MARD~WERKS EQ '{Plant}'");
+        builder.WhereCondition($"MARD~LGORT EQ '{query.StorageLocation}'");
+
+        if (!string.IsNullOrWhiteSpace(query.Material))
+            builder.WhereCondition($"MARD~MATNR EQ '{SapPad.Pad(query.Material, 18)}'");
+
+        builder.ReadTable("data_display");
+
+        return builder.Build();
+    }
+
+    internal static ImStockRow[] ParseImStockRows(RfcResponse response)
+    {
+        if (!response.Tables.TryGetValue("data_display", out var sapRows))
+            return [];
+
+        return SapDelimitedParser
+            .ParseRows(sapRows, '|', skipHeader: true)
+            .Where(cols => cols.Length >= MardColumns.Length)
+            .Select(cols => new ImStockRow
+            {
+                Plant           = cols[0],
+                StorageLocation = cols[1],
+                Material        = cols[2],
+                AvailableQty    = decimal.TryParse(cols[3], out var qty) ? qty : 0m,
+            })
+            .ToArray();
+    }
+
     // ── Transfer Order ────────────────────────────────────────────────────────
 
     internal static RfcRequest BuildTransferOrderRequest(CreateTransferOrderRequest body) =>

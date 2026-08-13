@@ -31,6 +31,24 @@ public sealed class WarehouseController : SapControllerBase
         return Ok(ApiResponse<StockRow[]>.Ok(WarehouseHelpers.ParseStockRows(response)));
     }
 
+    // ── GET /api/warehouse/im-stock ────────────────────────────────────────────
+    //
+    // MARD-based unrestricted stock (LABST) for a plant/storage-location —
+    // storage location 1716 (Production Count) has no WM/bin concept and
+    // never appears in LQUA, confirmed against the real SAP system. Same
+    // FnReadTables permission gate as GetStock, since it's the same
+    // underlying read-only RFC.
+    [HttpGet("im-stock")]
+    [ProducesResponseType(typeof(ApiResponse<ImStockRow[]>), 200)]
+    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
+    public async Task<IActionResult> GetImStock([FromQuery] ImStockQuery query, CancellationToken ct)
+    {
+        await CheckPermissionAsync(GetUserId(), WarehouseHelpers.FnReadTables, ct);
+
+        var response = await _pool.ExecuteAsync(WarehouseHelpers.BuildImStockRequest(query), ct);
+        return Ok(ApiResponse<ImStockRow[]>.Ok(WarehouseHelpers.ParseImStockRows(response)));
+    }
+
     // ── GET /api/warehouse/stock/totals ───────────────────────────────────────
 
     [HttpGet("stock/totals")]

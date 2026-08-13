@@ -43,17 +43,20 @@ public sealed class StockAdjustmentRequest
     public string StorageLocation { get; init; } = string.Empty;
     /// <summary>
     /// WM storage type. Maps to GOODSMVT_ITEM-STGE_TYPE. Sent unconditionally
-    /// alongside StorageBin below — CAUTION for the Stock Count feature's
-    /// Production Count (storage location 1716, inventory-managed only, no
-    /// WM/bin concept as far as LQUA is concerned): the user's own prior
-    /// experience is that sending WM-shaped values here (storage type 'SA',
-    /// bin 'PTFE') still posts successfully for an IM-only storage location,
-    /// but this is UNVERIFIED against this SAP system — confirm via a
-    /// TestRun=true call against a real 1716 material before Production
-    /// Count posts anything for real. If it turns out SAP silently mis-posts
-    /// or rejects it, StorageType/StorageBin may need to become optional
-    /// here instead (omit GOODSMVT_ITEM-STGE_TYPE/STGE_BIN entirely for an
-    /// IM-only posting) — test before assuming either way.
+    /// alongside StorageBin below. Confirmed by the user: storage location
+    /// 1716 (Production Count) is inventory-managed only (MARD, not LQUA —
+    /// see WarehouseHelpers.BuildImStockRequest) and has no WM/bin concept of
+    /// its own, but material issued to production also physically sits in
+    /// storage type 'SA'/bin 'PTFE' under storage location 1710 (WM-managed)
+    /// — Production Count's SAP comparison sums MARD@1716 + LQUA@1710/SA/PTFE
+    /// for this reason (see routes/stockcount.js's resolveSapComparisonForLine
+    /// in Normanton-Nexus). Postings for Production Count lines still target
+    /// StorageType='SA'/StorageBin='PTFE' (routes/stockcount.js's approve
+    /// handler's fallback) — this specific combination is still not verified
+    /// via a live TestRun=true call against a real 1716/SA/PTFE material,
+    /// only corroborated by the user's recollection and by StagingPost's
+    /// existing (working) use of the same SA/PTFE pair elsewhere in this
+    /// codebase — confirm before relying on it for a real posting.
     /// </summary>
     public string StorageType { get; init; }  = string.Empty;
     public string StorageBin { get; init; }  = string.Empty;
