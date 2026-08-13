@@ -213,6 +213,17 @@ internal sealed class SapStaWorker : IDisposable
         var request = item.Request!;
         var tcs      = item.Tcs!;
 
+        // ProcessItem only ever runs on this worker's own dedicated _staThread
+        // (see WorkerLoop's foreach over the blocking queue), so this managed
+        // thread id is stable for this slot's whole lifetime — logging it here
+        // (rather than guessing from SlotId alone) is what actually proves
+        // whether concurrent calls are running on genuinely different OS
+        // threads, or serializing somewhere despite going to different slots.
+        int threadId = Environment.CurrentManagedThreadId;
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        _logger.LogInformation("RFC '{Function}' starting on slot {SlotId}, thread {ThreadId}.",
+            request.FunctionName, SlotId, threadId);
+
         try
         {
             EnsureConnected();
@@ -254,6 +265,13 @@ internal sealed class SapStaWorker : IDisposable
             _logger.LogError(ex, "RFC call '{Function}' failed on slot {SlotId}.",
                 request.FunctionName, SlotId);
             tcs.TrySetException(ex);
+        }
+        finally
+        {
+            stopwatch.Stop();
+            _logger.LogInformation("RFC '{Function}' finished on slot {SlotId}, thread {ThreadId} in {ElapsedMs}ms — {Outcome}.",
+                request.FunctionName, SlotId, threadId, stopwatch.ElapsedMilliseconds,
+                tcs.Task.IsCompletedSuccessfully ? "OK" : "FAILED");
         }
     }
 
