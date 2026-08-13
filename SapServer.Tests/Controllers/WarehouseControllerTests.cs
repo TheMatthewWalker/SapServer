@@ -45,7 +45,7 @@ public class WarehouseControllerTests
                     ["data_display"] = new()
                     {
                         new() { ["WA"] = "header" },
-                        new() { ["WA"] = "1710|SA|BIN-001|30005R|10|BATCH1|F|Q|SO1" },
+                        new() { ["WA"] = "1710|SA|BIN-001|30005R|10|BATCH1|F|Q|SO1|20260110" },
                     },
                 },
             });
@@ -54,6 +54,46 @@ public class WarehouseControllerTests
         var body = Assert.IsType<ApiResponse<StockRow[]>>(result.Value);
         Assert.Single(body.Data!);
         Assert.Equal("30005R", body.Data![0].Material);
+        Assert.Equal("20260110", body.Data![0].GrDate);
+    }
+
+    [Fact]
+    public async Task GetStock_joins_in_ProfitCentre_from_the_MARC_lookup_and_filters_by_it_when_requested()
+    {
+        _permissions.Setup(p => p.CanExecuteAsync(1, WarehouseHelpers.FnReadTables, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        var stockResponse = new RfcResponse
+        {
+            Tables = new()
+            {
+                ["data_display"] = new()
+                {
+                    new() { ["WA"] = "header" },
+                    new() { ["WA"] = "1710|SA|BIN-001|30005R|10|BATCH1|F|Q|SO1|20260110" },
+                    new() { ["WA"] = "1710|SA|BIN-002|30006R|5|BATCH2|F|Q|SO2|20260110" },
+                },
+            },
+        };
+        var pcResponse = new RfcResponse
+        {
+            Tables = new()
+            {
+                ["data_display"] = new()
+                {
+                    new() { ["WA"] = "30005R|9912" },
+                    new() { ["WA"] = "30006R|9913" },
+                },
+            },
+        };
+        _pool.SetupSequence(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(stockResponse)
+            .ReturnsAsync(pcResponse);
+
+        var result = Assert.IsType<OkObjectResult>(await _controller.GetStock(new StockQuery { ProfitCentre = "9912" }, CancellationToken.None));
+        var body = Assert.IsType<ApiResponse<StockRow[]>>(result.Value);
+
+        Assert.Single(body.Data!);
+        Assert.Equal("30005R", body.Data![0].Material);
+        Assert.Equal("9912", body.Data![0].ProfitCentre);
     }
 
     [Fact]

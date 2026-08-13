@@ -18,6 +18,10 @@ public sealed class StockQuery
     public string? Batch           { get; init; }
     public string? StorageLocation { get; init; } // LGORT
     public string? StockCategory   { get; init; } // BESTQ
+    // Not an LQUA field (PRCTR lives on MARC) — applied by WarehouseController
+    // as a post-filter once rows are joined against the material→profit-centre
+    // lookup, not part of BuildStockRequest's WHERE clause.
+    public string? ProfitCentre    { get; init; }
     public int     RowCount        { get; init; } = 9999;
 }
 
@@ -56,6 +60,8 @@ public sealed class StockRow
     public string  StockCategory   { get; init; } = string.Empty; // BESTQ
     public string  SpecialStockInd { get; init; } = string.Empty; // SOBKZ
     public string  SpecialStockNum { get; init; } = string.Empty; // SONUM
+    public string  GrDate          { get; init; } = string.Empty; // WDATU, raw yyyyMMdd
+    public string  ProfitCentre    { get; init; } = string.Empty; // MARC-PRCTR, looked up by material
 }
 
 /// <summary>Total available quantity per material number.</summary>

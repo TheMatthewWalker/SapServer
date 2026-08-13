@@ -16,7 +16,7 @@ public class WarehouseHelpersTests
     [Fact]
     public void ParseStockRows_maps_LQUA_columns_in_order()
     {
-        var response = StockResponse("1710|SA|BIN-001|30005R|12.5|BATCH1|F|Q|SO123");
+        var response = StockResponse("1710|SA|BIN-001|30005R|12.5|BATCH1|F|Q|SO123|20260110");
 
         var rows = WarehouseHelpers.ParseStockRows(response);
 
@@ -27,14 +27,35 @@ public class WarehouseHelpersTests
         Assert.Equal("30005R", rows[0].Material);
         Assert.Equal(12.5m, rows[0].AvailableQty);
         Assert.Equal("BATCH1", rows[0].Batch);
+        Assert.Equal("20260110", rows[0].GrDate);
     }
 
     [Fact]
     public void ParseStockRows_unparsable_quantity_defaults_to_zero_rather_than_throwing()
     {
-        var response = StockResponse("1710|SA|BIN-001|30005R|not-a-number|BATCH1|F|Q|SO123");
+        var response = StockResponse("1710|SA|BIN-001|30005R|not-a-number|BATCH1|F|Q|SO123|20260110");
         var rows = WarehouseHelpers.ParseStockRows(response);
         Assert.Equal(0m, rows[0].AvailableQty);
+    }
+
+    [Fact]
+    public void ParseStockRows_looks_up_ProfitCentre_by_normalised_material_when_a_dictionary_is_supplied()
+    {
+        var response = StockResponse("1710|SA|BIN-001|30005R|12.5|BATCH1|F|Q|SO123|20260110");
+        var profitCentres = new Dictionary<string, string> { ["30005R"] = "9912" };
+
+        var rows = WarehouseHelpers.ParseStockRows(response, profitCentres);
+
+        Assert.Equal("9912", rows[0].ProfitCentre);
+    }
+
+    [Fact]
+    public void ParseStockRows_ProfitCentre_is_empty_when_no_dictionary_is_supplied_or_material_is_unmatched()
+    {
+        var response = StockResponse("1710|SA|BIN-001|30005R|12.5|BATCH1|F|Q|SO123|20260110");
+
+        Assert.Equal("", WarehouseHelpers.ParseStockRows(response)[0].ProfitCentre);
+        Assert.Equal("", WarehouseHelpers.ParseStockRows(response, new Dictionary<string, string>())[0].ProfitCentre);
     }
 
     [Fact]
@@ -209,6 +230,29 @@ public class WarehouseHelpersTests
         Assert.Contains("LQUA~MATNR", whereText);
         Assert.DoesNotContain("LGTYP", whereText);
         Assert.DoesNotContain("LGPLA", whereText);
+    }
+
+    [Fact]
+    public void BuildStockRequest_plain_material_uses_padded_exact_match_EQ()
+    {
+        var request = WarehouseHelpers.BuildStockRequest(new StockQuery { Material = "30005R" });
+        var whereText = string.Join(" ", request.InputTablesItems["where_clause"].Select(r => r["TEXT"]));
+
+        Assert.Contains("LQUA~MATNR EQ '30005R'", whereText);
+        Assert.DoesNotContain("CP", whereText);
+    }
+
+    [Fact]
+    public void BuildStockRequest_material_with_a_wildcard_uses_CP_pattern_match_unpadded()
+    {
+        // Wildcard search is opt-in — only kicks in when the caller actually
+        // types a '*' — so a plain material search elsewhere keeps behaving
+        // exactly as before (see the EQ test above).
+        var request = WarehouseHelpers.BuildStockRequest(new StockQuery { Material = "tshv*" });
+        var whereText = string.Join(" ", request.InputTablesItems["where_clause"].Select(r => r["TEXT"]));
+
+        Assert.Contains("LQUA~MATNR CP 'TSHV*'", whereText);
+        Assert.DoesNotContain("MATNR EQ", whereText);
     }
 
     // ── IM stock (MARD) — Production Count, storage location 1716 ───────────────

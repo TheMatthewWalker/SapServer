@@ -26,9 +26,10 @@ internal static class WarehouseHelpers
     // material/vendor) before trusting it the way the 711 case was.
     internal const string GmCodeTransferPosting = "04";
 
-    // Column order must exactly match query_FIELDS registration order below
+    // Column order must exactly match query_FIELDS registration order below.
+    // WDATU = date of last goods movement into this quant — the GR date.
     internal static readonly string[] LquaColumns =
-        ["LGORT", "LGTYP", "LGPLA", "MATNR", "VERME", "CHARG", "BESTQ", "SOBKZ", "SONUM"];
+        ["LGORT", "LGTYP", "LGPLA", "MATNR", "VERME", "CHARG", "BESTQ", "SOBKZ", "SONUM", "WDATU"];
 
     // ── Stock ─────────────────────────────────────────────────────────────────
 
@@ -46,7 +47,16 @@ internal static class WarehouseHelpers
         builder.WhereCondition($"LQUA~LGNUM EQ '{Warehouse}'");
 
         if (!string.IsNullOrWhiteSpace(query.Material))
-            builder.WhereCondition($"LQUA~MATNR EQ '{SapPad.Pad(query.Material, 18)}'");
+        {
+            // Wildcard search is opt-in: a caller has to type '*' themselves
+            // (e.g. "TSHV*") to get a pattern match (ABAP CP, '*'/'+' wildcards)
+            // — plain material numbers keep going through the padded exact-match
+            // EQ below, unchanged from before.
+            if (query.Material.Contains('*'))
+                builder.WhereCondition($"LQUA~MATNR CP '{query.Material.ToUpperInvariant()}'");
+            else
+                builder.WhereCondition($"LQUA~MATNR EQ '{SapPad.Pad(query.Material, 18)}'");
+        }
 
         if (!string.IsNullOrWhiteSpace(query.StorageType))
             builder.WhereCondition($"LQUA~LGTYP EQ '{query.StorageType}'");
@@ -71,7 +81,11 @@ internal static class WarehouseHelpers
         return builder.Build();
     }
 
-    internal static StockRow[] ParseStockRows(RfcResponse response)
+    // profitCentres is an optional Material→PRCTR lookup (PerformanceHelpers.
+    // BuildMaterialProfitCentre/ParseMaterialProfitCentre — PRCTR lives on MARC,
+    // not LQUA, so it's a separate RFC call the controller joins in here rather
+    // than something this function can look up on its own).
+    internal static StockRow[] ParseStockRows(RfcResponse response, Dictionary<string, string>? profitCentres = null)
     {
         if (!response.Tables.TryGetValue("data_display", out var sapRows))
             return [];
@@ -89,7 +103,9 @@ internal static class WarehouseHelpers
                 Batch           = cols[5],
                 StockCategory   = cols[6],
                 SpecialStockInd = cols[7],
-                SpecialStockNum = cols[8]
+                SpecialStockNum = cols[8],
+                GrDate          = cols[9],
+                ProfitCentre    = profitCentres?.GetValueOrDefault(PerformanceHelpers.NormaliseMaterial(cols[3]), "") ?? ""
             })
             .ToArray();
     }

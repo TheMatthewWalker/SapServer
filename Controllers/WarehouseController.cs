@@ -28,7 +28,19 @@ public sealed class WarehouseController : SapControllerBase
         //"User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "stock");
 
         var response = await _pool.ExecuteAsync(WarehouseHelpers.BuildStockRequest(query), ct);
-        return Ok(ApiResponse<StockRow[]>.Ok(WarehouseHelpers.ParseStockRows(response)));
+
+        // PRCTR lives on MARC, not LQUA, so Profit Centre is joined in from a
+        // second, unfiltered whole-plant MATNR→PRCTR pull (same pattern as
+        // PerformanceController's stock endpoint) rather than being part of
+        // BuildStockRequest's WHERE clause.
+        var pcResponse = await _pool.ExecuteAsync(PerformanceHelpers.BuildMaterialProfitCentre(), ct);
+        var profitCentres = PerformanceHelpers.ParseMaterialProfitCentre(pcResponse);
+
+        var rows = WarehouseHelpers.ParseStockRows(response, profitCentres);
+        if (!string.IsNullOrWhiteSpace(query.ProfitCentre))
+            rows = rows.Where(r => string.Equals(r.ProfitCentre, query.ProfitCentre, StringComparison.OrdinalIgnoreCase)).ToArray();
+
+        return Ok(ApiResponse<StockRow[]>.Ok(rows));
     }
 
     // ── GET /api/warehouse/im-stock ────────────────────────────────────────────
