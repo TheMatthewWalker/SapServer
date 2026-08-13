@@ -238,26 +238,45 @@ public sealed class SapConnectionPool : ISapConnectionPool, IDisposable
         }
     }
 
+    // Rotating start point for the tie-break scan below — Interlocked.Increment
+    // gives each concurrent SelectWorker() call a distinct starting offset
+    // without needing a lock. Wraps naturally (int overflow); only ever used
+    // mod _workers.Length, so the sign/magnitude after overflow don't matter.
+    private int _nextWorkerIndex = -1;
+
     /// <summary>
-    /// Selects the worker with the shortest queue depth.
-    /// Iterates once — O(n) on pool size, which is always small.
+    /// Selects the worker with the shortest queue depth, round-robining among
+    /// every worker currently tied at that minimum — this is the
+    /// round-robin-on-ties behavior this class's doc comment has always
+    /// promised, but a prior version of this method was a plain
+    /// first-minimum-wins scan with no tiebreak at all, so a burst of
+    /// concurrent calls that all observed every worker idle (queue depth 0 —
+    /// the common case) all landed on _workers[0], serializing work that
+    /// should have spread across the pool. Two passes: one to find the
+    /// minimum depth, one starting from a rotating offset to pick among the
+    /// workers actually at it.
     /// </summary>
     private SapStaWorker SelectWorker()
     {
-        var best      = _workers[0];
-        int bestDepth = best.QueueDepth;
-
-        for (int i = 1; i < _workers.Length; i++)
+        int n = _workers.Length;
+        int minDepth = _workers[0].QueueDepth;
+        for (int i = 1; i < n; i++)
         {
             int depth = _workers[i].QueueDepth;
-            if (depth < bestDepth)
-            {
-                best      = _workers[i];
-                bestDepth = depth;
-            }
+            if (depth < minDepth) minDepth = depth;
         }
 
-        return best;
+        int start = Interlocked.Increment(ref _nextWorkerIndex);
+        for (int offset = 0; offset < n; offset++)
+        {
+            int idx = (int)(((uint)(start + offset)) % n);
+            if (_workers[idx].QueueDepth == minDepth)
+                return _workers[idx];
+        }
+
+        // Unreachable — minDepth was just observed on at least one worker
+        // above, so the loop always returns before falling through.
+        return _workers[0];
     }
 
     public void Dispose()
