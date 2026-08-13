@@ -211,6 +211,27 @@ public class WarehouseHelpersTests
         Assert.DoesNotContain("LGPLA", whereText);
     }
 
+    [Fact]
+    public void BuildStockRequest_adds_an_LGTYP_NE_condition_for_ExcludeStorageType()
+    {
+        // Weekly PTFE Cycle Count excludes bin type 'SA' (sample/quality
+        // stock) from the comparison — StockQuery.ExcludeStorageType.
+        var request = WarehouseHelpers.BuildStockRequest(new StockQuery { ExcludeStorageType = "SA" });
+        var whereText = string.Join(" ", request.InputTablesItems["where_clause"].Select(r => r["TEXT"]));
+
+        Assert.Contains("LQUA~LGTYP NE 'SA'", whereText);
+    }
+
+    [Fact]
+    public void BuildStockRequest_StorageType_and_ExcludeStorageType_are_independent()
+    {
+        var request = WarehouseHelpers.BuildStockRequest(new StockQuery { StorageType = "PTF", ExcludeStorageType = "SA" });
+        var whereText = string.Join(" ", request.InputTablesItems["where_clause"].Select(r => r["TEXT"]));
+
+        Assert.Contains("LQUA~LGTYP EQ 'PTF'", whereText);
+        Assert.Contains("LQUA~LGTYP NE 'SA'", whereText);
+    }
+
     // ── Bin → storage type lookup ────────────────────────────────────────────
 
     [Fact]

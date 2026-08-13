@@ -51,6 +51,9 @@ internal static class WarehouseHelpers
         if (!string.IsNullOrWhiteSpace(query.StorageType))
             builder.WhereCondition($"LQUA~LGTYP EQ '{query.StorageType}'");
 
+        if (!string.IsNullOrWhiteSpace(query.ExcludeStorageType))
+            builder.WhereCondition($"LQUA~LGTYP NE '{query.ExcludeStorageType}'");
+
         if (!string.IsNullOrWhiteSpace(query.Bin))
             builder.WhereCondition($"LQUA~LGPLA EQ '{query.Bin}'");
 

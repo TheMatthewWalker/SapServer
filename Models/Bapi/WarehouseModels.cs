@@ -9,9 +9,22 @@ public sealed class StockQuery
 {
     public string? Material        { get; init; }
     public string? StorageType     { get; init; }
+    // Excludes rows matching this storage type (LQUA~LGTYP NE) rather than
+    // filtering to it — e.g. the Weekly PTFE Cycle Count excludes bin type
+    // 'SA' (sample/quality stock, not real countable inventory). Independent
+    // of StorageType above; setting both applies both conditions.
+    public string? ExcludeStorageType { get; init; }
     public string? Bin             { get; init; }
     public string? Batch           { get; init; }
-    public string? StorageLocation { get; init; } // LGORT
+    // LGORT. CAUTION for the Stock Count feature's Production Count (storage
+    // location 1716, inventory-managed only, no WM/bin concept): LQUA is a
+    // WM (bin-managed) table and generally only holds stock for WM-managed
+    // storage locations — UNVERIFIED whether 1716 rows appear in LQUA at all
+    // via this filter. Check against a real SAP system before wiring
+    // Production Count's stock pull to GetStock/BuildStockRequest; if 1716
+    // genuinely doesn't appear here, it needs a different IM stock table
+    // (e.g. MARD) via the same ZRFC_READ_TABLES mechanism instead.
+    public string? StorageLocation { get; init; }
     public string? StockCategory   { get; init; } // BESTQ
     public int     RowCount        { get; init; } = 9999;
 }

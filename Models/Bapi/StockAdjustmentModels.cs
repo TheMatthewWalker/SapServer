@@ -41,6 +41,20 @@ public sealed class StockAdjustmentRequest
 
     /// <summary>Storage location. Maps to GOODSMVT_ITEM-STGE_LOC.</summary>
     public string StorageLocation { get; init; } = string.Empty;
+    /// <summary>
+    /// WM storage type. Maps to GOODSMVT_ITEM-STGE_TYPE. Sent unconditionally
+    /// alongside StorageBin below — CAUTION for the Stock Count feature's
+    /// Production Count (storage location 1716, inventory-managed only, no
+    /// WM/bin concept as far as LQUA is concerned): the user's own prior
+    /// experience is that sending WM-shaped values here (storage type 'SA',
+    /// bin 'PTFE') still posts successfully for an IM-only storage location,
+    /// but this is UNVERIFIED against this SAP system — confirm via a
+    /// TestRun=true call against a real 1716 material before Production
+    /// Count posts anything for real. If it turns out SAP silently mis-posts
+    /// or rejects it, StorageType/StorageBin may need to become optional
+    /// here instead (omit GOODSMVT_ITEM-STGE_TYPE/STGE_BIN entirely for an
+    /// IM-only posting) — test before assuming either way.
+    /// </summary>
     public string StorageType { get; init; }  = string.Empty;
     public string StorageBin { get; init; }  = string.Empty;
     public string? StockCategory { get; init; }
