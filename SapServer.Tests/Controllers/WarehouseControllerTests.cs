@@ -58,6 +58,34 @@ public class WarehouseControllerTests
     }
 
     [Fact]
+    public async Task GetStock_skips_the_MARC_ProfitCentre_lookup_entirely_when_not_filtering_by_it()
+    {
+        // The MARC pull is an expensive, unfiltered whole-plant read — only
+        // worth paying for when a caller actually needs to filter by Profit
+        // Centre. An ordinary search should hit SAP once, not twice, and
+        // ProfitCentre comes back blank rather than silently doing the join anyway.
+        _permissions.Setup(p => p.CanExecuteAsync(1, WarehouseHelpers.FnReadTables, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        _pool.Setup(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new RfcResponse
+            {
+                Tables = new()
+                {
+                    ["data_display"] = new()
+                    {
+                        new() { ["WA"] = "header" },
+                        new() { ["WA"] = "1710|SA|BIN-001|30005R|10|BATCH1|F|Q|SO1|20260110" },
+                    },
+                },
+            });
+
+        var result = Assert.IsType<OkObjectResult>(await _controller.GetStock(new StockQuery(), CancellationToken.None));
+        var body = Assert.IsType<ApiResponse<StockRow[]>>(result.Value);
+
+        Assert.Equal("", body.Data![0].ProfitCentre);
+        _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
     public async Task GetStock_joins_in_ProfitCentre_from_the_MARC_lookup_and_filters_by_it_when_requested()
     {
         _permissions.Setup(p => p.CanExecuteAsync(1, WarehouseHelpers.FnReadTables, It.IsAny<CancellationToken>())).ReturnsAsync(true);

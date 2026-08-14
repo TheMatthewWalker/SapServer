@@ -29,16 +29,26 @@ public sealed class WarehouseController : SapControllerBase
 
         var response = await _pool.ExecuteAsync(WarehouseHelpers.BuildStockRequest(query), ct);
 
-        // PRCTR lives on MARC, not LQUA, so Profit Centre is joined in from a
-        // second, unfiltered whole-plant MATNR→PRCTR pull (same pattern as
-        // PerformanceController's stock endpoint) rather than being part of
-        // BuildStockRequest's WHERE clause.
-        var pcResponse = await _pool.ExecuteAsync(PerformanceHelpers.BuildMaterialProfitCentre(), ct);
-        var profitCentres = PerformanceHelpers.ParseMaterialProfitCentre(pcResponse);
-
-        var rows = WarehouseHelpers.ParseStockRows(response, profitCentres);
+        // PRCTR lives on MARC, not LQUA, so Profit Centre can only be filled in
+        // via a second, unfiltered whole-plant MATNR→PRCTR pull (same pattern as
+        // PerformanceController's stock endpoint). That pull is expensive, so it
+        // only runs when a caller actually filters by Profit Centre — an
+        // ordinary stock search skips it and gets rows back with ProfitCentre
+        // left blank.
+        StockRow[] rows;
         if (!string.IsNullOrWhiteSpace(query.ProfitCentre))
-            rows = rows.Where(r => string.Equals(r.ProfitCentre, query.ProfitCentre, StringComparison.OrdinalIgnoreCase)).ToArray();
+        {
+            var pcResponse = await _pool.ExecuteAsync(PerformanceHelpers.BuildMaterialProfitCentre(), ct);
+            var profitCentres = PerformanceHelpers.ParseMaterialProfitCentre(pcResponse);
+
+            rows = WarehouseHelpers.ParseStockRows(response, profitCentres)
+                .Where(r => string.Equals(r.ProfitCentre, query.ProfitCentre, StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+        }
+        else
+        {
+            rows = WarehouseHelpers.ParseStockRows(response);
+        }
 
         return Ok(ApiResponse<StockRow[]>.Ok(rows));
     }
