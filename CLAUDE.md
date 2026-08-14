@@ -49,7 +49,7 @@ dotnet test
 
 **Deploy via Task Scheduler, not Windows Service.** The SAP OCX requires an interactive user session. Running under Session 0 (Windows Services) causes `AccessViolationException`. `install.ps1` registers an `AtLogon`-triggered Task Scheduler task instead, which keeps the process in the interactive user session.
 
-**Secrets via machine-level environment variables.** `Auth__JwtSecret` and `SapPool__ServiceAccount__Password` (and `__User`) are set as Windows machine-level env vars by `install.ps1`, not stored in config files. `appsettings.json` has empty/placeholder values for these — see `appsettings.example.json`.
+**`Auth:JwtSecret` via a machine-level environment variable, SAP credentials directly in the config file.** `Auth__JwtSecret` is set as a Windows machine env var by `install.ps1` (shared with sql2005-bridge, so not something edited per-deployment). `SapPool:ServiceAccount`/`ServiceAccounts` (SAP service account credentials — one or several, see the STA Thread Pool section below) are kept directly in `appsettings.Production.json` instead — that file is `.gitignore`'d the same as `appsettings.json`, and a plain config file is far easier to maintain than machine env vars once there's more than one account. `appsettings.example.json` has placeholder values for both — see it for the full shape.
 
 ## Architecture
 

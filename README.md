@@ -190,7 +190,7 @@ Copy `appsettings.example.json` → `appsettings.json` and fill in all values:
 
 `ServiceAccounts` is optional — omit it (and just fill in `ServiceAccount`) to keep every service worker logged in as one shared account, the original behaviour. When present, worker *i* logs in as `ServiceAccounts[i % ServiceAccounts.Count]`.
 
-> **Security:** Keep `appsettings.json` out of source control. Set secrets via environment variables in production: `SapPool__ServiceAccount__Password` (or, per-account, `SapPool__ServiceAccounts__0__User` / `__0__Password`, `__1__User` / `__1__Password`, etc.), `Auth__JwtSecret`, etc.
+> **Security:** Keep `appsettings.json`/`appsettings.Production.json` out of source control (both already `.gitignore`'d) — that's what protects the SAP account credentials in `SapPool:ServiceAccount`/`ServiceAccounts`, kept directly in the config file rather than machine environment variables since that's far easier to maintain once there's more than one account. `Auth:JwtSecret` is the one secret still set via an env var (`install.ps1` prompts for it) — it's shared with sql2005-bridge, so it isn't something you'd otherwise be editing per-account the way SAP credentials are.
 
 ### 4. Add JWT issuance to sql2005-bridge
 

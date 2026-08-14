@@ -17,50 +17,22 @@ $secretPlain = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
 
 if ($secretPlain.Length -lt 32) { Write-Error "Secret must be at least 32 characters."; exit 1 }
 
-# ---- SAP credentials -------------------------------------------------------
-Write-Host ""
-Write-Host "Enter SAP service account credentials (stored as machine env vars)."
-Write-Host "Enter 1 to keep every service worker on a single shared account (the"
-Write-Host "original behaviour), or more to give each worker its own SAP login"
-Write-Host "(SapPool:ServiceWorkerCount workers cycle round-robin through however"
-Write-Host "many accounts you enter here, e.g. 4 workers over 4 accounts = 1:1)."
-$accountCountInput = Read-Host "  How many service accounts? [1]"
-$accountCount = 1
-if ($accountCountInput -and [int]::TryParse($accountCountInput, [ref]$accountCount)) {
-    if ($accountCount -lt 1) { $accountCount = 1 }
-} else {
-    $accountCount = 1
-}
-
 # ---- Machine environment variables ----------------------------------------
 Write-Host "Setting environment variables..."
 [System.Environment]::SetEnvironmentVariable('ASPNETCORE_ENVIRONMENT', 'Production', 'Machine')
 [System.Environment]::SetEnvironmentVariable('Auth__JwtSecret',        $secretPlain, 'Machine')
 
-for ($i = 0; $i -lt $accountCount; $i++) {
-    Write-Host ""
-    Write-Host "Service account $($i + 1) of $accountCount`:"
-    $sapUser = Read-Host "  SAP Username"
-    $sapPass = Read-Host "  SAP Password" -AsSecureString
-    $sapPassPlain = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
-        [Runtime.InteropServices.Marshal]::SecureStringToBSTR($sapPass))
-
-    # A single account still goes through SapPool:ServiceAccounts (index 0) —
-    # SapConnectionPool.SelectWorker routes every worker to ServiceAccounts[0]
-    # in that case, which is equivalent to the old single-ServiceAccount
-    # behaviour, so there's no need to also set the legacy
-    # SapPool__ServiceAccount__User/Password pair here.
-    [System.Environment]::SetEnvironmentVariable("SapPool__ServiceAccounts__${i}__User",     $sapUser,      'Machine')
-    [System.Environment]::SetEnvironmentVariable("SapPool__ServiceAccounts__${i}__Password", $sapPassPlain, 'Machine')
-}
-
+# ---- SAP credentials --------------------------------------------------------
+# Deliberately NOT prompted for here / set as env vars — SAP service account(s)
+# live directly in appsettings.Production.json's SapPool:ServiceAccount (single
+# account) or SapPool:ServiceAccounts (array, one login per service worker,
+# see README.md), same as every other non-secret SapPool setting. That file is
+# already .gitignore'd, same protection env vars would have given, but a lot
+# easier to maintain when there's more than one account to keep track of.
 Write-Host ""
-Write-Host "Reminder: SapPool:ServiceAccount (singular) in appsettings.Production.json"
-Write-Host "still needs its System/Client/SystemId/Language filled in — Purchasing/"
-Write-Host "PackagingController's elevated endpoints read that as the shared"
-Write-Host "connection profile regardless of how many ServiceAccounts you just set."
-Write-Host "Also set SapPool:ServiceWorkerCount to $accountCount (or a multiple of it)"
-Write-Host "in appsettings.Production.json so every account actually gets used."
+Write-Host "Reminder: fill in SapPool:ServiceAccount (and SapPool:ServiceAccounts if" -ForegroundColor Yellow
+Write-Host "you want more than one login) directly in appsettings.Production.json"    -ForegroundColor Yellow
+Write-Host "before starting the service — it's no longer set via this script."        -ForegroundColor Yellow
 
 # ---- Register Task Scheduler task ------------------------------------------
 Write-Host "Registering scheduled task '$taskName'..."
