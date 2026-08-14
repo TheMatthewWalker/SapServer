@@ -573,17 +573,25 @@ internal static class WarehouseHelpers
 
     // ── Open Transfer Requirements (LTBK/LTBP) ──────────────────────────────────
     //
-    // Mirrors wm_open_tr.xltm's Get_LAGP_LQUA sub exactly (its name is a
-    // leftover from an earlier version of that macro — it has always
-    // queried LTBK/LTBP/MARC/MKPF, not LAGP/LQUA): same 4-table join, same
-    // field list, same WHERE clause the warehouse team's own Excel macro has
-    // used for years to list open Transfer Requirements ready for LT04.
+    // Mirrors wm_open_tr.xltm's Get_LAGP_LQUA sub (its name is a leftover
+    // from an earlier version of that macro — it has always queried
+    // LTBK/LTBP/MARC/MKPF, not LAGP/LQUA): same 4-table join, same field
+    // list, and the macro's own LTBK~STATU <> 'E' / LTBP~BESTQ = '' WHERE
+    // conditions, plus one extra condition (LTBK~TRART <> 'E') added on top
+    // of the macro's own filter — see below.
     //
     // LTBK~STATU NE 'E' excludes only error/cancelled TR headers — there's
     // no explicit "not yet converted to a TO" flag in this select, because
     // this SAP system evidently doesn't need one for TRs generated from a
     // 131 movement (once fully converted, the LTBP row simply stops
     // appearing here, same assumption the macro has always relied on).
+    // LTBK~TRART NE 'E' additionally excludes TR headers relating to a
+    // goods receipt (not present in the macro; added deliberately here).
+    // NOTE: this field was briefly swapped out for LTBP~ELIKZ <> 'X' (an
+    // accidental side effect of an unrelated commit) which silently
+    // filtered out TRs the macro correctly showed — if the Nexus tile ever
+    // again shows fewer/no rows compared to the macro, check this WHERE
+    // clause against get_tr.bas's Get_LAGP_LQUA sub first.
     // LTBP~BESTQ EQ '' excludes quality-blocked items (BESTQ 'Q') — the same
     // gate CheckQualityBlock enforces again per-item immediately before
     // posting, so a blocked line never shows up as pickable in the first
@@ -635,7 +643,7 @@ internal static class WarehouseHelpers
             .TableItemRow("join_FIELDS", new { TAB_FROM = "LTBK", FLD_FROM = "MBLNR", TAB_TO = "MKPF", FLD_TO = "MBLNR" });
 
         builder.WhereCondition($"LTBP~LGNUM EQ '{Warehouse}'");
-        builder.WhereCondition("LTBP~ELIKZ <> 'X'"); // Remove TR's already processed
+        builder.WhereCondition("LTBK~STATU <> 'E'"); // Remove TR's already processed
         builder.WhereCondition("LTBK~TRART <> 'E'"); // Remove TR's relating to GR.
         builder.WhereCondition("LTBP~BESTQ EQ ''"); // Only show TR's for unrestricted stock (not quality blocked)
 
