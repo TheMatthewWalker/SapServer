@@ -29,6 +29,13 @@ internal sealed class SapStaWorker : IDisposable
     private readonly ILogger _logger;
     private readonly CancellationTokenSource _cts = new();
 
+    // This worker's own service-account login — assigned once at construction
+    // (see SapConnectionPool's constructor, which hands out SapPoolOptions.
+    // ServiceAccounts[i % count] per worker when that list is populated).
+    // Only meaningful for non-elevated workers; elevated workers never use
+    // this (they log in solely via LogonElevatedAsync's per-user creds).
+    private readonly SapConnectionOptions _serviceAccount;
+
     // Prevents concurrent SAPFunctions64 COM initialization across STA threads.
     // The OCX has a race in its constructor/Connection property when multiple instances
     // are created simultaneously — serializing here eliminates the AccessViolationException
@@ -57,13 +64,15 @@ internal sealed class SapStaWorker : IDisposable
     /// </summary>
     public bool IsElevated { get; }
 
-    public SapStaWorker(int slotId, SapPoolOptions options, ILogger logger, bool isElevated = false)
+    public SapStaWorker(int slotId, SapPoolOptions options, ILogger logger, bool isElevated = false,
+        SapConnectionOptions? serviceAccount = null)
     {
-        SlotId      = slotId;
-        _options    = options;
-        _logger     = logger;
-        IsElevated  = isElevated;
-        _queue      = new BlockingCollection<SapWorkItem>(options.MaxQueueDepth);
+        SlotId          = slotId;
+        _options        = options;
+        _logger         = logger;
+        IsElevated      = isElevated;
+        _serviceAccount = serviceAccount ?? options.ServiceAccount;
+        _queue          = new BlockingCollection<SapWorkItem>(options.MaxQueueDepth);
 
         _staThread = new Thread(WorkerLoop)
         {
@@ -282,16 +291,19 @@ internal sealed class SapStaWorker : IDisposable
     /// <summary>
     /// Logs this worker's SAP session in. Service workers (and any internal
     /// reconnect/retry path) always call this with no argument, which logs in
-    /// as the shared <see cref="SapPoolOptions.ServiceAccount"/> — the original
-    /// behavior. Elevated workers are logged in ONLY via <paramref name="overrideCreds"/>,
-    /// supplied by <see cref="LogonElevatedAsync"/> with one specific user's own
-    /// SAP credentials, decrypted just-in-time by the caller (Node) — see
+    /// as <see cref="_serviceAccount"/> — this worker's own assigned account
+    /// (either one entry of <see cref="SapPoolOptions.ServiceAccounts"/>, or
+    /// the single shared <see cref="SapPoolOptions.ServiceAccount"/> when that
+    /// list is empty — see the constructor). Elevated workers are logged in
+    /// ONLY via <paramref name="overrideCreds"/>, supplied by
+    /// <see cref="LogonElevatedAsync"/> with one specific user's own SAP
+    /// credentials, decrypted just-in-time by the caller (Node) — see
     /// lib/sapCredentials.js in the sql2005-bridge app for why decryption
     /// happens there rather than here.
     /// </summary>
     private void Connect(SapConnectionOptions? overrideCreds = null)
     {
-        var creds = overrideCreds ?? _options.ServiceAccount;
+        var creds = overrideCreds ?? _serviceAccount;
 
         _connectLock.Wait();
         try

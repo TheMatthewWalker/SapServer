@@ -59,8 +59,8 @@ SapServer is an ASP.NET Core 10 REST API that wraps the SAP GUI `SAPFunctions64`
 
 `SapConnectionPool` (singleton, `Services/SapConnectionPool.cs`) maintains **two separate groups** of `SapStaWorker`, each owning one dedicated STA thread and one SAP COM session:
 
-- **Service workers** (`SapPool:ServiceWorkerCount`, default 3) — always logged in as the shared `ServiceAccount`, for the lifetime of the process. `ExecuteAsync`/`AcquireWorker` (i.e. every ordinary RFC call from `RfcController` and the domain controllers below) only ever route to this group via least-loaded selection (`SelectWorker()`).
-- **Elevated workers** (`SapPool:ElevatedWorkerCount`, default 3) — created **logged out**. `AcquireElevatedWorkerAsync(creds)` claims one via a semaphore (queues up to `ElevatedAcquireTimeoutSeconds`, then throws `PoolExhaustedException`), logs it in with one specific user's own SAP credentials for the duration of a single elevated request (e.g. PO creation in `PurchasingController`/`PackagingController`'s `-elevated` endpoints), then `ReleaseElevatedWorkerAsync` **must** be called in a `finally` block to log it back out and return it to the pool. This is what stops one user's elevated session ever being reused for another user — it is not just a bigger version of the service pool.
+- **Service workers** (`SapPool:ServiceWorkerCount`, default 4) — always logged in, for the lifetime of the process. Logs in as one entry of `SapPool:ServiceAccounts` (worker *i* → `ServiceAccounts[i % Count]`) when that array is populated, otherwise every worker shares the single `SapPool:ServiceAccount` (the original behavior) — see `SapStaWorker`'s `serviceAccount` ctor param. `ExecuteAsync`/`AcquireWorker` (i.e. every ordinary RFC call from `RfcController` and the domain controllers below) only ever route to this group via least-loaded selection with round-robin tiebreaking (`SelectWorker()`) — confirmed against real per-call slot/thread logging (`SapConnectionPool.ExecuteAsync` logs the routed-to slot at enqueue time; `SapStaWorker.ProcessItem` logs its own managed thread id at start/finish) after a prior version of `SelectWorker()` turned out to be a plain first-minimum-wins scan with no actual tiebreak, silently serializing bursts onto slot 0.
+- **Elevated workers** (`SapPool:ElevatedWorkerCount`, default 2) — created **logged out**. `AcquireElevatedWorkerAsync(creds)` claims one via a semaphore (queues up to `ElevatedAcquireTimeoutSeconds`, then throws `PoolExhaustedException`), logs it in with one specific user's own SAP credentials for the duration of a single elevated request (e.g. PO creation in `PurchasingController`/`PackagingController`'s `-elevated` endpoints), then `ReleaseElevatedWorkerAsync` **must** be called in a `finally` block to log it back out and return it to the pool. This is what stops one user's elevated session ever being reused for another user — it is not just a bigger version of the service pool.
 
 Total STA threads started at startup = `ServiceWorkerCount + ElevatedWorkerCount`; size relative to your SAP system's concurrent-user license count, not CPU count.
 
@@ -138,7 +138,8 @@ Dev bypass: `Auth:DevBypassAuth=true` (Development environment only) swaps in `D
 
 | Key | Purpose |
 |-----|---------|
-| `SapPool:ServiceWorkerCount` / `ElevatedWorkerCount` | Worker counts per group (default 3 + 3) |
+| `SapPool:ServiceWorkerCount` / `ElevatedWorkerCount` | Worker counts per group (default 4 + 2) |
+| `SapPool:ServiceAccounts` | Optional array of per-worker service accounts (worker *i* → `ServiceAccounts[i % Count]`); falls back to the single `ServiceAccount` for every worker when empty |
 | `SapPool:ElevatedAcquireTimeoutSeconds` | Max wait for a free elevated slot before `PoolExhaustedException` (default 30) |
 | `SapPool:MaxQueueDepth` | Per-worker queued-item cap before rejecting new work (default 50) |
 | `SapPool:IdleTimeoutSeconds` / `HealthCheckIntervalSeconds` | Keep-alive ping threshold / monitor tick interval |

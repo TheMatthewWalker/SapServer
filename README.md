@@ -63,12 +63,14 @@ The pool is split into two groups of workers, each configured in `appsettings.js
 
 | Group | Setting | Behaviour |
 |-------|---------|-----------|
-| Service | `SapPool:ServiceWorkerCount` (default `3`) | Always logged in as `SapPool:ServiceAccount`. Handles every ordinary RFC call. |
-| Elevated | `SapPool:ElevatedWorkerCount` (default `3`) | Created logged **out**. Only logged in on demand with one specific user's own SAP credentials, for the duration of one elevated request (e.g. PO creation), then logged back out. Prevents one user's elevated session ever being reused for another user. |
+| Service | `SapPool:ServiceWorkerCount` (default `4`) | Always logged in. Handles every ordinary RFC call. |
+| Elevated | `SapPool:ElevatedWorkerCount` (default `2`) | Created logged **out**. Only logged in on demand with one specific user's own SAP credentials, for the duration of one elevated request (e.g. PO creation), then logged back out. Prevents one user's elevated session ever being reused for another user. |
 
 `SapPool:ElevatedAcquireTimeoutSeconds` (default `30`) caps how long a caller waits for a free elevated slot if all of them are busy.
 
 Each worker holds its own STA thread; a service worker also holds one persistent SAP COM session for the app's lifetime, while an elevated worker only holds one for the duration of a single elevated request. Set `ServiceWorkerCount`/`ElevatedWorkerCount` based on your SAP system's concurrent user licence count, not just CPU count — total STA threads started is `ServiceWorkerCount + ElevatedWorkerCount`.
+
+**Service account(s):** by default every service worker logs in as the single `SapPool:ServiceAccount`. To instead give each service worker its own distinct SAP login — e.g. so concurrent postings aren't all attributed to one shared account in SAP's own change logs, or to sidestep whatever behaviour your SAP system has for the same account logging in multiple times at once — populate `SapPool:ServiceAccounts` as an array. Worker *i* logs in as `ServiceAccounts[i % ServiceAccounts.Count]`, wrapping round-robin if there are fewer accounts than workers (e.g. 2 accounts covering 4 workers). `ServiceAccount` (singular) still has to be filled in even when `ServiceAccounts` is used — `PurchasingController`/`PackagingController`'s elevated endpoints read its System/Client/SystemId/Language as the shared connection profile regardless. Leave `ServiceAccounts` empty/unset to keep the original single-account behaviour.
 
 ### Session keep-alive
 
@@ -159,8 +161,8 @@ Copy `appsettings.example.json` → `appsettings.json` and fill in all values:
 ```json
 {
   "SapPool": {
-    "ServiceWorkerCount": 3,
-    "ElevatedWorkerCount": 3,
+    "ServiceWorkerCount": 4,
+    "ElevatedWorkerCount": 2,
     "ServiceAccount": {
       "System":   "SAP",
       "Client":   "100",
@@ -168,7 +170,13 @@ Copy `appsettings.example.json` → `appsettings.json` and fill in all values:
       "User":     "SVC_SAPAPI",
       "Password": "...",
       "Language": "EN"
-    }
+    },
+    "ServiceAccounts": [
+      { "System": "SAP", "Client": "100", "SystemId": "01", "User": "SVC_SAPAPI1", "Password": "...", "Language": "EN" },
+      { "System": "SAP", "Client": "100", "SystemId": "01", "User": "SVC_SAPAPI2", "Password": "...", "Language": "EN" },
+      { "System": "SAP", "Client": "100", "SystemId": "01", "User": "SVC_SAPAPI3", "Password": "...", "Language": "EN" },
+      { "System": "SAP", "Client": "100", "SystemId": "01", "User": "SVC_SAPAPI4", "Password": "...", "Language": "EN" }
+    ]
   },
   "Auth": {
     "JwtSecret":           "min-32-char-random-secret-shared-with-sql2005-bridge",
@@ -180,7 +188,9 @@ Copy `appsettings.example.json` → `appsettings.json` and fill in all values:
 }
 ```
 
-> **Security:** Keep `appsettings.json` out of source control. Set secrets via environment variables in production: `SapPool__ServiceAccount__Password`, `Auth__JwtSecret`, etc.
+`ServiceAccounts` is optional — omit it (and just fill in `ServiceAccount`) to keep every service worker logged in as one shared account, the original behaviour. When present, worker *i* logs in as `ServiceAccounts[i % ServiceAccounts.Count]`.
+
+> **Security:** Keep `appsettings.json` out of source control. Set secrets via environment variables in production: `SapPool__ServiceAccount__Password` (or, per-account, `SapPool__ServiceAccounts__0__User` / `__0__Password`, `__1__User` / `__1__Password`, etc.), `Auth__JwtSecret`, etc.
 
 ### 4. Add JWT issuance to sql2005-bridge
 
@@ -309,8 +319,9 @@ All errors use the same envelope:
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `SapPool:ServiceWorkerCount` | `3` | Always-logged-in workers for ordinary RFC calls |
-| `SapPool:ElevatedWorkerCount` | `3` | Logged-out-by-default workers for per-user elevated calls |
+| `SapPool:ServiceWorkerCount` | `4` | Always-logged-in workers for ordinary RFC calls |
+| `SapPool:ElevatedWorkerCount` | `2` | Logged-out-by-default workers for per-user elevated calls |
+| `SapPool:ServiceAccounts` | *(empty)* | Optional array of per-worker service accounts — worker *i* uses `ServiceAccounts[i % Count]`; falls back to the single `ServiceAccount` for every worker when empty |
 | `SapPool:ElevatedAcquireTimeoutSeconds` | `30` | Max wait for a free elevated slot |
 | `SapPool:MaxQueueDepth` | `50` | Max queued requests per worker |
 | `SapPool:IdleTimeoutSeconds` | `300` | Ping threshold (5 min) |

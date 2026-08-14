@@ -52,9 +52,20 @@ public sealed class SapConnectionPool : ISapConnectionPool, IDisposable
 
         var opts = options.Value;
 
+        // When SapPool:ServiceAccounts is populated, each service worker gets its
+        // own SAP login (wrapping round-robin if there are fewer accounts than
+        // workers) instead of every worker sharing the single ServiceAccount —
+        // see SapPoolOptions.ServiceAccounts and SapStaWorker's serviceAccount ctor
+        // param. An empty/unset list falls back to the original single-account
+        // behavior for every worker.
         _workers = new SapStaWorker[opts.ServiceWorkerCount];
         for (int i = 0; i < _workers.Length; i++)
-            _workers[i] = new SapStaWorker(i, opts, loggerFactory.CreateLogger<SapStaWorker>());
+        {
+            var account = opts.ServiceAccounts.Count > 0
+                ? opts.ServiceAccounts[i % opts.ServiceAccounts.Count]
+                : null; // SapStaWorker falls back to opts.ServiceAccount itself when null
+            _workers[i] = new SapStaWorker(i, opts, loggerFactory.CreateLogger<SapStaWorker>(), serviceAccount: account);
+        }
 
         // Elevated slot IDs continue on from the service slot IDs so every
         // worker in the pool has a unique SlotId for logging/health-status purposes.
