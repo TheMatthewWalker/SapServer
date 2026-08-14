@@ -96,6 +96,7 @@ ASP.NET Core deserializes `object?` parameters as `JsonElement`. `SapStaWorker.U
 | `LogisticsController` | `api/logistics` | Open picksheets |
 | `ConsignmentController` | `api/consignment` | Vendor consignment goods-receipt + stock lookups |
 | `PerformanceController` | `api/performance` | Stock, agreements, VBFA order-link, invoicing, OTIF, MM Turns/Valuation Class (+ change-valuation-class) |
+| `SalesController` | `api/sales` | Schedule Agreement Waterfall — VBAK/VBAP/VBLB/VBEH (history) + VBAK/VBAP/VBLB/VBEP (current) joined reads, backing Normanton-Nexus's sales-page rebuild of `sd_waterfall.xltm` |
 | `FunctionController` | `api/function` | Generic RFC function parameter introspection |
 | `RfcController` | `api/rfc` | Generic execute/status (original, still used directly by some callers) |
 
@@ -132,7 +133,7 @@ Dev bypass: `Auth:DevBypassAuth=true` (Development environment only) swaps in `D
 
 ### Domain Helpers
 
-`Helpers/` holds typed RFC/BAPI request builders and response parsers, one broadly per business area: `ProductionHelpers`, `PurchasingHelper`, `WarehouseHelpers`, `QualityHelpers`, `PackagingHelpers`, `CostingHelper`, `CustomsHelpers`, `LogisticsHelpers`, `ConsignmentHelpers`, `PerformanceHelpers`, `FunctionHelper`, plus cross-cutting ones: `BdcBuilder` (BDC/session-based posting helpers), `RfcRequestBuilder`/`RfcRowHelpers` (generic request/table-row construction), `ReturnTableHelper` (parsing SAP's RETURN/BAPIRETURN messages), `GoodsReceiptHelper`, `StockAdjustmentHelper`, `ZdelflagHelpers`, `SapDelimitedParser` (WA/delimited raw-table parsing for `ZRFC_READ_TABLES`-style reads), `SapPad` (material-number/field zero-padding), `WhereClauseBuilder`, `CommitHelpers`. New SAP integrations should add a helper here rather than putting COM logic in a controller.
+`Helpers/` holds typed RFC/BAPI request builders and response parsers, one broadly per business area: `ProductionHelpers`, `PurchasingHelper`, `WarehouseHelpers`, `QualityHelpers`, `PackagingHelpers`, `CostingHelper`, `CustomsHelpers`, `LogisticsHelpers`, `ConsignmentHelpers`, `PerformanceHelpers`, `SalesHelpers`, `FunctionHelper`, plus cross-cutting ones: `BdcBuilder` (BDC/session-based posting helpers), `RfcRequestBuilder`/`RfcRowHelpers` (generic request/table-row construction), `ReturnTableHelper` (parsing SAP's RETURN/BAPIRETURN messages), `GoodsReceiptHelper`, `StockAdjustmentHelper`, `ZdelflagHelpers`, `SapDelimitedParser` (WA/delimited raw-table parsing for `ZRFC_READ_TABLES`-style reads), `SapPad` (material-number/field zero-padding), `WhereClauseBuilder`, `CommitHelpers`. New SAP integrations should add a helper here rather than putting COM logic in a controller.
 
 ## Key Configuration Keys
 
