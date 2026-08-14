@@ -644,7 +644,7 @@ internal static class WarehouseHelpers
 
         builder.WhereCondition($"LTBP~LGNUM EQ '{Warehouse}'");
         builder.WhereCondition("LTBK~STATU <> 'E'"); // Remove TR's already processed
-        builder.WhereCondition("LTBK~TRART <> 'E'"); // Remove TR's relating to GR.
+        builder.WhereCondition("LTBK~VLTYP <> '902'"); // Remove TR's relating to GR.
         builder.WhereCondition("LTBP~BESTQ EQ ''"); // Only show TR's for unrestricted stock (not quality blocked)
 
         if (!string.IsNullOrWhiteSpace(query.MrpController))
