@@ -239,19 +239,24 @@ public class WarehouseHelpersTests
         var whereText = string.Join(" ", request.InputTablesItems["where_clause"].Select(r => r["TEXT"]));
 
         Assert.Contains("LQUA~MATNR EQ '30005R'", whereText);
-        Assert.DoesNotContain("CP", whereText);
+        Assert.DoesNotContain("LIKE", whereText);
     }
 
-    [Fact]
-    public void BuildStockRequest_material_with_a_wildcard_uses_CP_pattern_match_unpadded()
+    // Wildcard search is opt-in — only kicks in when the caller actually types
+    // a '%' or '_' (native SQL wildcards — this Z-RFC runs a LIKE, not an ABAP
+    // CP comparison) — so a plain material search elsewhere keeps behaving
+    // exactly as before (see the EQ test above).
+    [Theory]
+    [InlineData("tshv%",  "LQUA~MATNR LIKE 'TSHV%'")]   // starts with
+    [InlineData("%tshv",  "LQUA~MATNR LIKE '%TSHV'")]   // ends with
+    [InlineData("%tshv%", "LQUA~MATNR LIKE '%TSHV%'")]  // contains
+    [InlineData("tsh_v",  "LQUA~MATNR LIKE 'TSH_V'")]   // single-char wildcard
+    public void BuildStockRequest_material_with_a_wildcard_uses_LIKE_pattern_match_unpadded(string material, string expectedCondition)
     {
-        // Wildcard search is opt-in — only kicks in when the caller actually
-        // types a '*' — so a plain material search elsewhere keeps behaving
-        // exactly as before (see the EQ test above).
-        var request = WarehouseHelpers.BuildStockRequest(new StockQuery { Material = "tshv*" });
+        var request = WarehouseHelpers.BuildStockRequest(new StockQuery { Material = material });
         var whereText = string.Join(" ", request.InputTablesItems["where_clause"].Select(r => r["TEXT"]));
 
-        Assert.Contains("LQUA~MATNR CP 'TSHV*'", whereText);
+        Assert.Contains(expectedCondition, whereText);
         Assert.DoesNotContain("MATNR EQ", whereText);
     }
 

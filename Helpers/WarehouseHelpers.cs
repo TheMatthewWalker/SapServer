@@ -48,12 +48,15 @@ internal static class WarehouseHelpers
 
         if (!string.IsNullOrWhiteSpace(query.Material))
         {
-            // Wildcard search is opt-in: a caller has to type '*' themselves
-            // (e.g. "TSHV*") to get a pattern match (ABAP CP, '*'/'+' wildcards)
-            // — plain material numbers keep going through the padded exact-match
-            // EQ below, unchanged from before.
-            if (query.Material.Contains('*'))
-                builder.WhereCondition($"LQUA~MATNR CP '{query.Material.ToUpperInvariant()}'");
+            // Wildcard search is opt-in: a caller has to type '%' or '_'
+            // themselves (native SQL wildcards, not ABAP's CP/'*' — this Z-RFC
+            // runs a LIKE, not an Open SQL CP comparison) to get a pattern
+            // match, e.g. "TSHV%" (starts with), "%TSHV" (ends with),
+            // "%TSHV%" (contains), "TSH_V" (single-char wildcard). A plain
+            // material number with neither character keeps going through the
+            // padded exact-match EQ below, unchanged from before.
+            if (query.Material.Contains('%') || query.Material.Contains('_'))
+                builder.WhereCondition($"LQUA~MATNR LIKE '{query.Material.ToUpperInvariant()}'");
             else
                 builder.WhereCondition($"LQUA~MATNR EQ '{SapPad.Pad(query.Material, 18)}'");
         }
