@@ -10,29 +10,26 @@ $exePath    = "$PSScriptRoot\..\publish\SapServer.exe"
 $exePath    = (Resolve-Path $exePath).Path
 $workingDir = Split-Path $exePath
 
-# ---- JWT secret ------------------------------------------------------------
-$secret = Read-Host "Enter Auth__JwtSecret (shared with sql2005-bridge)" -AsSecureString
-$secretPlain = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
-    [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secret))
-
-if ($secretPlain.Length -lt 32) { Write-Error "Secret must be at least 32 characters."; exit 1 }
-
 # ---- Machine environment variables ----------------------------------------
+# ASPNETCORE_ENVIRONMENT has to be an env var (or command-line arg) — it's what
+# tells ASP.NET Core which appsettings.{Environment}.json to layer on top of
+# appsettings.json in the first place, so there's no config-file equivalent to
+# put it in instead.
 Write-Host "Setting environment variables..."
 [System.Environment]::SetEnvironmentVariable('ASPNETCORE_ENVIRONMENT', 'Production', 'Machine')
-[System.Environment]::SetEnvironmentVariable('Auth__JwtSecret',        $secretPlain, 'Machine')
 
-# ---- SAP credentials --------------------------------------------------------
-# Deliberately NOT prompted for here / set as env vars — SAP service account(s)
-# live directly in appsettings.Production.json's SapPool:ServiceAccount (single
-# account) or SapPool:ServiceAccounts (array, one login per service worker,
-# see README.md), same as every other non-secret SapPool setting. That file is
-# already .gitignore'd, same protection env vars would have given, but a lot
-# easier to maintain when there's more than one account to keep track of.
+# ---- Secrets ----------------------------------------------------------------
+# Deliberately NOT prompted for here / set as env vars — Auth:JwtSecret and
+# SapPool:ServiceAccount(s) (SAP service account credentials — one or several,
+# see README.md) live directly in appsettings.Production.json instead, same as
+# every other setting. That file is already .gitignore'd, same protection env
+# vars would have given, but much easier to maintain — no separate step to
+# remember, no re-running this script just to rotate a value.
 Write-Host ""
-Write-Host "Reminder: fill in SapPool:ServiceAccount (and SapPool:ServiceAccounts if" -ForegroundColor Yellow
-Write-Host "you want more than one login) directly in appsettings.Production.json"    -ForegroundColor Yellow
-Write-Host "before starting the service — it's no longer set via this script."        -ForegroundColor Yellow
+Write-Host "Reminder: fill in Auth:JwtSecret (shared with sql2005-bridge) and"        -ForegroundColor Yellow
+Write-Host "SapPool:ServiceAccount / ServiceAccounts directly in"                     -ForegroundColor Yellow
+Write-Host "appsettings.Production.json before starting the service — neither is"     -ForegroundColor Yellow
+Write-Host "set via this script."                                                     -ForegroundColor Yellow
 
 # ---- Register Task Scheduler task ------------------------------------------
 Write-Host "Registering scheduled task '$taskName'..."
