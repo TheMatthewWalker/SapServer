@@ -34,6 +34,22 @@ public sealed class ProfitCentreRequest
 
 }
 
+// ── Bulk Profit Centre (MARC, multiple materials in one call) ──────────────
+// One round trip for N materials instead of N single-material
+// check-profit-centre calls — used to classify every BOM component in one
+// go (raw material, profit centre 2012 — no portal production record
+// exists for these, so traceability there is a hand-written SAP batch
+// number rather than something to resolve — vs. a portal-tracked
+// semi-finished material). Same IN opt / value_list bulk pattern as
+// CustomsHelpers.BuildMarcRequest. Response rows reuse the existing
+// SapServer.Models.ProfitCentreRow { Material, ProfitCentre } (declared in
+// PerformanceModels.cs but not namespace-scoped under .Bapi like this
+// file — see that file — so no separate type is redeclared here).
+public sealed class ProfitCentresRequest
+{
+    public List<string> Materials { get; init; } = [];
+}
+
 
 public sealed class KgToUnitQuery
 {

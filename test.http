@@ -366,3 +366,17 @@ Authorization: Bearer {{token}}
     ]
 }
 ###
+
+
+### GET /api/production/check-profit-centres  (bulk MARC~PRCTR lookup — one
+### round trip for every BOM component, classifying raw materials, profit
+### centre 2012, vs. portal-tracked semi-finished materials. Same IN opt /
+### value_list pattern as CustomsHelpers' MARC lookup.)
+GET {{baseUrl}}/api/production/check-profit-centres
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+    "Materials": ["30005R", "30007R", "TCEL9-9CBT"]
+}
+###

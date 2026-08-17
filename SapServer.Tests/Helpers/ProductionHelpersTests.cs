@@ -183,4 +183,74 @@ public class ProductionHelpersTests
     {
         Assert.Equal("", ProductionHelpers.ParseOrderText(new RfcResponse()));
     }
+
+    // ── Bulk Profit Centre ──────────────────────────────────────────────────
+
+    [Fact]
+    public void BuildProfitCentresRequest_filters_by_plant_and_upper_cased_padded_materials()
+    {
+        var request = ProductionHelpers.BuildProfitCentresRequest(new ProfitCentresRequest { Materials = ["30005r", "12345678"] });
+
+        var whereRows = request.InputTablesItems["where_clause"];
+        var whereClauses = string.Join(" ", whereRows.Select(r => r["TEXT"]));
+        Assert.Contains("MARC~WERKS EQ '3012'", whereClauses);
+        Assert.Contains("MARC~MATNR IN opt", whereClauses);
+    }
+
+    [Fact]
+    public void BuildProfitCentresRequest_writes_one_value_list_row_per_material_padded_and_upper_cased()
+    {
+        var request = ProductionHelpers.BuildProfitCentresRequest(new ProfitCentresRequest { Materials = ["30005r", "12345678"] });
+
+        var rows = request.InputTablesItems["value_list"];
+        Assert.Equal(2, rows.Count);
+        Assert.Contains(rows, r => (string?)r["LOW"] == "30005R");
+        Assert.Contains(rows, r => (string?)r["LOW"] == "000000000012345678"); // 18-char zero-pad of the purely-numeric material
+        Assert.All(rows, r =>
+        {
+            Assert.Equal("MARC", r["TABNAME"]);
+            Assert.Equal("MATNR", r["FIELDNAME"]);
+            Assert.Equal("I", r["SIGN"]);
+            Assert.Equal("EQ", r["OPTION"]);
+            Assert.Equal("", r["HIGH"]);
+        });
+    }
+
+    [Fact]
+    public void BuildProfitCentresRequest_is_not_rowcount_limited_unlike_the_single_material_variant()
+    {
+        var request = ProductionHelpers.BuildProfitCentresRequest(new ProfitCentresRequest { Materials = ["30005R"] });
+        Assert.False(request.ImportParameters.ContainsKey("ROWCOUNT"));
+    }
+
+    [Fact]
+    public void ParseProfitCentreRows_parses_delimited_material_and_profit_centre_pairs()
+    {
+        var response = new RfcResponse
+        {
+            Tables = new()
+            {
+                ["data_display"] = new()
+                {
+                    new() { ["WA"] = "MATNR|PRCTR" }, // header — skipped
+                    new() { ["WA"] = "30005R|0000002012" },
+                    new() { ["WA"] = "30006R|0000002002" },
+                }
+            }
+        };
+
+        var rows = ProductionHelpers.ParseProfitCentreRows(response);
+
+        Assert.Equal(2, rows.Length);
+        Assert.Equal("30005R", rows[0].Material);
+        Assert.Equal("0000002012", rows[0].ProfitCentre);
+        Assert.Equal("30006R", rows[1].Material);
+        Assert.Equal("0000002002", rows[1].ProfitCentre);
+    }
+
+    [Fact]
+    public void ParseProfitCentreRows_returns_empty_when_the_table_is_missing_entirely()
+    {
+        Assert.Empty(ProductionHelpers.ParseProfitCentreRows(new RfcResponse()));
+    }
 }

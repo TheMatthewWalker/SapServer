@@ -189,6 +189,34 @@ public sealed class ProductionController : SapControllerBase
     }
 
 
+// ── GET /api/production/check-profit-centres (bulk) ───────────────────
+//
+// One round trip for every distinct material in a job's BOM, instead of
+// one check-profit-centre call per component — used by Normanton-Nexus to
+// classify each BOM component as raw material (profit centre 2012 — no
+// portal production record exists for these, so traceability there is a
+// hand-written SAP batch number rather than something to resolve) vs. a
+// portal-tracked semi-finished material.
+
+    [HttpGet("check-profit-centres")]
+    [ProducesResponseType(typeof(ApiResponse<ProfitCentreRow[]>), 200)]
+    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
+    public async Task<IActionResult> CheckProfitCentres(
+
+        [FromBody] ProfitCentresRequest body,
+        CancellationToken ct)
+    {
+        await CheckPermissionAsync(GetUserId(), ProductionHelpers.FnCreate, ct);
+
+        if (body.Materials.Count == 0)
+            return Ok(ApiResponse<ProfitCentreRow[]>.Ok([]));
+
+        var data = await _pool.ExecuteAsync(ProductionHelpers.BuildProfitCentresRequest(body), ct);
+        var rows = ProductionHelpers.ParseProfitCentreRows(data);
+
+        return Ok(ApiResponse<ProfitCentreRow[]>.Ok(rows));
+    }
+
 
 // ── GET /api/production/find-cost-collector ──────────────────────────
 

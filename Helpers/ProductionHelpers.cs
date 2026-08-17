@@ -497,6 +497,48 @@ internal static class ProductionHelpers
         return builder.Build();
     }
 
+    // Bulk variant — one round trip for N materials instead of N calls to
+    // BuildProfitCentre above. Same IN opt / value_list pattern as
+    // CustomsHelpers.BuildMarcRequest (that file's bulk MARC lookup, for a
+    // different pair of columns) — deliberately not ROWCOUNT-limited, same
+    // as that proven-working call, so every material's row comes back
+    // regardless of how many were asked for.
+    internal static RfcRequest BuildProfitCentresRequest(ProfitCentresRequest req)
+    {
+        var builder = new RfcRequestBuilder(FnReadTables)
+            .Import("DELIMITER", "|")
+            .Import("NO_DATA",   " ")
+            .TableRow("QUERY_TABLES", new { TABNAME = "MARC" });
+
+        builder.TableItemRow("query_FIELDS", new { TABNAME = "MARC", FIELDNAME = "MATNR" });
+        builder.TableItemRow("query_FIELDS", new { TABNAME = "MARC", FIELDNAME = "PRCTR" });
+
+        builder
+            .WhereCondition($"MARC~WERKS EQ '{Plant}'")
+            .WhereCondition("MARC~MATNR IN opt");
+
+        foreach (var m in req.Materials)
+            builder.TableItemRow("value_list", new
+            {
+                TABNAME = "MARC", FIELDNAME = "MATNR",
+                SIGN = "I", OPTION = "EQ", LOW = (SapPad.Pad(m, 18) ?? "").ToUpperInvariant(), HIGH = ""
+            });
+
+        return builder.ReadTable("data_display").Build();
+    }
+
+    internal static ProfitCentreRow[] ParseProfitCentreRows(RfcResponse response)
+    {
+        if (!response.Tables.TryGetValue("data_display", out var rows))
+            return [];
+
+        return SapDelimitedParser
+            .ParseRows(rows, '|', skipHeader: true)
+            .Where(cols => cols.Length >= 2)
+            .Select(cols => new ProfitCentreRow { Material = cols[0], ProfitCentre = cols[1] })
+            .ToArray();
+    }
+
     internal static RfcRequest SapRT(string? table, string[] fields, string[] where)
     {
         var builder = new RfcRequestBuilder(FnReadTables)
