@@ -39,16 +39,27 @@ public sealed class GoodsReceiptRequest
     /// </summary>
     public int LineNumber { get; init; }
 
-    /// <summary>Reference of the cost (e.g. the Inbound Log shipment reference, "INB-000014"). Maps to RM07M-LFSNR.</summary>
+    /// <summary>
+    /// Free-text delivery reference, meaning depends on the caller. For the
+    /// Inbound Log's Mark Received flow (see performance.js's
+    /// postGoodsReceiptToSap): the SUPPLIER's own reference for this
+    /// delivery (their paperwork/invoice reference), not Nexus's internal
+    /// shipment reference — per the user, LFSNR needs to be something the
+    /// supplier themselves would recognise. Maps to RM07M-LFSNR.
+    /// </summary>
     public string Reference { get; init; } = string.Empty;
 
     /// <summary>Tracking number of the shipment. Maps to MKPF-FRBNR.</summary>
     public string TrackingNumber { get; init; } = string.Empty;
 
     /// <summary>
-    /// 4-character address code: 2-digit country code + 2-digit postcode
-    /// (e.g. "US28"), built by the caller from the shipment's destination.
-    /// Maps to MKPF-BKTXT.
+    /// Free-text header text, meaning depends on the caller. The
+    /// create-po-and-receipt/freight-cost flow (CreatePoAndReceiptItem,
+    /// mirrored here) builds a 4-character address code: 2-digit country
+    /// code + 2-digit postcode (e.g. "US28") from the shipment's
+    /// destination. The Inbound Log's Mark Received flow instead sends its
+    /// own (Nexus-internal) shipment reference here, since Reference above
+    /// is taken by the supplier's reference for that flow. Maps to MKPF-BKTXT.
     /// </summary>
     public string AddressCode { get; init; } = string.Empty;
 
