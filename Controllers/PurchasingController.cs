@@ -66,6 +66,30 @@ public sealed class PurchasingController : SapControllerBase
     }
 
     /// <summary>
+    /// Reads back a just-created (or existing) PO's per-item net price via
+    /// BAPI_PO_GETDETAIL1 — see PurchasingHelper.BuildPoGetPriceRequest's
+    /// header comment: UNVERIFIED, best-effort, no proven reference for
+    /// this call unlike PO creation. Used by Normanton-Nexus to show the
+    /// real SAP-determined price on the PO PDF for lines that were created
+    /// with no manual price override (letting SAP's own condition
+    /// determination set it). A plain service-worker read — no elevation
+    /// needed, this doesn't create or change anything in SAP.
+    /// </summary>
+    [HttpGet("{poNumber}/price")]
+    [ProducesResponseType(typeof(ApiResponse<Dictionary<string, decimal>>), 200)]
+    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
+    public async Task<IActionResult> GetPoPrice(string poNumber, CancellationToken ct)
+    {
+        await CheckPermissionAsync(GetUserId(), PurchasingHelper.FnPoCreate, ct);
+
+        var request  = PurchasingHelper.BuildPoGetPriceRequest(poNumber);
+        var data     = await _pool.ExecuteAsync(request, ct);
+        var response = PurchasingHelper.ParsePoPrices(data);
+
+        return Ok(ApiResponse<Dictionary<string, decimal>>.Ok(response));
+    }
+
+    /// <summary>
     /// Posts a goods receipt against a single purchase order item via
     /// transaction MB01 (BDC recording) — see GoodsReceiptHelper for the
     /// exact recording this was built from. BAPI_GOODSMVT_CREATE was tried

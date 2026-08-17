@@ -98,6 +98,22 @@ public class PurchasingControllerTests
     }
 
     [Fact]
+    public async Task GetPoPrice_returns_the_parsed_price_map()
+    {
+        _pool.Setup(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new RfcResponse
+            {
+                Tables = new() { ["POCOND"] = [new() { ["ITM_NUMBER"] = "00010", ["COND_TYPE"] = "PB00", ["COND_VALUE"] = "89,25" }] },
+            });
+
+        var result = await _controller.GetPoPrice("4500001234", CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var body = Assert.IsType<ApiResponse<Dictionary<string, decimal>>>(ok.Value);
+        Assert.Equal(89.25m, body.Data!["00010"]);
+    }
+
+    [Fact]
     public async Task CreatePurchaseOrderAndReceipt_requires_SAP_credentials_before_touching_the_pool()
     {
         var result = await _controller.CreatePurchaseOrderAndReceipt(

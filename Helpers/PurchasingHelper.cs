@@ -196,6 +196,60 @@ internal static class PurchasingHelper
         };
     }
 
+    /// <summary>
+    /// UNVERIFIED — unlike every other request builder in this file (all
+    /// ported field-for-field from the user's working VBA macro), there is
+    /// no proven reference for reading a PO's price back from SAP. This is
+    /// a best-effort implementation using BAPI_PO_GETDETAIL1's standard,
+    /// widely-documented shape: PURCHASEORDER in, ITEM_CONDITIONS = 'X' to
+    /// populate the POCOND pricing-conditions table. Needs a real smoke
+    /// test against a live PO before being trusted. Designed to fail soft
+    /// either way — PurchasingController.GetPoPrice/ParsePoPrices return an
+    /// empty result rather than throwing if the guessed table/field names
+    /// don't match this SAP system, and the Normanton-Nexus caller treats a
+    /// missing price the same as "SAP hasn't priced this line" (falls back
+    /// to showing "Per SAP condition" on the PO PDF) rather than a hard
+    /// failure — see routes/performance.js's create-po route.
+    /// </summary>
+    internal const string FnPoGetDetail = "BAPI_PO_GETDETAIL1";
+
+    internal static RfcRequest BuildPoGetPriceRequest(string poNumber)
+    {
+        return new RfcRequestBuilder(FnPoGetDetail)
+            .Import("PURCHASEORDER",  SapPad.Pad(poNumber, 10))
+            .Import("ITEM_CONDITIONS", "X")
+            .ReadTable("POCOND", "ITM_NUMBER", "COND_TYPE", "COND_VALUE", "CURRENCY", "COND_UNIT")
+            .Build();
+    }
+
+    /// <summary>
+    /// Keyed by PO item number (e.g. "00010", matching the same 5-digit
+    /// x10 numbering BuildPoCreateRequest assigns). PB00 (SAP's standard
+    /// gross/net price condition type) is preferred when present; any other
+    /// priced condition on the item is used as a fallback so a differently-
+    /// configured pricing procedure still surfaces something rather than
+    /// nothing. A condition with no positive value is ignored.
+    /// </summary>
+    internal static Dictionary<string, decimal> ParsePoPrices(RfcResponse response)
+    {
+        var result = new Dictionary<string, decimal>();
+        if (!response.Tables.TryGetValue("POCOND", out var rows))
+            return result;
+
+        foreach (var row in rows)
+        {
+            var itemNumber = row.GetString("ITM_NUMBER");
+            var condType   = row.GetString("COND_TYPE");
+            var value      = row.GetDecimal("COND_VALUE");
+            if (string.IsNullOrWhiteSpace(itemNumber) || value <= 0)
+                continue;
+
+            if (!result.ContainsKey(itemNumber) || condType == "PB00")
+                result[itemNumber] = value;
+        }
+        return result;
+    }
+
     private static string NormaliseDate(string? date)
     {
         if (string.IsNullOrWhiteSpace(date)) return DateTime.Now.ToString("yyyyMMdd");

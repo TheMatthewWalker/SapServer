@@ -166,4 +166,66 @@ public class PurchasingHelperTests
         Assert.Single(row.Messages);
         Assert.Equal("No authorization", row.Messages[0].Message);
     }
+
+    [Fact]
+    public void BuildPoGetPriceRequest_pads_the_PO_number_and_requests_ITEM_CONDITIONS()
+    {
+        var request = PurchasingHelper.BuildPoGetPriceRequest("4500012345");
+        Assert.Equal("4500012345", request.ImportParameters["PURCHASEORDER"]); // already 10 chars, pad is a no-op
+        Assert.Equal("X", request.ImportParameters["ITEM_CONDITIONS"]);
+        Assert.True(request.OutputTables.ContainsKey("POCOND"));
+    }
+
+    [Fact]
+    public void ParsePoPrices_prefers_the_PB00_condition_over_any_other_priced_condition_for_the_same_item()
+    {
+        var response = new RfcResponse
+        {
+            Tables = new()
+            {
+                ["POCOND"] =
+                [
+                    new() { ["ITM_NUMBER"] = "00010", ["COND_TYPE"] = "ZFRA", ["COND_VALUE"] = "5,00" },
+                    new() { ["ITM_NUMBER"] = "00010", ["COND_TYPE"] = "PB00", ["COND_VALUE"] = "89,25" },
+                ],
+            },
+        };
+        var prices = PurchasingHelper.ParsePoPrices(response);
+        Assert.Equal(89.25m, prices["00010"]);
+    }
+
+    [Fact]
+    public void ParsePoPrices_falls_back_to_any_priced_condition_when_PB00_is_absent()
+    {
+        var response = new RfcResponse
+        {
+            Tables = new()
+            {
+                ["POCOND"] = [new() { ["ITM_NUMBER"] = "00020", ["COND_TYPE"] = "PBXX", ["COND_VALUE"] = "12,50" }],
+            },
+        };
+        var prices = PurchasingHelper.ParsePoPrices(response);
+        Assert.Equal(12.50m, prices["00020"]);
+    }
+
+    [Fact]
+    public void ParsePoPrices_ignores_a_zero_or_negative_condition_value()
+    {
+        var response = new RfcResponse
+        {
+            Tables = new()
+            {
+                ["POCOND"] = [new() { ["ITM_NUMBER"] = "00010", ["COND_TYPE"] = "PB00", ["COND_VALUE"] = "0,00" }],
+            },
+        };
+        var prices = PurchasingHelper.ParsePoPrices(response);
+        Assert.Empty(prices);
+    }
+
+    [Fact]
+    public void ParsePoPrices_returns_empty_rather_than_throwing_when_POCOND_is_missing()
+    {
+        var prices = PurchasingHelper.ParsePoPrices(new RfcResponse());
+        Assert.Empty(prices);
+    }
 }
