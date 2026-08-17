@@ -162,4 +162,78 @@ public class PerformanceHelpersTests
 
         Assert.Empty(errors);
     }
+
+    // ParseConsumptionHistoryByYear — reuses the exact same MVER data_display rows as
+    // ParseConsumptionHistoryRows (see that method's fixture shape in production code),
+    // just summed per (Material, GJAHR) instead of windowed into a rolling 36-month array.
+    private static RfcResponse MverResponse(params string[] dataRows)
+    {
+        var rows = new List<Dictionary<string, object?>> { new() { ["WA"] = "MATNR|WERKS|GJAHR|GSV01|GSV02|GSV03|GSV04|GSV05|GSV06|GSV07|GSV08|GSV09|GSV10|GSV11|GSV12" } };
+        rows.AddRange(dataRows.Select(r => new Dictionary<string, object?> { ["WA"] = r }));
+        return new RfcResponse { Tables = new() { ["data_display"] = rows } };
+    }
+
+    [Fact]
+    public void ParseConsumptionHistoryByYear_sums_all_12_periods_for_one_material_year()
+    {
+        var response = MverResponse("30005R|3012|2025|10|20|30|40|50|60|70|80|90|100|110|120");
+
+        var rows = PerformanceHelpers.ParseConsumptionHistoryByYear(response);
+
+        var row = Assert.Single(rows);
+        Assert.Equal("30005R", row.Material);
+        Assert.Equal(2025, row.FiscalYear);
+        Assert.Equal(780m, row.Qty); // 10+20+...+120
+    }
+
+    [Fact]
+    public void ParseConsumptionHistoryByYear_returns_one_row_per_material_per_fiscal_year_not_a_rolling_window()
+    {
+        var response = MverResponse(
+            "30005R|3012|2024|1|1|1|1|1|1|1|1|1|1|1|1", // 12
+            "30005R|3012|2025|2|2|2|2|2|2|2|2|2|2|2|2", // 24
+            "30006R|3012|2025|3|3|3|3|3|3|3|3|3|3|3|3"  // 36
+        );
+
+        var rows = PerformanceHelpers.ParseConsumptionHistoryByYear(response);
+
+        Assert.Equal(3, rows.Length);
+        Assert.Contains(rows, r => r.Material == "30005R" && r.FiscalYear == 2024 && r.Qty == 12m);
+        Assert.Contains(rows, r => r.Material == "30005R" && r.FiscalYear == 2025 && r.Qty == 24m);
+        Assert.Contains(rows, r => r.Material == "30006R" && r.FiscalYear == 2025 && r.Qty == 36m);
+    }
+
+    [Fact]
+    public void ParseConsumptionHistoryByYear_accumulates_split_valuated_duplicate_rows_for_the_same_material_year()
+    {
+        // Same material/year appearing twice (e.g. split valuation) should add together,
+        // not overwrite — same "accumulate, don't clobber" expectation as the rest of this
+        // file's dedupe-aware parsing.
+        var response = MverResponse(
+            "30005R|3012|2025|1|1|1|1|1|1|1|1|1|1|1|1", // 12
+            "30005R|3012|2025|1|1|1|1|1|1|1|1|1|1|1|1"  // 12 again
+        );
+
+        var rows = PerformanceHelpers.ParseConsumptionHistoryByYear(response);
+
+        var row = Assert.Single(rows);
+        Assert.Equal(24m, row.Qty);
+    }
+
+    [Fact]
+    public void ParseConsumptionHistoryByYear_skips_a_row_with_too_few_columns()
+    {
+        var response = MverResponse("30005R|3012|2025|only|four|cols");
+
+        var rows = PerformanceHelpers.ParseConsumptionHistoryByYear(response);
+
+        Assert.Empty(rows);
+    }
+
+    [Fact]
+    public void ParseConsumptionHistoryByYear_returns_empty_when_there_is_no_data_display_table()
+    {
+        var rows = PerformanceHelpers.ParseConsumptionHistoryByYear(new RfcResponse());
+        Assert.Empty(rows);
+    }
 }

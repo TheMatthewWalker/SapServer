@@ -38,6 +38,63 @@ public class ProductionHelpersTests
         Assert.DoesNotContain(whereRows, r => r["TEXT"]!.ToString()!.Contains("IDNRK"));
     }
 
+    // ── BuildBomRequestBulk ──────────────────────────────────────────────────────
+
+    [Fact]
+    public void BuildBomRequestBulk_filters_by_plant_and_an_IN_opt_MATNR_condition()
+    {
+        var request = ProductionHelpers.BuildBomRequestBulk(["30005r", "12345678"]);
+
+        var whereRows = request.InputTablesItems["where_clause"];
+        var whereClauses = string.Join(" ", whereRows.Select(r => r["TEXT"]));
+        Assert.Contains("ZBOM_INFO~WERKS EQ '3012'", whereClauses);
+        Assert.Contains("ZBOM_INFO~MATNR IN opt", whereClauses);
+    }
+
+    [Fact]
+    public void BuildBomRequestBulk_writes_one_value_list_row_per_material_padded_and_upper_cased()
+    {
+        var request = ProductionHelpers.BuildBomRequestBulk(["30005r", "12345678"]);
+
+        var rows = request.InputTablesItems["value_list"];
+        Assert.Equal(2, rows.Count);
+        Assert.Contains(rows, r => (string?)r["LOW"] == "30005R");
+        Assert.Contains(rows, r => (string?)r["LOW"] == "000000000012345678");
+        Assert.All(rows, r =>
+        {
+            Assert.Equal("ZBOM_INFO", r["TABNAME"]);
+            Assert.Equal("MATNR", r["FIELDNAME"]);
+            Assert.Equal("I", r["SIGN"]);
+            Assert.Equal("EQ", r["OPTION"]);
+        });
+    }
+
+    [Fact]
+    public void BuildBomRequestBulk_is_not_rowcount_limited_unlike_the_single_material_variant()
+    {
+        var request = ProductionHelpers.BuildBomRequestBulk(["30005R"]);
+        Assert.False(request.ImportParameters.ContainsKey("ROWCOUNT"));
+    }
+
+    [Fact]
+    public void BuildBomRequestBulk_is_parsed_by_the_same_ParseBomRows_as_the_single_material_variant()
+    {
+        var response = new RfcResponse
+        {
+            Tables = new()
+            {
+                ["data_display"] = new()
+                {
+                    new() { ["WA"] = "MATNR|WERKS|IDNRK|POSNR|MENGE|MEINS|LGORT|PRVBE" },
+                    new() { ["WA"] = "30005R|3012|30006R|0010|2.5|KG|1710|312" },
+                }
+            }
+        };
+
+        var rows = ProductionHelpers.ParseBomRows(response);
+        Assert.Single(rows);
+    }
+
     [Fact]
     public void ParseBomRows_parses_delimited_rows_into_typed_columns()
     {

@@ -1,4 +1,5 @@
 using SapServer.Models;
+using SapServer.Models.Bapi;
 using System.Globalization;
 
 namespace SapServer.Helpers;
@@ -850,6 +851,50 @@ internal static class PerformanceHelpers
         }
 
         return result;
+    }
+
+    // Same MVER data as ParseConsumptionHistoryRows/BuildConsumptionHistoryRequest above —
+    // reused as-is, no new RFC call — but summed per (Material, GJAHR) instead of folded
+    // into a rolling 36-month window. BuildConsumptionHistoryRequest already casts a
+    // 6-fiscal-year net (today.Year-4..today.Year+1) for exactly this reason (see its own
+    // comment), so the true year-on-year totals this needs are already present in the same
+    // response ParseConsumptionHistoryRows discards outside its trailing 36 months. Kept as
+    // a separate parser rather than changing the existing one — that one is load-bearing for
+    // the daily TurnsValClassSnapshot sync and the seasonal-index forecast, and both already
+    // only ever need the trailing 13/36-month window it produces.
+    //
+    // GJAHR is SAP's fiscal year, not necessarily the calendar year — callers displaying
+    // this as "year-on-year" should be aware a non-Jan-Dec fiscal year won't line up with
+    // calendar years.
+    internal static ConsumptionByYearRow[] ParseConsumptionHistoryByYear(RfcResponse response)
+    {
+        if (!response.Tables.TryGetValue("data_display", out var sapRows))
+            return [];
+
+        var totals  = new Dictionary<(string Material, int FiscalYear), decimal>();
+        var minCols = 3 + MverMonthColumns.Length;
+
+        foreach (var cols in SapDelimitedParser.ParseRows(sapRows, '|', skipHeader: true))
+        {
+            if (cols.Length < minCols) continue;
+
+            var material = NormaliseMaterial(cols[0]);
+            if (!int.TryParse(cols[2].Trim(), out var year)) continue;
+
+            decimal yearTotal = 0m;
+            for (var m = 1; m <= 12; m++)
+                yearTotal += decimal.TryParse(cols[2 + m].Trim(), out var qty) ? qty : 0m;
+
+            var key = (material, year);
+            totals[key] = totals.GetValueOrDefault(key) + yearTotal;
+        }
+
+        return [.. totals.Select(kv => new ConsumptionByYearRow
+        {
+            Material   = kv.Key.Material,
+            FiscalYear = kv.Key.FiscalYear,
+            Qty        = kv.Value,
+        })];
     }
 
     // ── Last Movement Dates (S032) ───────────────────────────────────────────────

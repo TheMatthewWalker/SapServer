@@ -53,6 +53,36 @@ internal static class ProductionHelpers
         return builder.Build();
     }
 
+    // Bulk variant — one round trip for N materials instead of N calls to BuildBomRequest
+    // above. Same IN opt / value_list pattern as BuildProfitCentresRequest below (deliberately
+    // not ROWCOUNT-limited, same as that proven-working call) — used by
+    // MrpAnalysisHelper.ExplodeBom to explode every material at one BOM depth in a single
+    // call. Reuses ParseBomRows unchanged; it doesn't care how many distinct MATNR values
+    // were in the WHERE clause.
+    internal static RfcRequest BuildBomRequestBulk(IEnumerable<string> materials)
+    {
+        var builder = new RfcRequestBuilder(FnReadTables)
+            .Import("DELIMITER", "|")
+            .Import("NO_DATA",   " ")
+            .TableRow("QUERY_TABLES", new { TABNAME = "ZBOM_INFO" });
+
+        foreach (var field in BomColumns)
+            builder.TableItemRow("query_FIELDS", new { TABNAME = "ZBOM_INFO", FIELDNAME = field });
+
+        builder
+            .WhereCondition($"ZBOM_INFO~WERKS EQ '{Plant}'")
+            .WhereCondition("ZBOM_INFO~MATNR IN opt");
+
+        foreach (var m in materials)
+            builder.TableItemRow("value_list", new
+            {
+                TABNAME = "ZBOM_INFO", FIELDNAME = "MATNR",
+                SIGN = "I", OPTION = "EQ", LOW = (SapPad.Pad(m, 18) ?? "").ToUpperInvariant(), HIGH = ""
+            });
+
+        return builder.ReadTable("data_display").Build();
+    }
+
     internal static BomRow[] ParseBomRows(RfcResponse response)
     {
         if (!response.Tables.TryGetValue("data_display", out var sapRows))
