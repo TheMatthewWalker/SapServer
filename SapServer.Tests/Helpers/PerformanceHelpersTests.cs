@@ -187,6 +187,22 @@ public class PerformanceHelpersTests
     }
 
     [Fact]
+    public void ParseConsumptionHistoryByYear_keeps_a_purely_numeric_material_zero_padded_not_normalised()
+    {
+        // log.MaterialConsumptionHistory (Normanton-Nexus) is joined against
+        // log.TurnsValClassSnapshot.Material, which stores MATNR exactly as
+        // ComputeTurnsRows outputs it — raw/padded, never NormaliseMaterial'd. Stripping
+        // leading zeros here would silently break that join for any purely-numeric material
+        // (a mixed alnum code like "30005R" survives either way, which is why the other
+        // tests in this class don't catch this).
+        var response = MverResponse("000000000000100234|3012|2025|1|1|1|1|1|1|1|1|1|1|1|1");
+
+        var row = Assert.Single(PerformanceHelpers.ParseConsumptionHistoryByYear(response));
+
+        Assert.Equal("000000000000100234", row.Material);
+    }
+
+    [Fact]
     public void ParseConsumptionHistoryByYear_returns_one_row_per_material_per_fiscal_year_not_a_rolling_window()
     {
         var response = MverResponse(

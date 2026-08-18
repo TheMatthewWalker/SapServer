@@ -69,6 +69,20 @@ public class MrpAnalysisHelperTests
     }
 
     [Fact]
+    public void ParseGoodsReceiptHistoryRawRows_keeps_a_purely_numeric_material_zero_padded_not_normalised()
+    {
+        // log.MaterialReceiptHistory (Normanton-Nexus) is joined against
+        // log.TurnsValClassSnapshot.Material, which stores MATNR exactly as ComputeTurnsRows
+        // outputs it — raw/padded, never NormaliseMaterial'd. Stripping leading zeros here
+        // would silently break that join for any purely-numeric material.
+        var response = GrResponse("000000000000100234|100|KG|4500012345|0000012345|02.01.2026");
+
+        var row = Assert.Single(MrpAnalysisHelper.ParseGoodsReceiptHistoryRawRows(response));
+
+        Assert.Equal("000000000000100234", row.Material);
+    }
+
+    [Fact]
     public void ParseGoodsReceiptHistoryRawRows_leaves_Vendor_blank_when_MSEG_LIFNR_is_blank_on_an_ordinary_PO_receipt()
     {
         var response = GrResponse("30005R|100|KG|4500012345| |02.01.2026");

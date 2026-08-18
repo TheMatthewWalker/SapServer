@@ -91,7 +91,17 @@ internal static class MrpAnalysisHelper
             {
                 // Column order follows registration order: MsegColumns
                 // (MATNR, MENGE, MEINS, EBELN, LIFNR) then MkpfColumns (BUDAT).
-                Material      = PerformanceHelpers.NormaliseMaterial(cols[0]),
+                //
+                // Material is deliberately left in SAP's raw/padded form here (just trimmed),
+                // NOT run through NormaliseMaterial — Normanton-Nexus's log.TurnsValClassSnapshot
+                // (and everything joined to it — log.VendorMaterial, log.PurchaseOrderSuggestion)
+                // stores Material the same raw/padded way ComputeTurnsRows outputs it
+                // (Material = rawMaterial, never normalised), so this needs to match that
+                // convention, not diverge from it, or a purely-numeric material's join to
+                // TurnsValClassSnapshot would silently match zero rows even though the material
+                // genuinely exists (mixed alnum codes like "30005R" happen to survive either way,
+                // which is what let this slip through initially).
+                Material      = cols[0].Trim(),
                 Qty           = decimal.TryParse(cols[1].Trim(), out var qty) ? qty : 0m,
                 Uom           = cols[2].Trim(),
                 PurchaseOrder = cols[3].Trim(),

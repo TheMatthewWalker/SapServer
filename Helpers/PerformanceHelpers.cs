@@ -866,6 +866,16 @@ internal static class PerformanceHelpers
     // GJAHR is SAP's fiscal year, not necessarily the calendar year — callers displaying
     // this as "year-on-year" should be aware a non-Jan-Dec fiscal year won't line up with
     // calendar years.
+    //
+    // Material is deliberately left in SAP's raw/padded form here (just trimmed), NOT run
+    // through NormaliseMaterial — unlike ParseConsumptionHistoryRows above, whose output only
+    // ever gets matched in-memory against NormaliseMaterial(MATNR) keys from the other
+    // TurnsValClassSnapshot data pulls (see this file's own header comment), this feeds
+    // Normanton-Nexus's log.MaterialConsumptionHistory, which is joined in SQL against
+    // log.TurnsValClassSnapshot.Material — stored the same raw/padded way ComputeTurnsRows
+    // outputs it (Material = rawMaterial, never normalised). Normalising here would silently
+    // break that join for any purely-numeric material code (mixed alnum codes like "30005R"
+    // survive either way, which is what let this slip through initially).
     internal static ConsumptionByYearRow[] ParseConsumptionHistoryByYear(RfcResponse response)
     {
         if (!response.Tables.TryGetValue("data_display", out var sapRows))
@@ -878,7 +888,7 @@ internal static class PerformanceHelpers
         {
             if (cols.Length < minCols) continue;
 
-            var material = NormaliseMaterial(cols[0]);
+            var material = cols[0].Trim();
             if (!int.TryParse(cols[2].Trim(), out var year)) continue;
 
             decimal yearTotal = 0m;
