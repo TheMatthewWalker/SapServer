@@ -956,15 +956,22 @@ internal sealed class SapStaWorker : IDisposable
         dynamic? rc = null;
         try
         {
+            // The string indexer (rc["SUBRC"]) that works on table rows does NOT
+            // work here — a live run showed every single field as "(unreadable)"
+            // uniformly, which only makes sense if the indexer itself isn't
+            // supported on an "imports" parameter object. func.imports(name) is
+            // read positionally elsewhere in this file (ReadStructParam's s(i)
+            // pattern) — SYST's field order from the SE37 dump gives us the
+            // position to pair with each name here.
             rc = func.imports("RC");
             var rcValues = new List<string>();
-            foreach (var field in systFields)
+            for (int i = 0; i < systFields.Length; i++)
             {
                 string value;
-                try { value = rc[field]?.ToString() ?? "(null)"; }
+                try { value = rc(i + 1)?.ToString() ?? "(null)"; }
                 catch { value = "(unreadable)"; }
                 if (!string.IsNullOrWhiteSpace(value) && value != "0" && value != "(null)")
-                    rcValues.Add($"{field}={value}");
+                    rcValues.Add($"{systFields[i]}={value}");
             }
             logger.LogWarning(
                 "ZDELFLAG DIAGNOSTIC — RC (SYST) non-blank/non-zero fields: {Fields}",
