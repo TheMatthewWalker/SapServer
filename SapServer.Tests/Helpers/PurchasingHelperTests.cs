@@ -233,6 +233,37 @@ public class PurchasingHelperTests
     }
 
     [Fact]
+    public void ParsePoPrices_divides_COND_VALUE_by_COND_P_UNT_when_the_condition_is_priced_per_1000()
+    {
+        // Confirmed for real on a live PO: a condition of 500 with COND_P_UNT 1000
+        // means "500 per 1000 units", i.e. a real per-unit price of 0.5 — reading
+        // COND_VALUE raw showed a price 1000x too high on the PDF.
+        var response = new RfcResponse
+        {
+            Tables = new()
+            {
+                ["POCOND"] = [new() { ["ITM_NUMBER"] = "00010", ["COND_TYPE"] = "PB00", ["COND_VALUE"] = "500,00", ["COND_P_UNT"] = "1000" }],
+            },
+        };
+        var prices = PurchasingHelper.ParsePoPrices(response);
+        Assert.Equal(0.5m, prices["10"]);
+    }
+
+    [Fact]
+    public void ParsePoPrices_treats_a_blank_COND_P_UNT_as_priced_per_1_not_a_divide_by_zero()
+    {
+        var response = new RfcResponse
+        {
+            Tables = new()
+            {
+                ["POCOND"] = [new() { ["ITM_NUMBER"] = "00010", ["COND_TYPE"] = "PB00", ["COND_VALUE"] = "12,50" }], // no COND_P_UNT
+            },
+        };
+        var prices = PurchasingHelper.ParsePoPrices(response);
+        Assert.Equal(12.50m, prices["10"]);
+    }
+
+    [Fact]
     public void ParsePoPrices_ignores_a_zero_or_negative_condition_value()
     {
         var response = new RfcResponse

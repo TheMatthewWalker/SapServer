@@ -222,7 +222,7 @@ internal static class PurchasingHelper
     {
         return new RfcRequestBuilder(FnPoGetDetail)
             .Import("PURCHASEORDER",  SapPad.Pad(poNumber, 10))
-            .ReadTable("POCOND", "ITM_NUMBER", "COND_TYPE", "COND_VALUE", "CURRENCY", "COND_UNIT")
+            .ReadTable("POCOND", "ITM_NUMBER", "COND_TYPE", "COND_VALUE", "CURRENCY", "COND_UNIT", "COND_P_UNT")
             .Build();
     }
 
@@ -244,6 +244,14 @@ internal static class PurchasingHelper
     /// priced condition on the item is used as a fallback so a differently-
     /// configured pricing procedure still surfaces something rather than
     /// nothing. A condition with no positive value is ignored.
+    ///
+    /// COND_VALUE is scaled by COND_P_UNT (the condition's own "price unit" —
+    /// e.g. a condition of 500 with COND_P_UNT 1000 means "500 per 1000
+    /// COND_UNIT", i.e. a real per-unit price of 0.5), standard SAP pricing
+    /// behaviour that was missed reading COND_VALUE raw — confirmed for real
+    /// on a live PO where the PDF showed a price 1000x too high. COND_P_UNT
+    /// of 0/blank means "per 1" (no scaling), same convention SAP itself uses
+    /// (a blank price unit is never meant as "divide by zero").
     /// </summary>
     internal static Dictionary<string, decimal> ParsePoPrices(RfcResponse response)
     {
@@ -255,11 +263,14 @@ internal static class PurchasingHelper
         {
             var itemNumber = row.GetString("ITM_NUMBER");
             var condType   = row.GetString("COND_TYPE");
-            var value      = row.GetDecimal("COND_VALUE");
-            if (string.IsNullOrWhiteSpace(itemNumber) || value <= 0)
+            var rawValue   = row.GetDecimal("COND_VALUE");
+            if (string.IsNullOrWhiteSpace(itemNumber) || rawValue <= 0)
                 continue;
             if (!int.TryParse(itemNumber, out var itemNum))
                 continue;
+
+            var priceUnit = row.GetDecimal("COND_P_UNT");
+            var value = rawValue / (priceUnit > 0 ? priceUnit : 1m);
 
             var key = itemNum.ToString();
             if (!result.ContainsKey(key) || condType == "PB00")
