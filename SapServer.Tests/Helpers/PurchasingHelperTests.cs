@@ -194,7 +194,8 @@ public class PurchasingHelperTests
             },
         };
         var prices = PurchasingHelper.ParsePoPrices(response);
-        Assert.Equal(89.25m, prices["00010"]);
+        // Keyed by bare integer, not the raw padded string — see the test below.
+        Assert.Equal(89.25m, prices["10"]);
     }
 
     [Fact]
@@ -208,7 +209,27 @@ public class PurchasingHelperTests
             },
         };
         var prices = PurchasingHelper.ParsePoPrices(response);
-        Assert.Equal(12.50m, prices["00020"]);
+        Assert.Equal(12.50m, prices["20"]);
+    }
+
+    [Fact]
+    public void ParsePoPrices_normalizes_a_6_digit_ITM_NUMBER_to_match_a_5_digit_PO_item_key()
+    {
+        // Reproduces the real bug: POCOND's ITM_NUMBER is a 6-digit NUMC field on
+        // this SAP system ("000010"), while BuildPoCreateRequest's x10 numbering
+        // (and routes/performance.js's buildPoPdfItems, which normalizes its own
+        // 5-digit key the same way before looking a price up) only ever produces
+        // 5 digits ("00010") — an exact-string dictionary key would never match
+        // either way, silently losing every price despite the RFC call succeeding.
+        var response = new RfcResponse
+        {
+            Tables = new()
+            {
+                ["POCOND"] = [new() { ["ITM_NUMBER"] = "000010", ["COND_TYPE"] = "PB00", ["COND_VALUE"] = "42,00" }],
+            },
+        };
+        var prices = PurchasingHelper.ParsePoPrices(response);
+        Assert.Equal(42.00m, prices["10"]);
     }
 
     [Fact]

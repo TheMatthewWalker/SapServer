@@ -227,8 +227,19 @@ internal static class PurchasingHelper
     }
 
     /// <summary>
-    /// Keyed by PO item number (e.g. "00010", matching the same 5-digit
-    /// x10 numbering BuildPoCreateRequest assigns). PB00 (SAP's standard
+    /// Keyed by PO item number as a plain integer string with no leading
+    /// zeros (e.g. "10", not "00010") — a real RFC_GET_FUNCTION_INTERFACE
+    /// dump of this function (via Normanton-Nexus's BAPI Inspector) shows
+    /// POCOND's ITM_NUMBER is a 6-digit NUMC field, so it comes back as
+    /// "000010", not the 5-digit "00010" BuildPoCreateRequest's x10
+    /// numbering assigns. Comparing those as exact strings would never
+    /// match — the RFC call itself was succeeding fine (see the SapStaWorker
+    /// fix + BuildPoGetPriceRequest's ITEM_CONDITIONS removal), but every
+    /// price lookup was silently failing regardless, because the join key
+    /// never lined up. Normalizing to a bare integer string here, and
+    /// routes/performance.js's buildPoPdfItems doing the same to its own
+    /// 5-digit poItemNumber before looking a price up, makes both sides
+    /// agree regardless of either one's padding width. PB00 (SAP's standard
     /// gross/net price condition type) is preferred when present; any other
     /// priced condition on the item is used as a fallback so a differently-
     /// configured pricing procedure still surfaces something rather than
@@ -247,9 +258,12 @@ internal static class PurchasingHelper
             var value      = row.GetDecimal("COND_VALUE");
             if (string.IsNullOrWhiteSpace(itemNumber) || value <= 0)
                 continue;
+            if (!int.TryParse(itemNumber, out var itemNum))
+                continue;
 
-            if (!result.ContainsKey(itemNumber) || condType == "PB00")
-                result[itemNumber] = value;
+            var key = itemNum.ToString();
+            if (!result.ContainsKey(key) || condType == "PB00")
+                result[key] = value;
         }
         return result;
     }

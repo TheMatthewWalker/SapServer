@@ -110,7 +110,9 @@ public class PurchasingControllerTests
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var body = Assert.IsType<ApiResponse<Dictionary<string, decimal>>>(ok.Value);
-        Assert.Equal(89.25m, body.Data!["00010"]);
+        // Keyed by bare integer, not the raw padded string — see
+        // PurchasingHelperTests' ParsePoPrices_normalizes_a_6_digit_ITM_NUMBER... test.
+        Assert.Equal(89.25m, body.Data!["10"]);
     }
 
     [Fact]
