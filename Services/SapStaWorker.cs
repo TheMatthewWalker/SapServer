@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Runtime.InteropServices;
 using SapServer.Configuration;
 using SapServer.Exceptions;
 using SapServer.Models;
@@ -122,6 +123,13 @@ internal sealed class SapStaWorker : IDisposable
         else
         {
             try { Connect(); }
+            catch (Exception ex) when (IsOutOfMemory(ex))
+            {
+                _logger.LogCritical(ex,
+                    "Slot {SlotId}: unrecoverable OutOfMemoryException during initial SAP connection — terminating process so Task Scheduler restarts it.",
+                    SlotId);
+                Environment.FailFast($"SapServer OOM on slot {SlotId} during initial connect.", ex);
+            }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Slot {SlotId} failed initial SAP connection — will retry on first request.", SlotId);
@@ -176,6 +184,13 @@ internal sealed class SapStaWorker : IDisposable
                     item.ControlTcs!.TrySetResult(true);
                     break;
             }
+        }
+        catch (Exception ex) when (IsOutOfMemory(ex))
+        {
+            _logger.LogCritical(ex,
+                "Slot {SlotId}: unrecoverable OutOfMemoryException during elevated control item '{Kind}' — terminating process so Task Scheduler restarts it.",
+                SlotId, item.ControlKind);
+            Environment.FailFast($"SapServer OOM on slot {SlotId} during elevated control item '{item.ControlKind}'.", ex);
         }
         catch (Exception ex)
         {
@@ -240,6 +255,26 @@ internal sealed class SapStaWorker : IDisposable
             _lastActivity = DateTime.UtcNow;
             tcs.TrySetResult(response);
         }
+        catch (Exception ex) when (IsOutOfMemory(ex))
+        {
+            // A genuine OutOfMemoryException (raw, or wrapped as the InnerException of a
+            // SapConnectionException — see ExecuteRfc's func.Add() catch and Connect()'s
+            // catch) means the process's memory is already corrupted enough that COM
+            // interop can no longer reliably create objects. Microsoft's own guidance is
+            // to treat OOM as fatal rather than keep running — continuing here previously
+            // meant every subsequent call on every slot kept failing the same way
+            // (2026-08-24 downtime) while Task Scheduler's RestartCount/RestartInterval
+            // policy (see scripts/install.ps1) never fired, because it only restarts the
+            // task when the process actually exits. FailFast forces that exit immediately,
+            // skipping finally blocks (which could themselves allocate and re-throw) so
+            // the task manager sees a real failure and restarts us within a minute.
+            _logger.LogCritical(ex,
+                "Slot {SlotId}: unrecoverable OutOfMemoryException while processing '{Function}' — terminating process so Task Scheduler restarts it.",
+                SlotId, request.FunctionName);
+            Environment.FailFast(
+                $"SapServer OOM on slot {SlotId} during '{request.FunctionName}' — forcing restart via Task Scheduler.",
+                ex);
+        }
         catch (SapConnectionException ex) when (IsElevated)
         {
             // No auto-reconnect on an elevated slot — Connect() here would log
@@ -261,6 +296,15 @@ internal sealed class SapStaWorker : IDisposable
                 var response  = ExecuteRfc(request);
                 _lastActivity = DateTime.UtcNow;
                 tcs.TrySetResult(response);
+            }
+            catch (Exception retryEx) when (IsOutOfMemory(retryEx))
+            {
+                _logger.LogCritical(retryEx,
+                    "Slot {SlotId}: unrecoverable OutOfMemoryException retrying '{Function}' after reconnect — terminating process so Task Scheduler restarts it.",
+                    SlotId, request.FunctionName);
+                Environment.FailFast(
+                    $"SapServer OOM on slot {SlotId} retrying '{request.FunctionName}' — forcing restart via Task Scheduler.",
+                    retryEx);
             }
             catch (Exception retryEx)
             {
@@ -311,17 +355,30 @@ internal sealed class SapStaWorker : IDisposable
             _sapFunctions = new SAPFunctions64.SAPFunctions();
 
             dynamic conn  = _sapFunctions!.Connection;
-            conn.System   = creds.System;
-            conn.Client   = creds.Client;
-            conn.SystemID = creds.System;
-            conn.User     = creds.User;
-            conn.Password = creds.Password;
-            conn.Language = creds.Language;
+            try
+            {
+                conn.System   = creds.System;
+                conn.Client   = creds.Client;
+                conn.SystemID = creds.System;
+                conn.User     = creds.User;
+                conn.Password = creds.Password;
+                conn.Language = creds.Language;
 
-            bool loggedOn = conn.Logon(0, true);
-            if (!loggedOn)
-                throw new SapConnectionException(SlotId,
-                    $"SAP Logon() returned false for user '{creds.User}'. Check credentials.");
+                bool loggedOn = conn.Logon(0, true);
+                if (!loggedOn)
+                    throw new SapConnectionException(SlotId,
+                        $"SAP Logon() returned false for user '{creds.User}'. Check credentials.");
+            }
+            finally
+            {
+                // The Connection sub-object is only needed for the duration of this login
+                // call — see the header comment on ExecuteRfc's RemoveAll() cleanup for why
+                // these dynamic COM proxies need an explicit release: without a Windows
+                // message pump on this STA thread, GC-finalizer-driven release of an
+                // STA-created RCW can never actually be delivered, so leaving this to the
+                // GC leaks the native COM reference for good.
+                ReleaseCom(conn, "Connection");
+            }
 
             _isConnected  = true;
             _lastActivity = DateTime.UtcNow;
@@ -365,7 +422,8 @@ internal sealed class SapStaWorker : IDisposable
             if (_sapFunctions is not null)
             {
                 dynamic conn = _sapFunctions.Connection;
-                conn.Logoff();
+                try   { conn.Logoff(); }
+                finally { ReleaseCom(conn, "Connection"); }
             }
         }
         catch (Exception ex)
@@ -374,8 +432,47 @@ internal sealed class SapStaWorker : IDisposable
         }
         finally
         {
+            // _sapFunctions itself was never explicitly released before — it just got
+            // dropped here and left for the GC finalizer, which (see ExecuteRfc's cleanup
+            // comment) this bare STA thread can't reliably service. Release it explicitly
+            // before letting go of the field.
+            ReleaseCom(_sapFunctions, "SAPFunctions");
             _sapFunctions = null;
             _isConnected  = false;
+        }
+    }
+
+    /// <summary>
+    /// Explicitly releases a dynamic SAP COM sub-object (a function, table, row, struct,
+    /// or connection proxy) instead of leaving it for the GC finalizer. This worker's
+    /// <see cref="_staThread"/> is a bare STA thread with no Windows message pump — releasing
+    /// an STA-created COM object from another thread (e.g. the .NET finalizer thread) needs
+    /// that Release() call marshaled back into this apartment via its message queue, which
+    /// never gets serviced here, so GC-driven cleanup effectively never happens. Every dynamic
+    /// object obtained from <see cref="_sapFunctions"/> is therefore released synchronously,
+    /// on this same STA thread, right after its last use — see the 2026-08-24 SapServer
+    /// downtime: unreleased RCWs from routine (not oversized) RFC calls accumulated over the
+    /// day until a genuine OutOfMemoryException hit inside COM marshalling.
+    /// </summary>
+    private void ReleaseCom(object? comObject, string what) => ReleaseCom(comObject, what, _logger, SlotId);
+
+    // Static overload so the two static helpers below (BuildResponse, TryReadReturnMessage —
+    // static because they run against a caller-supplied dynamic func, not this worker's own
+    // state) can release their own row/table objects without needing an instance. Logging is
+    // optional there: those methods already swallow per-row/per-table errors individually
+    // (bare catches around field reads), so a release failure is logged when a logger is
+    // available and silently ignored otherwise — consistent with that existing behavior.
+    private static void ReleaseCom(object? comObject, string what, ILogger? logger, int slotId)
+    {
+        if (comObject is null) return;
+        try
+        {
+            if (Marshal.IsComObject(comObject))
+                Marshal.FinalReleaseComObject(comObject);
+        }
+        catch (Exception ex)
+        {
+            logger?.LogWarning(ex, "Failed to release COM object ({What}) on slot {SlotId}.", what, slotId);
         }
     }
 
@@ -416,17 +513,29 @@ internal sealed class SapStaWorker : IDisposable
         // unconditionally: this worker's STA thread processes the queue strictly one item
         // at a time (see WorkerLoop), so nothing else can be using _sapFunctions concurrently
         // — by the time the next call starts, the collection is already back to empty.
+        //
+        // RemoveAll() only clears SAP's own bookkeeping list of added functions though — it
+        // says nothing about the .NET-side RCWs (func itself, every exports()/struct/table/row
+        // object obtained below) that back it. Those need their own explicit release (see
+        // ReleaseCom's doc comment for why leaving them to the GC finalizer doesn't work on
+        // this bare STA thread) — every dynamic sub-object created in this method is released
+        // here, right after its last use.
         try
         {
             // Scalar import parameters — func.exports("KEY").Value pattern (lowercase, indexer call)
             foreach (var (key, value) in request.ImportParameters)
             {
                 if (value is not null)
+                {
+                    dynamic export = func.exports(key);
                     try
-                    { func.exports(key).Value = UnwrapJson(value);  }
+                    { export.Value = UnwrapJson(value); }
                     catch (Exception ex)
                     { Console.WriteLine($"SCALAR IMPORT ERROR: {key} -> {ex.Message}");
                         throw; }
+                    finally
+                    { ReleaseCom(export, $"exports({key})"); }
+                }
             }
 
 
@@ -434,16 +543,20 @@ internal sealed class SapStaWorker : IDisposable
             foreach (var (structName, fields) in request.StructImportParameters)
             {
                 dynamic sapStruct = func.exports(structName);
-
-                foreach (var (field, value) in fields)
+                try
                 {
-                    if (value is not null)
-                        try
-                        { sapStruct[field] = UnwrapJson(value); }
-                        catch (Exception ex)
-                        { Console.WriteLine($"STRUCT FIELD ERROR: {structName}.{field} -> {ex.Message}");
-                            throw; }
+                    foreach (var (field, value) in fields)
+                    {
+                        if (value is not null)
+                            try
+                            { sapStruct[field] = UnwrapJson(value); }
+                            catch (Exception ex)
+                            { Console.WriteLine($"STRUCT FIELD ERROR: {structName}.{field} -> {ex.Message}");
+                                throw; }
+                    }
                 }
+                finally
+                { ReleaseCom(sapStruct, $"exports({structName})"); }
             }
 
 
@@ -453,40 +566,60 @@ internal sealed class SapStaWorker : IDisposable
                 foreach (var (tableName, rows) in request.InputTables)
                 {
                     dynamic table = func.Tables(tableName);
-                    table.Freetable();
-                    foreach (var row in rows)
+                    try
                     {
-                        dynamic sapRow = table.Rows.Add();
-                        foreach (var (col, val) in row)
+                        table.Freetable();
+                        foreach (var row in rows)
                         {
-                            if (val is not null)
-                                try
-                                { sapRow[col] = UnwrapJson(val); }
-                                catch (Exception ex)
-                                { Console.WriteLine($"INPUT TABLE ERROR: {tableName}.{col} -> {ex.Message}");
-                                    throw; }
+                            dynamic sapRow = table.Rows.Add();
+                            try
+                            {
+                                foreach (var (col, val) in row)
+                                {
+                                    if (val is not null)
+                                        try
+                                        { sapRow[col] = UnwrapJson(val); }
+                                        catch (Exception ex)
+                                        { Console.WriteLine($"INPUT TABLE ERROR: {tableName}.{col} -> {ex.Message}");
+                                            throw; }
+                                }
+                            }
+                            finally
+                            { ReleaseCom(sapRow, $"{tableName} input row"); }
                         }
                     }
+                    finally
+                    { ReleaseCom(table, $"Tables({tableName})"); }
                 }
 
                 // Input table Items — clear with Freetable() then populate rows
                 foreach (var (tableName, rows) in request.InputTablesItems)
                 {
                     dynamic table = func.Tables.Item(tableName);
-                    table.Freetable();
-                    foreach (var row in rows)
+                    try
                     {
-                        dynamic sapRow = table.Rows.Add();
-                        foreach (var (col, val) in row)
+                        table.Freetable();
+                        foreach (var row in rows)
                         {
-                            if (val is not null)
-                                try
-                                { sapRow[col] = UnwrapJson(val); }
-                                catch (Exception ex)
-                                { Console.WriteLine($"INPUT TABLE ERROR: {tableName}.{col} -> {ex.Message}");
-                                    throw; }
+                            dynamic sapRow = table.Rows.Add();
+                            try
+                            {
+                                foreach (var (col, val) in row)
+                                {
+                                    if (val is not null)
+                                        try
+                                        { sapRow[col] = UnwrapJson(val); }
+                                        catch (Exception ex)
+                                        { Console.WriteLine($"INPUT TABLE ERROR: {tableName}.{col} -> {ex.Message}");
+                                            throw; }
+                                }
+                            }
+                            finally
+                            { ReleaseCom(sapRow, $"{tableName} input row"); }
                         }
                     }
+                    finally
+                    { ReleaseCom(table, $"Tables.Item({tableName})"); }
                 }
             }
             catch (System.Runtime.InteropServices.COMException ex)
@@ -556,6 +689,11 @@ internal sealed class SapStaWorker : IDisposable
                     "RemoveAll() cleanup failed on slot {SlotId} after '{Function}'.",
                     SlotId, request.FunctionName);
             }
+
+            // func (and typedFunc, which QueryInterface's the same underlying COM identity
+            // rather than creating a distinct one) is released last, after RemoveAll() and
+            // after BuildResponse/TryReadReturnMessage above are done reading from it.
+            ReleaseCom(func, $"function({request.FunctionName})");
         }
     }
 
@@ -583,6 +721,8 @@ internal sealed class SapStaWorker : IDisposable
 
     private static string? TryReadReturnMessage(dynamic func, out string diag)
     {
+        dynamic? tables = null;
+        dynamic? ret = null;
         try
         {
             // When the call failed because the RFC connection was already closed
@@ -591,14 +731,14 @@ internal sealed class SapStaWorker : IDisposable
             // ("Cannot perform runtime binding on a null reference") that says
             // nothing about the actual SAP condition. Guard it explicitly so the
             // log gets a diagnostic that actually explains what happened.
-            dynamic? tables = func.tables;
+            tables = func.tables;
             if (tables is null)
             {
                 diag = "RETURN table unavailable — SAP connection was already closed when the call failed";
                 return null;
             }
 
-            dynamic? ret = tables.Item("RETURN");
+            ret = tables.Item("RETURN");
             if (ret is null)
             {
                 // The COM automation layer returns a null item rather than
@@ -619,22 +759,27 @@ internal sealed class SapStaWorker : IDisposable
 
             foreach (var row in ret.Rows)
             {
-                rowCount++;
-                // Prefer the pre-formatted MESSAGE field; fall back to MESSAGE_V1-V4
-                string msg = row["MESSAGE"]?.ToString() ?? "";
-                if (string.IsNullOrWhiteSpace(msg))
+                try
                 {
-                    var parts = new[]
+                    rowCount++;
+                    // Prefer the pre-formatted MESSAGE field; fall back to MESSAGE_V1-V4
+                    string msg = row["MESSAGE"]?.ToString() ?? "";
+                    if (string.IsNullOrWhiteSpace(msg))
                     {
-                        row["MESSAGE_V1"]?.ToString(),
-                        row["MESSAGE_V2"]?.ToString(),
-                        row["MESSAGE_V3"]?.ToString(),
-                        row["MESSAGE_V4"]?.ToString(),
-                    };
-                    msg = string.Join(" ", parts.Where(p => !string.IsNullOrWhiteSpace(p)));
+                        var parts = new[]
+                        {
+                            row["MESSAGE_V1"]?.ToString(),
+                            row["MESSAGE_V2"]?.ToString(),
+                            row["MESSAGE_V3"]?.ToString(),
+                            row["MESSAGE_V4"]?.ToString(),
+                        };
+                        msg = string.Join(" ", parts.Where(p => !string.IsNullOrWhiteSpace(p)));
+                    }
+                    if (!string.IsNullOrWhiteSpace(msg))
+                        messages.Add($"[{row["TYPE"]}] {msg}");
                 }
-                if (!string.IsNullOrWhiteSpace(msg))
-                    messages.Add($"[{row["TYPE"]}] {msg}");
+                finally
+                { ReleaseCom(row, "RETURN row", null, 0); }
             }
 
             diag = $"{rowCount} row(s)";
@@ -643,6 +788,11 @@ internal sealed class SapStaWorker : IDisposable
         catch (Exception ex)
         {
             diag = $"table access failed: {ex.Message}";
+        }
+        finally
+        {
+            ReleaseCom(ret, "RETURN table", null, 0);
+            ReleaseCom(tables, "func.tables", null, 0);
         }
         return null;
     }
@@ -655,18 +805,25 @@ internal sealed class SapStaWorker : IDisposable
         // Read scalar export (SAP IMPORTING) parameters — lowercase func.imports(name).Value
         foreach (var paramName in request.ExportParameters)
         {
-            try   { parameters[paramName] = func.imports(paramName)?.Value?.ToString(); }
+            dynamic? imp = null;
+            try
+            {
+                imp = func.imports(paramName);
+                parameters[paramName] = imp?.Value?.ToString();
+            }
             catch { parameters[paramName] = null; }
+            finally { ReleaseCom(imp, $"imports({paramName})", null, 0); }
         }
 
         // Read structure export parameters — positional fields joined with a space
         // Mirrors VB: Set x = MyFunc.imports("MESSG") / x(1) & " " & x(2) & ...
         foreach (var (paramName, fieldCount) in request.StructExportParameters)
         {
+            dynamic? s = null;
             try
             {
-                dynamic s      = func.imports(paramName);
-                var     parts  = new List<string>(fieldCount);
+                s = func.imports(paramName);
+                var parts = new List<string>(fieldCount);
                 for (int i = 1; i <= fieldCount; i++)
                 {
                     try { parts.Add(s(i)?.ToString() ?? ""); }
@@ -675,39 +832,47 @@ internal sealed class SapStaWorker : IDisposable
                 parameters[paramName] = string.Join(" ", parts).Trim();
             }
             catch { parameters[paramName] = null; }
+            finally { ReleaseCom(s, $"imports({paramName})", null, 0); }
         }
 
         // Read output tables — lowercase func.tables.Item(name), foreach over rows
         foreach (var (tableName, fields) in request.OutputTables)
         {
             var resultRows = new List<Dictionary<string, object?>>();
+            dynamic? table = null;
             try
             {
-                dynamic table = func.tables.Item(tableName);
+                table = func.tables.Item(tableName);
 
                 foreach (var sapRow in table.Rows)
                 {
-                    var row = new Dictionary<string, object?>();
-
-                    if (fields.Count > 0)
+                    try
                     {
-                        foreach (var field in fields)
+                        var row = new Dictionary<string, object?>();
+
+                        if (fields.Count > 0)
                         {
-                            try   { row[field] = sapRow[field]?.ToString(); }
-                            catch { row[field] = null; }
+                            foreach (var field in fields)
+                            {
+                                try   { row[field] = sapRow[field]?.ToString(); }
+                                catch { row[field] = null; }
+                            }
                         }
-                    }
-                    else
-                    {
-                        // No fields specified — read the WA (work area) column
-                        try { row["WA"] = sapRow["WA"]?.ToString(); }
-                        catch { /* WA column does not exist on this table */ }
-                    }
+                        else
+                        {
+                            // No fields specified — read the WA (work area) column
+                            try { row["WA"] = sapRow["WA"]?.ToString(); }
+                            catch { /* WA column does not exist on this table */ }
+                        }
 
-                    resultRows.Add(row);
+                        resultRows.Add(row);
+                    }
+                    finally
+                    { ReleaseCom(sapRow, $"{tableName} output row", null, 0); }
                 }
             }
             catch { /* Table does not exist or has no rows — return empty list */ }
+            finally { ReleaseCom(table, $"tables.Item({tableName})", null, 0); }
 
             tables[tableName] = resultRows;
         }
@@ -739,6 +904,15 @@ internal sealed class SapStaWorker : IDisposable
                       or "RFC_ABAP_RUNTIME_FAILURE"
                       or "RFC_INVALID_HANDLE"
                       or "RFC_CLOSED";
+
+    // A real OutOfMemoryException can reach here either directly, or wrapped as the
+    // InnerException of a SapConnectionException (see ExecuteRfc's func.Add() catch and
+    // Connect()'s catch, both of which wrap "ex is not SapConnectionException" — including
+    // OOM — into a SapConnectionException so ProcessItem's normal reconnect-and-retry path
+    // picks it up). Checking both here means every catch site below can fail fast on a
+    // genuinely fatal OOM without duplicating that unwrap logic at each call site.
+    private static bool IsOutOfMemory(Exception ex) =>
+        ex is OutOfMemoryException || ex.InnerException is OutOfMemoryException;
 
     // -------------------------------------------------------------------------
 
