@@ -197,19 +197,24 @@ internal static class PurchasingHelper
     }
 
     /// <summary>
-    /// UNVERIFIED — unlike every other request builder in this file (all
-    /// ported field-for-field from the user's working VBA macro), there is
-    /// no proven reference for reading a PO's price back from SAP. This is
-    /// a best-effort implementation using BAPI_PO_GETDETAIL1's standard,
-    /// widely-documented shape: PURCHASEORDER in, ITEM_CONDITIONS = 'X' to
-    /// populate the POCOND pricing-conditions table. Needs a real smoke
-    /// test against a live PO before being trusted. Designed to fail soft
-    /// either way — PurchasingController.GetPoPrice/ParsePoPrices return an
-    /// empty result rather than throwing if the guessed table/field names
-    /// don't match this SAP system, and the Normanton-Nexus caller treats a
-    /// missing price the same as "SAP hasn't priced this line" (falls back
-    /// to showing "Per SAP condition" on the PO PDF) rather than a hard
-    /// failure — see routes/performance.js's create-po route.
+    /// Reads a PO's price back via BAPI_PO_GETDETAIL1. Originally guessed at
+    /// an ITEM_CONDITIONS = 'X' import flag to request the POCOND pricing-
+    /// conditions table (the widely-documented shape elsewhere), but that
+    /// parameter doesn't exist on this SAP system at all — confirmed via the
+    /// Normanton-Nexus BAPI Inspector's real RFC_GET_FUNCTION_INTERFACE dump
+    /// of this function's actual interface here (no CONDITIONS-anything
+    /// import parameter exists), and it crashed the call outright (fixed
+    /// separately in SapStaWorker.ExecuteRfc's null-guards, but the
+    /// parameter itself was still just wrong). That same dump confirms
+    /// POCOND is a plain TABLE-class parameter with exactly the fields read
+    /// below, populated unconditionally alongside POITEM/POSCHEDULE/etc.
+    /// whenever PURCHASEORDER is supplied — no flag needed. Still
+    /// unconfirmed: whether POCOND is actually non-empty/priced for a real
+    /// PO (needs a live PO to check) — PurchasingController.GetPoPrice/
+    /// ParsePoPrices return an empty result rather than throwing either way,
+    /// and Normanton-Nexus treats a missing price as "SAP hasn't priced this
+    /// line" (falls back to "Per SAP condition" on the PO PDF) rather than a
+    /// hard failure — see routes/performance.js's create-po route.
     /// </summary>
     internal const string FnPoGetDetail = "BAPI_PO_GETDETAIL1";
 
@@ -217,7 +222,6 @@ internal static class PurchasingHelper
     {
         return new RfcRequestBuilder(FnPoGetDetail)
             .Import("PURCHASEORDER",  SapPad.Pad(poNumber, 10))
-            .Import("ITEM_CONDITIONS", "X")
             .ReadTable("POCOND", "ITM_NUMBER", "COND_TYPE", "COND_VALUE", "CURRENCY", "COND_UNIT")
             .Build();
     }

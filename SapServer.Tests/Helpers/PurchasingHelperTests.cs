@@ -168,11 +168,14 @@ public class PurchasingHelperTests
     }
 
     [Fact]
-    public void BuildPoGetPriceRequest_pads_the_PO_number_and_requests_ITEM_CONDITIONS()
+    public void BuildPoGetPriceRequest_pads_the_PO_number_and_reads_POCOND()
     {
         var request = PurchasingHelper.BuildPoGetPriceRequest("4500012345");
         Assert.Equal("4500012345", request.ImportParameters["PURCHASEORDER"]); // already 10 chars, pad is a no-op
-        Assert.Equal("X", request.ImportParameters["ITEM_CONDITIONS"]);
+        // No ITEM_CONDITIONS import — confirmed via a real RFC_GET_FUNCTION_INTERFACE
+        // dump that this SAP system's BAPI_PO_GETDETAIL1 has no such parameter (it
+        // crashed the call outright); POCOND is read unconditionally instead.
+        Assert.False(request.ImportParameters.ContainsKey("ITEM_CONDITIONS"));
         Assert.True(request.OutputTables.ContainsKey("POCOND"));
     }
 
