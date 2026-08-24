@@ -527,7 +527,20 @@ internal sealed class SapStaWorker : IDisposable
             {
                 if (value is not null)
                 {
+                    // func.exports(name) returns null (rather than throwing) when this SAP
+                    // system's real signature for the function has no EXPORTING parameter
+                    // by that name — dereferencing it unchecked crashed as a raw, undiagnosable
+                    // Microsoft.CSharp.RuntimeBinderException ("Cannot perform runtime binding
+                    // on a null reference") instead of a clean, per-call SapExecutionException.
+                    // Hit for real via PurchasingHelper.BuildPoGetPriceRequest's guessed
+                    // ITEM_CONDITIONS parameter (see that file's UNVERIFIED header comment) —
+                    // this turns that same failure mode into a message that actually names the
+                    // bad parameter instead of an unhandled 500.
                     dynamic export = func.exports(key);
+                    if (export is null)
+                        throw new SapExecutionException(request.FunctionName,
+                            $"'{request.FunctionName}' has no EXPORTING parameter named '{key}'.",
+                            $"func.exports(\"{key}\") returned null — check the real BAPI/RFC signature in SE37 for this SAP system.");
                     try
                     { export.Value = UnwrapJson(value); }
                     catch (Exception ex)
@@ -543,6 +556,10 @@ internal sealed class SapStaWorker : IDisposable
             foreach (var (structName, fields) in request.StructImportParameters)
             {
                 dynamic sapStruct = func.exports(structName);
+                if (sapStruct is null)
+                    throw new SapExecutionException(request.FunctionName,
+                        $"'{request.FunctionName}' has no EXPORTING structure named '{structName}'.",
+                        $"func.exports(\"{structName}\") returned null — check the real BAPI/RFC signature in SE37 for this SAP system.");
                 try
                 {
                     foreach (var (field, value) in fields)
@@ -566,6 +583,10 @@ internal sealed class SapStaWorker : IDisposable
                 foreach (var (tableName, rows) in request.InputTables)
                 {
                     dynamic table = func.Tables(tableName);
+                    if (table is null)
+                        throw new SapExecutionException(request.FunctionName,
+                            $"'{request.FunctionName}' has no table parameter named '{tableName}'.",
+                            $"func.Tables(\"{tableName}\") returned null — check the real BAPI/RFC signature in SE37 for this SAP system.");
                     try
                     {
                         table.Freetable();
@@ -596,6 +617,10 @@ internal sealed class SapStaWorker : IDisposable
                 foreach (var (tableName, rows) in request.InputTablesItems)
                 {
                     dynamic table = func.Tables.Item(tableName);
+                    if (table is null)
+                        throw new SapExecutionException(request.FunctionName,
+                            $"'{request.FunctionName}' has no table parameter named '{tableName}'.",
+                            $"func.Tables.Item(\"{tableName}\") returned null — check the real BAPI/RFC signature in SE37 for this SAP system.");
                     try
                     {
                         table.Freetable();
