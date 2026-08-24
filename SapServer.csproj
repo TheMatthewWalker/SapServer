@@ -28,6 +28,39 @@
   <ItemGroup Condition="!Exists('libs\Interop.SAPFunctions64.dll')">
       <ProjectReference Include="interop-stubs\SAPFunctions64.DevStub\SAPFunctions64.DevStub.csproj" />
   </ItemGroup>
+  <!--
+    SAP NCo rebuild spike (Services/Nco/*, see CLAUDE.md's "SAP NCo Spike"
+    section) — same present-DLL-wins pattern as SAPFunctions64 above. Drop
+    the real sapnco.dll/sapnco_utils.dll (downloaded from the SAP Support
+    Portal under a licensed S-user — see the earlier "newer sapnco" DLL
+    discussion) into libs\ to compile/run against the real API; until then
+    this falls back to interop-stubs\SapNco.DevStub, which only supplies
+    enough of SAP.Middleware.Connector's shape to compile.
+  -->
+  <ItemGroup Condition="Exists('libs\sapnco.dll') And Exists('libs\sapnco_utils.dll')">
+      <Reference Include="sapnco">
+        <HintPath>libs\sapnco.dll</HintPath>
+        <Private>true</Private>
+      </Reference>
+      <Reference Include="sapnco_utils">
+        <HintPath>libs\sapnco_utils.dll</HintPath>
+        <Private>true</Private>
+      </Reference>
+  </ItemGroup>
+  <ItemGroup Condition="!(Exists('libs\sapnco.dll') And Exists('libs\sapnco_utils.dll'))">
+      <ProjectReference Include="interop-stubs\SapNco.DevStub\SapNco.DevStub.csproj" />
+  </ItemGroup>
+  <!--
+    NCo's native unmanaged binaries (librfc32.dll/librfcum.dll, icudt*/icuin*/
+    icuuc*.dll, matching VC++ runtime) — copy the whole matched-version set
+    from the SAP NCo download into libs\sapnco-native\ (never mix DLL
+    versions across NCo releases — see the earlier "newer sapnco" discussion).
+  -->
+  <ItemGroup Condition="Exists('libs\sapnco-native')">
+    <None Include="libs\sapnco-native\*.dll">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.*" />
     <PackageReference Include="Microsoft.Data.SqlClient" Version="6.*" />

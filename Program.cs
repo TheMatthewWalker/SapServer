@@ -7,6 +7,7 @@ using SapServer.Configuration;
 using SapServer.Middleware;
 using SapServer.Services;
 using SapServer.Services.Interfaces;
+using SapServer.Services.Nco;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -23,6 +24,9 @@ builder.Services.Configure<SapPoolOptions>(
 
 builder.Services.Configure<AuthOptions>(
     builder.Configuration.GetSection(AuthOptions.SectionName));
+
+builder.Services.Configure<SapNcoOptions>(
+    builder.Configuration.GetSection(SapNcoOptions.SectionName));
 
 // Eagerly read auth options so we can configure JWT validation below
 var authOpts = builder.Configuration
@@ -98,6 +102,13 @@ builder.Services.AddSingleton<ISapConnectionPool, SapConnectionPool>();
 
 // Background service that sends keep-alive pings and logs disconnected workers
 builder.Services.AddHostedService<SapSessionMonitor>();
+
+// ---------------------------------------------------------------------------
+// SAP NCo rebuild spike — parallel to the COM pool above, not a replacement.
+// Singleton so the registered destination configuration + NCo connection
+// pool live for the app's lifetime. See CLAUDE.md's "SAP NCo Spike" section.
+// ---------------------------------------------------------------------------
+builder.Services.AddSingleton<INcoRfcService, NcoRfcService>();
 
 // ---------------------------------------------------------------------------
 // Permission service cache
