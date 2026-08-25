@@ -956,26 +956,52 @@ internal sealed class SapStaWorker : IDisposable
         dynamic? rc = null;
         try
         {
-            // The string indexer (rc["SUBRC"]) that works on table rows does NOT
-            // work here — a live run showed every single field as "(unreadable)"
-            // uniformly, which only makes sense if the indexer itself isn't
-            // supported on an "imports" parameter object. func.imports(name) is
-            // read positionally elsewhere in this file (ReadStructParam's s(i)
-            // pattern) — SYST's field order from the SE37 dump gives us the
-            // position to pair with each name here.
+            // Two prior attempts both failed on EVERY field uniformly — the
+            // string indexer (rc["SUBRC"]) and positional call (rc(24)) alike,
+            // including index 1. That uniform failure (not a per-field one) is
+            // the same signature this file documents elsewhere for func.exports
+            // returning null instead of throwing when SAP has no real parameter
+            // by that name/shape (see the EXPORTING-structure-not-found comment
+            // above). So before trying to read fields at all, confirm whether
+            // `rc` itself is null, and fall back to whatever .Value / GetType
+            // reveal — that's strictly more diagnostic than guessing at another
+            // field-access pattern blind.
             rc = func.imports("RC");
-            var rcValues = new List<string>();
-            for (int i = 0; i < systFields.Length; i++)
+            if (rc is null)
             {
-                string value;
-                try { value = rc(i + 1)?.ToString() ?? "(null)"; }
-                catch { value = "(unreadable)"; }
-                if (!string.IsNullOrWhiteSpace(value) && value != "0" && value != "(null)")
-                    rcValues.Add($"{systFields[i]}={value}");
+                logger.LogWarning(
+                    "ZDELFLAG DIAGNOSTIC — func.imports(\"RC\") returned null. " +
+                    "SAP has no EXPORTING parameter named RC as far as this COM call is concerned " +
+                    "(despite SE37 showing one) — field-level access is moot until this returns something.");
             }
-            logger.LogWarning(
-                "ZDELFLAG DIAGNOSTIC — RC (SYST) non-blank/non-zero fields: {Fields}",
-                rcValues.Count > 0 ? string.Join(", ", rcValues) : "(all blank/zero/null)");
+            else
+            {
+                string typeName;
+                try { typeName = ((object)rc).GetType().FullName ?? "(unknown)"; }
+                catch (Exception ex) { typeName = $"(GetType failed: {ex.Message})"; }
+
+                string rawValue;
+                try { rawValue = rc.Value?.ToString() ?? "(null)"; }
+                catch (Exception ex) { rawValue = $"(Value read failed: {ex.Message})"; }
+
+                logger.LogWarning(
+                    "ZDELFLAG DIAGNOSTIC — RC import parameter: COM type={TypeName}, " +
+                    "raw .Value (len {Len})='{Value}'",
+                    typeName, rawValue.Length, rawValue);
+
+                var rcValues = new List<string>();
+                for (int i = 0; i < systFields.Length; i++)
+                {
+                    string value;
+                    try { value = rc(i + 1)?.ToString() ?? "(null)"; }
+                    catch { value = "(unreadable)"; }
+                    if (!string.IsNullOrWhiteSpace(value) && value != "0" && value != "(null)")
+                        rcValues.Add($"{systFields[i]}={value}");
+                }
+                logger.LogWarning(
+                    "ZDELFLAG DIAGNOSTIC — RC (SYST) non-blank/non-zero positional fields: {Fields}",
+                    rcValues.Count > 0 ? string.Join(", ", rcValues) : "(all blank/zero/null/unreadable)");
+            }
         }
         catch (Exception ex)
         {
