@@ -680,7 +680,7 @@ internal sealed class SapStaWorker : IDisposable
                     detail);
             }
 
-            return BuildResponse(func, request, _logger);
+            return BuildResponse(func, request);
         }
         finally
         {
@@ -804,7 +804,7 @@ internal sealed class SapStaWorker : IDisposable
         return null;
     }
 
-    private static RfcResponse BuildResponse(dynamic func, RfcRequest request, ILogger logger)
+    private static RfcResponse BuildResponse(dynamic func, RfcRequest request)
     {
         var parameters = new Dictionary<string, object?>();
         var tables     = new Dictionary<string, List<Dictionary<string, object?>>>();
@@ -884,143 +884,7 @@ internal sealed class SapStaWorker : IDisposable
             tables[tableName] = resultRows;
         }
 
-        // TEMP DIAGNOSTIC — Normanton Nexus warehouse picksheet completion is
-        // maintaining ZDELFLAG correctly in SAP, but every run lands as
-        // 'Warning' with blank type/message text. Root cause found by reading
-        // the RFC signature directly in SE37: ET_MESSAGE is typed ZERRORTEXT
-        // (fields LINE/TEXT — no TYPE or MESSAGE field exists at all, so
-        // ZdelflagHelpers.BuildMaintainRequest's ReadTable("ET_MESSAGE", "TYPE",
-        // "MESSAGE") never matches anything real), and RC is typed SYST (the
-        // full system-fields structure, not a plain return code — so
-        // ReadParam("RC")'s scalar .Value read is meaningless too). Dumping
-        // the real field values here so the actual SUBRC/MSGTY/MSGID/MSGNO/
-        // MSGV1-4/LINE/TEXT content can be read off the next live run and the
-        // correct fields identified before ZdelflagHelpers.cs is fixed for
-        // real. Remove this block once that's done.
-        if (request.FunctionName == "Z_MAINT_ZDELFLAG_ZDELPACK")
-            DumpZdelflagDiagnostics(func, logger);
-
         return new RfcResponse { Parameters = parameters, Tables = tables };
-    }
-
-    // TEMP DIAGNOSTIC — see BuildResponse's call site above. Reads RC (typed
-    // SYST) field-by-field via the string indexer and logs every field name
-    // SE37 reported for it, plus every ET_MESSAGE row's LINE/TEXT. Never
-    // throws — a field SAP doesn't actually populate for this call just logs
-    // as "(unreadable)" rather than aborting the dump. Goes through the
-    // passed-in ILogger (Serilog), not Console.WriteLine — this app's
-    // Production log sink is Serilog-only (see Program.cs), so raw
-    // Console.WriteLine output never reaches the on-disk log at all.
-    private static void DumpZdelflagDiagnostics(dynamic func, ILogger logger)
-    {
-        string[] systFields =
-        [
-            "INDEX","PAGNO","TABIX","TFILL","TLOPC","TMAXL","TOCCU","TTABC","TSTIS","TTABI",
-            "DBCNT","FDPOS","COLNO","LINCT","LINNO","LINSZ","PAGCT","MACOL","MAROW","TLENG",
-            "SFOFF","WILLI","LILLI","SUBRC","FLENG","CUCOL","CUROW","LSIND","LISTI","STEPL",
-            "TPAGI","WINX1","WINY1","WINX2","WINY2","WINCO","WINRO","WINDI","SROWS","SCOLS",
-            "LOOPC","FOLEN","FODEC","TZONE","DAYST","FTYPE","APPLI","FDAYW","CCURS","CCURT",
-            "DEBUG","CTYPE","INPUT","LANGU","MODNO","BATCH","BINPT","CALLD","DYNNR","DYNGR",
-            "NEWPA","PRI40","RSTRT","WTITL","CPAGE","DBNAM","MANDT","PREFX","FMKEY","PEXPI",
-            "PRINI","PRIMM","PRREL","PLAYO","PRBIG","PLAYP","PRNEW","PRLOG","PDEST","PLIST",
-            "PAUTH","PRDSN","PNWPA","CALLR","REPI2","RTITL","PRREC","PRTXT","PRABT","LPASS",
-            "NRPAG","PAART","PRCOP","BATZS","BSPLD","BREP4","BATZO","BATZD","BATZW","BATZM",
-            "CTABL","DBSYS","DCSYS","MACDB","SYSID","OPSYS","PFKEY","SAPRL","TCODE","UCOMM",
-            "CFWAE","CHWAE","SPONO","SPONR","WAERS","CDATE","DATUM","SLSET","SUBTY","SUBCS",
-            "GROUP","FFILE","UZEIT","DSNAM","TABID","TFDSN","UNAME","LSTAT","ABCDE","MARKY",
-            "SFNAM","TNAME","MSGLI","TITLE","ENTRY","LISEL","ULINE","XCODE","CPROG","XPROG",
-            "XFORM","LDBPG","TVAR0","TVAR1","TVAR2","TVAR3","TVAR4","TVAR5","TVAR6","TVAR7",
-            "TVAR8","TVAR9","MSGID","MSGTY","MSGNO","MSGV1","MSGV2","MSGV3","MSGV4","ONCOM",
-            "VLINE","WINSL","STACO","STARO","DATAR","HOST","LOCDB","LOCOP","DATLO","TIMLO",
-            "ZONLO",
-        ];
-
-        dynamic? rc = null;
-        try
-        {
-            // Two prior attempts both failed on EVERY field uniformly — the
-            // string indexer (rc["SUBRC"]) and positional call (rc(24)) alike,
-            // including index 1. That uniform failure (not a per-field one) is
-            // the same signature this file documents elsewhere for func.exports
-            // returning null instead of throwing when SAP has no real parameter
-            // by that name/shape (see the EXPORTING-structure-not-found comment
-            // above). So before trying to read fields at all, confirm whether
-            // `rc` itself is null, and fall back to whatever .Value / GetType
-            // reveal — that's strictly more diagnostic than guessing at another
-            // field-access pattern blind.
-            rc = func.imports("RC");
-            if (rc is null)
-            {
-                logger.LogWarning(
-                    "ZDELFLAG DIAGNOSTIC — func.imports(\"RC\") returned null. " +
-                    "SAP has no EXPORTING parameter named RC as far as this COM call is concerned " +
-                    "(despite SE37 showing one) — field-level access is moot until this returns something.");
-            }
-            else
-            {
-                string typeName;
-                try { typeName = ((object)rc).GetType().FullName ?? "(unknown)"; }
-                catch (Exception ex) { typeName = $"(GetType failed: {ex.Message})"; }
-
-                string rawValue;
-                try { rawValue = rc.Value?.ToString() ?? "(null)"; }
-                catch (Exception ex) { rawValue = $"(Value read failed: {ex.Message})"; }
-
-                logger.LogWarning(
-                    "ZDELFLAG DIAGNOSTIC — RC import parameter: COM type={TypeName}, " +
-                    "raw .Value (len {Len})='{Value}'",
-                    typeName, rawValue.Length, rawValue);
-
-                var rcValues = new List<string>();
-                for (int i = 0; i < systFields.Length; i++)
-                {
-                    string value;
-                    try { value = rc(i + 1)?.ToString() ?? "(null)"; }
-                    catch { value = "(unreadable)"; }
-                    if (!string.IsNullOrWhiteSpace(value) && value != "0" && value != "(null)")
-                        rcValues.Add($"{systFields[i]}={value}");
-                }
-                logger.LogWarning(
-                    "ZDELFLAG DIAGNOSTIC — RC (SYST) non-blank/non-zero positional fields: {Fields}",
-                    rcValues.Count > 0 ? string.Join(", ", rcValues) : "(all blank/zero/null/unreadable)");
-            }
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "ZDELFLAG DIAGNOSTIC — failed to read RC structure.");
-        }
-        finally
-        { ReleaseCom(rc, "RC diagnostic dump", null, 0); }
-
-        dynamic? table = null;
-        try
-        {
-            table = func.tables.Item("ET_MESSAGE");
-            int rowNum = 0;
-            foreach (var sapRow in table.Rows)
-            {
-                rowNum++;
-                try
-                {
-                    string line, text;
-                    try { line = sapRow["LINE"]?.ToString() ?? "(null)"; } catch { line = "(unreadable)"; }
-                    try { text = sapRow["TEXT"]?.ToString() ?? "(null)"; } catch { text = "(unreadable)"; }
-                    logger.LogWarning(
-                        "ZDELFLAG DIAGNOSTIC — ET_MESSAGE row {RowNum}: LINE={Line} TEXT='{Text}'",
-                        rowNum, line, text);
-                }
-                finally
-                { ReleaseCom(sapRow, "ET_MESSAGE diagnostic row", null, 0); }
-            }
-            if (rowNum == 0)
-                logger.LogWarning("ZDELFLAG DIAGNOSTIC — ET_MESSAGE table has no rows.");
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "ZDELFLAG DIAGNOSTIC — failed to read ET_MESSAGE table.");
-        }
-        finally
-        { ReleaseCom(table, "ET_MESSAGE diagnostic dump", null, 0); }
     }
 
     // RFC_INVALID_HANDLE means the session/connection handle itself is no longer valid
