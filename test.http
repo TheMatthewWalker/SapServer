@@ -1,5 +1,5 @@
 @baseUrl = http://localhost:5200
-@token = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJub3JtYW50b24tbmV4dXMiLCJhdWQiOiJzYXAtc2VydmVyIiwic3ViIjoiZGV2IiwidXNlcklkIjoxLCJyb2xlIjoiYWRtaW4iLCJpYXQiOjE3ODY0NDU1NjksImV4cCI6MTc4NjQ0OTE2OX0.32imONa4eact2lvVNslzaYrrTuJpEifEPAoZXLSBLMM
+@token = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJub3JtYW50b24tbmV4dXMiLCJhdWQiOiJzYXAtc2VydmVyIiwic3ViIjoiZGV2IiwidXNlcklkIjoxLCJyb2xlIjoiYWRtaW4iLCJpYXQiOjE3ODcwNjQ3MDYsImV4cCI6MTc4NzA2ODMwNn0.uwQrPvcjsJmAJG8RN1Ia1bfZ6Xe8gbJJ1t759AtstmY
 
 
 
@@ -128,6 +128,16 @@ Authorization: Bearer {{token}}
         }
     ]
     }
+
+
+### GET /api/sapnco/ping  (test endpoint for SAPNCO connectivity — returns the built
+GET {{baseUrl}}/api/sapnco/ping
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+}
+###
 
 
 
@@ -378,5 +388,54 @@ Authorization: Bearer {{token}}
 
 {
     "Materials": ["30005R", "30007R", "TCEL9-9CBT"]
+}
+###
+
+
+### POST /api/warehouse/goods-issue?dryRun=true  (returns the built
+### BAPI_DELIVERYPROCESSING_EXEC RfcRequest without touching the pool —
+### sanity-check field names/values before ever hitting SAP. Swap
+### DeliveryNumber for a real test delivery number before the CheckMode/real
+### calls below.)
+POST {{baseUrl}}/api/warehouse/goods-issue?dryRun=true
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+    "DeliveryNumber": "80001234"
+}
+###
+
+
+### POST /api/warehouse/goods-issue  (CheckMode — simulate only. REQUEST's
+### minimal field set (DOCUMENT_NUMB + dates only) is a guess pending live
+### confirmation — see GoodsIssueModels.cs's header comment. Run this first;
+### iterate the fields GoodsIssueHelper.BuildGoodsIssueRequest sends based on
+### whatever RETURN actually complains about, rather than pre-guessing the
+### rest of REQUEST's ~200 fields. Only move to a real call below once this
+### comes back with a sensible RETURN message rather than a generic RFC
+### failure.)
+POST {{baseUrl}}/api/warehouse/goods-issue
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+    "DeliveryNumber": "80001234",
+    "CheckMode": true
+}
+###
+
+
+### POST /api/warehouse/goods-issue  (real call — only run once CheckMode
+### above comes back clean, against a real throwaway/test delivery. Posts
+### Goods Issue for real. Also worth checking: does this actually need the
+### BAPI_TRANSACTION_COMMIT the controller sends, or does GI post some other
+### way — compare against what actually shows up in SAP for the delivery.)
+POST {{baseUrl}}/api/warehouse/goods-issue
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+    "DeliveryNumber": "80001234"
 }
 ###
