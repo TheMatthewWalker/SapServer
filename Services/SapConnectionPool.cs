@@ -91,17 +91,6 @@ public sealed class SapConnectionPool : ISapConnectionPool, IDisposable
     {
         var worker = SelectWorker();
 
-        // Routing decision, logged at the moment of enqueue — compare this
-        // slot/queue-depth against SapStaWorker's own "starting"/"finished"
-        // log lines (timestamp + managed thread id) to tell apart two very
-        // different problems: SelectWorker() routing everything onto the
-        // same slot (a routing bug), vs. calls landing on genuinely
-        // different slots/threads but still not overlapping in time (something
-        // serializing further down, e.g. inside the SAP GUI COM layer itself).
-        _logger.LogInformation(
-            "RFC '{Function}' routed to slot {SlotId} (queue depth {QueueDepth} before enqueue).",
-            request.FunctionName, worker.SlotId, worker.QueueDepth);
-
         var tcs    = new TaskCompletionSource<RfcResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
         var item   = new SapWorkItem(request, tcs, cancellationToken);
 
