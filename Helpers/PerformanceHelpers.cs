@@ -331,7 +331,10 @@ internal static class PerformanceHelpers
     {
         var builder = new RfcRequestBuilder(FnReadTables)
             .Import("DELIMITER", "|")
-            .Import("ROWCOUNT",  "")
+            // See LogisticsHelpers.BuildPicksheetRequest's comment - ROWCOUNT
+            // must be a real integer for real SAP NCo (0 = RFC_READ_TABLE's
+            // standard "no limit"), not an empty string.
+            .Import("ROWCOUNT",  0)
             .Import("NO_DATA",   " ")
             .TableRow("QUERY_TABLES", new { TABNAME = "MARC" })
             .TableItemRow("query_FIELDS", new { TABNAME = "MARC", FIELDNAME = "MATNR" })
