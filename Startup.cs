@@ -1,3 +1,4 @@
+using System.IO;
 using System.Text;
 using System.Web.Hosting;
 using System.Web.Http;
@@ -61,9 +62,26 @@ public class Startup
         IAppBuilder app, IConfiguration configuration, Action<IServiceCollection>? overrideServices = null,
         bool startSessionMonitor = true)
     {
-        Log.Logger = new LoggerConfiguration()
-            .ReadFrom.Configuration(configuration)
-            .CreateLogger();
+        // The File sink's path is deliberately set here in code rather than
+        // via the "Serilog:WriteTo" JSON section (see appsettings.example.json,
+        // which only configures Console there) - Serilog.Sinks.File resolves a
+        // relative path against Environment.CurrentDirectory, which is not
+        // reliably the site root under IIS (see ResolveBasePath()'s own
+        // comment). Gated on HostingEnvironment.IsHosted, same as
+        // BuildConfiguration()'s basePath, so SapServer.Tests (which runs
+        // ConfigurePipeline directly via TestServer, never IIS-hosted) never
+        // writes a log file into its own bin output on every test run.
+        var loggerConfig = new LoggerConfiguration().ReadFrom.Configuration(configuration);
+        if (HostingEnvironment.IsHosted)
+        {
+            string logsPath = Path.Combine(ResolveBasePath(), "logs", "sapserver-.log");
+            loggerConfig = loggerConfig.WriteTo.File(
+                logsPath,
+                rollingInterval: RollingInterval.Day,
+                retainedFileCountLimit: 30,
+                outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] {Message:lj}{NewLine}{Exception}");
+        }
+        Log.Logger = loggerConfig.CreateLogger();
 
         var services = new ServiceCollection();
 
@@ -205,9 +223,7 @@ public class Startup
     /// </summary>
     private static IConfiguration BuildConfiguration()
     {
-        string basePath = HostingEnvironment.IsHosted
-            ? HostingEnvironment.MapPath("~/")!
-            : AppDomain.CurrentDomain.BaseDirectory;
+        string basePath = ResolveBasePath();
 
         string environmentName = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ?? "Production";
 
@@ -218,4 +234,20 @@ public class Startup
             .AddEnvironmentVariables()
             .Build();
     }
+
+    /// <summary>
+    /// The site's physical root under real IIS hosting, or the test/dev
+    /// AppDomain's own output directory otherwise — shared by
+    /// BuildConfiguration() (above) and ConfigurePipeline()'s Serilog file
+    /// sink (below), both of which need an absolute path rather than trusting
+    /// Environment.CurrentDirectory: under IIS, a process's actual working
+    /// directory is whatever w3wp.exe/WAS started it with (commonly
+    /// %windir%\System32\inetsrv), NOT the site root, so any relative path
+    /// resolved the ordinary way would land in the wrong place - or somewhere
+    /// the app pool identity has no write permission at all.
+    /// </summary>
+    private static string ResolveBasePath() =>
+        HostingEnvironment.IsHosted
+            ? HostingEnvironment.MapPath("~/")!
+            : AppDomain.CurrentDomain.BaseDirectory;
 }
