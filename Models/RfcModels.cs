@@ -52,7 +52,7 @@ public sealed class RfcResponse
     public Dictionary<string, List<Dictionary<string, object?>>> Tables { get; init; } = new();
 }
 
-/// <summary>Health status snapshot of a single STA pool worker.</summary>
+/// <summary>Health status snapshot of a single currently-active pinned or elevated SAP session.</summary>
 public sealed class WorkerStatus
 {
     public int      SlotId       { get; init; }

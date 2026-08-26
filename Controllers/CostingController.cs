@@ -109,20 +109,26 @@ public sealed class CostingController : SapControllerBase
         //_logger.LogInformation(
         //"User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "freight-posting");
 
-        var worker = _pool.AcquireWorker();
-
-        var request = CostingHelper.BuildFreightPostingRequest(body, "");
-        var data = await _pool.ExecuteOnWorkerAsync(worker, request, ct);
-        var response = CostingHelper.ParseFreightPostingRows(data);
-
-        if (string.IsNullOrEmpty(response.AccountingNumber))
+        var worker = await _pool.AcquireWorkerAsync(ct);
+        try
         {
-            var rollback = await _pool.ExecuteOnWorkerAsync(worker, CommitHelper.BuildBapiRollback(), ct);
-            return Content(HttpStatusCode.BadRequest, ApiResponse<FreightPostingRow>.Fail("INVALID_DATA", "Freight posting failed. Transaction rolled back.", response));
-        }
+            var request = CostingHelper.BuildFreightPostingRequest(body, "");
+            var data = await _pool.ExecuteOnWorkerAsync(worker, request, ct);
+            var response = CostingHelper.ParseFreightPostingRows(data);
 
-        var commit = await _pool.ExecuteOnWorkerAsync(worker, CommitHelper.BuildBapiCommit(), ct);
-        return Ok(ApiResponse<FreightPostingRow>.Ok(response));
+            if (string.IsNullOrEmpty(response.AccountingNumber))
+            {
+                var rollback = await _pool.ExecuteOnWorkerAsync(worker, CommitHelper.BuildBapiRollback(), ct);
+                return Content(HttpStatusCode.BadRequest, ApiResponse<FreightPostingRow>.Fail("INVALID_DATA", "Freight posting failed. Transaction rolled back.", response));
+            }
+
+            var commit = await _pool.ExecuteOnWorkerAsync(worker, CommitHelper.BuildBapiCommit(), ct);
+            return Ok(ApiResponse<FreightPostingRow>.Ok(response));
+        }
+        finally
+        {
+            await _pool.ReleaseWorkerAsync(worker);
+        }
     }
 
 
@@ -143,7 +149,9 @@ public sealed class CostingController : SapControllerBase
 
         var results = new List<FreightPostingRow>();
 
-        // Limit to your COM pool size (3)
+        // Client-side batch throttle — independent of SapNco:PoolSize/MaxPoolSize
+        // (the stateless pool ExecuteAsync below actually runs against), kept
+        // deliberately conservative since these are real postings, not reads.
         var semaphore = new SemaphoreSlim(3);
 
         var tasks = requests.Select(async request =>

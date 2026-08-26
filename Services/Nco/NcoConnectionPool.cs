@@ -9,28 +9,53 @@ using SapServer.Services.Interfaces;
 namespace SapServer.Services.Nco;
 
 /// <summary>
-/// SAP NCo-backed implementation of ISapConnectionPool — replaces the old
-/// COM/STA-thread SapConnectionPool entirely (see CLAUDE.md). Routing
-/// strategy, elevated acquire/release semantics, and the ISapConnectionPool
-/// contract itself are unchanged from the COM version; every domain
-/// controller was written against that interface, not against COM directly,
-/// so this swap needed no controller-level redesign beyond the mechanical
-/// ASP.NET-Core-to-WebApi2 port.
+/// SAP NCo-backed implementation of ISapConnectionPool. Two independent
+/// execution paths (see SapNcoOptions' class doc for the full rationale):
 ///
-/// Registered as a singleton so the pool (and its worker threads + NCo
-/// connections) lives for the application lifetime.
+///   - ExecuteAsync (ordinary, non-transactional calls — the bulk of
+///     traffic) runs straight against NcoStatelessPool, which calls into
+///     NCo's own thread-safe internal connection pool. No dedicated thread,
+///     no session pinning, no per-request acquire/release.
+///
+///   - AcquireWorkerAsync/AcquireElevatedWorkerAsync + ExecuteOnWorkerAsync
+///     (transactional sequences needing RfcSessionManager.BeginContext to
+///     pin one thread to one connection for a create-BAPI +
+///     COMMIT/ROLLBACK) construct a fresh, single-use NcoWorker on acquire
+///     and tear it down on release — bounded by a semaphore, not by a fixed
+///     set of always-alive threads.
+///
+/// The ISapConnectionPool contract (and every domain controller written
+/// against it) doesn't distinguish "COM" from "NCo" — only this rebuild's
+/// original first pass over-applied the old COM-era always-on-thread-pool
+/// shape; this version corrects that while keeping the same public surface
+/// controllers already use (AcquireWorkerAsync/AcquireElevatedWorkerAsync
+/// are now async and require an explicit release, matching the elevated
+/// pattern every caller already followed).
+///
+/// Registered as a singleton so the pool (and the stateless destinations'
+/// NCo-managed connections) lives for the application lifetime; pinned/
+/// elevated sessions are created and destroyed per request underneath it.
 /// </summary>
 public sealed class NcoConnectionPool : ISapConnectionPool, IDisposable
 {
-    private readonly NcoWorker[] _workers;
-    private readonly NcoWorker[] _elevatedWorkers;
+    private readonly SapNcoOptions _options;
+    private readonly NcoDestinationRegistry _registry;
+    private readonly NcoStatelessPool _statelessPool;
+    private readonly ILogger<NcoConnectionPool> _logger;
+    private readonly ILoggerFactory _loggerFactory;
+
+    private readonly SemaphoreSlim _pinnedSemaphore;
+    private readonly int _pinnedAcquireTimeoutMs;
 
     private readonly SemaphoreSlim _elevatedSemaphore;
-    private readonly ConcurrentQueue<NcoWorker> _elevatedFreeList;
     private readonly int _elevatedAcquireTimeoutMs;
 
-    private readonly NcoDestinationRegistry _registry;
-    private readonly ILogger<NcoConnectionPool> _logger;
+    // Currently-active pinned + elevated sessions, keyed by slot id — purely
+    // for GetPoolStatus() diagnostics; the sessions themselves are otherwise
+    // only ever touched via the SapWorkerHandle the caller that acquired
+    // them holds.
+    private readonly ConcurrentDictionary<int, NcoWorker> _activeSessions = new();
+    private int _nextSlotId = -1;
 
     // RegisterDestinationConfiguration may only be called once per process.
     private static int _configurationRegistered;
@@ -40,117 +65,108 @@ public sealed class NcoConnectionPool : ISapConnectionPool, IDisposable
         ILogger<NcoConnectionPool> logger,
         ILoggerFactory loggerFactory)
     {
-        _logger = logger;
-        var opts = options.Value;
+        _logger        = logger;
+        _loggerFactory = loggerFactory;
+        _options       = options.Value;
 
-        _registry = new NcoDestinationRegistry(opts);
+        _registry = new NcoDestinationRegistry(_options);
         if (Interlocked.Exchange(ref _configurationRegistered, 1) == 0)
         {
             RfcDestinationManager.RegisterDestinationConfiguration(_registry);
             logger.LogInformation("SAP NCo destination configuration registered.");
         }
 
-        _workers = new NcoWorker[opts.ServiceWorkerCount];
-        for (int i = 0; i < _workers.Length; i++)
-        {
-            var account = opts.ServiceAccounts.Count > 0
-                ? opts.ServiceAccounts[i % opts.ServiceAccounts.Count]
-                : null; // NcoWorker falls back to opts.ServiceAccount itself when null
-            _workers[i] = new NcoWorker(i, opts, _registry, loggerFactory.CreateLogger<NcoWorker>(), serviceAccount: account);
-        }
+        _statelessPool = new NcoStatelessPool(_options, _registry, loggerFactory.CreateLogger<NcoStatelessPool>());
 
-        _elevatedWorkers = new NcoWorker[opts.ElevatedWorkerCount];
-        for (int i = 0; i < _elevatedWorkers.Length; i++)
-            _elevatedWorkers[i] = new NcoWorker(
-                opts.ServiceWorkerCount + i, opts, _registry, loggerFactory.CreateLogger<NcoWorker>(), isElevated: true);
+        _pinnedSemaphore        = new SemaphoreSlim(_options.MaxConcurrentPinnedSessions, _options.MaxConcurrentPinnedSessions);
+        _pinnedAcquireTimeoutMs = _options.PinnedAcquireTimeoutSeconds * 1000;
 
-        _elevatedSemaphore        = new SemaphoreSlim(_elevatedWorkers.Length, _elevatedWorkers.Length);
-        _elevatedFreeList         = new ConcurrentQueue<NcoWorker>(_elevatedWorkers);
-        _elevatedAcquireTimeoutMs = opts.ElevatedAcquireTimeoutSeconds * 1000;
+        _elevatedSemaphore        = new SemaphoreSlim(_options.ElevatedWorkerCount, _options.ElevatedWorkerCount);
+        _elevatedAcquireTimeoutMs = _options.ElevatedAcquireTimeoutSeconds * 1000;
 
         logger.LogInformation(
-            "SAP NCo connection pool started with {ServiceCount} service workers (always connected) " +
-            "and {ElevatedCount} elevated workers (unconnected, per-user on demand) — {Total} threads total.",
-            _workers.Length, _elevatedWorkers.Length, opts.TotalWorkerCount);
+            "SAP NCo pool ready — stateless pool across {Destinations} destination(s) (PoolSize={PoolSize}, MaxPoolSize={MaxPoolSize} each), " +
+            "up to {Pinned} concurrent pinned session(s) and {Elevated} concurrent elevated session(s), both connecting on demand per request.",
+            _statelessPool.DestinationNames.Count, _options.PoolSize, _options.MaxPoolSize,
+            _options.MaxConcurrentPinnedSessions, _options.ElevatedWorkerCount);
     }
 
     /// <inheritdoc/>
-    public async Task<RfcResponse> ExecuteAsync(RfcRequest request, CancellationToken cancellationToken = default)
+    public Task<RfcResponse> ExecuteAsync(RfcRequest request, CancellationToken cancellationToken = default) =>
+        _statelessPool.ExecuteAsync(request, cancellationToken);
+
+    public async Task<SapWorkerHandle> AcquireWorkerAsync(CancellationToken cancellationToken = default)
     {
-        var worker = SelectWorker();
+        bool acquired = await _pinnedSemaphore.WaitAsync(_pinnedAcquireTimeoutMs, cancellationToken).ConfigureAwait(false);
+        if (!acquired)
+            throw new PoolExhaustedException(
+                $"All {_options.MaxConcurrentPinnedSessions} pinned SAP session slots are busy. " +
+                $"Timed out after {_pinnedAcquireTimeoutMs / 1000}s waiting for one to free up — please retry shortly.");
 
-        _logger.LogInformation(
-            "RFC '{Function}' routed to slot {SlotId} (queue depth {QueueDepth} before enqueue).",
-            request.FunctionName, worker.SlotId, worker.QueueDepth);
-
-        var tcs  = new TaskCompletionSource<RfcResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var item = new NcoWorkItem(request, tcs, cancellationToken);
-
-        using var reg = cancellationToken.Register(
-            () => tcs.TrySetCanceled(cancellationToken), useSynchronizationContext: false);
-
-        worker.Enqueue(item);
-        return await tcs.Task.ConfigureAwait(false);
+        int slotId = Interlocked.Increment(ref _nextSlotId);
+        try
+        {
+            var worker = await NcoWorker.ConnectAsync(
+                slotId, _options.MaxQueueDepth, _registry, _options.ServiceAccount, isElevated: false,
+                _loggerFactory.CreateLogger<NcoWorker>(), cancellationToken).ConfigureAwait(false);
+            _activeSessions[slotId] = worker;
+            return new SapWorkerHandle(worker);
+        }
+        catch
+        {
+            _pinnedSemaphore.Release();
+            throw;
+        }
     }
 
-    // For advanced scenarios where the caller needs a sequence of calls pinned
-    // to the same physical SAP session/connection — e.g. a create-BAPI
-    // followed by BAPI_TRANSACTION_COMMIT/ROLLBACK, which must land on the
-    // same LUW. See NcoWorker's class doc comment for why this still needs a
-    // dedicated worker thread under NCo, not just "any pooled connection".
-    public SapWorkerHandle AcquireWorker()
+    public async Task ReleaseWorkerAsync(SapWorkerHandle worker)
     {
-        var worker = SelectWorker();
-        return new SapWorkerHandle(worker);
+        _activeSessions.TryRemove(worker.Worker.SlotId, out _);
+        try
+        {
+            await Task.Run(() => worker.Worker.Dispose()).ConfigureAwait(false);
+        }
+        finally
+        {
+            _pinnedSemaphore.Release();
+        }
     }
 
     public async Task<SapWorkerHandle> AcquireElevatedWorkerAsync(
         SapConnectionOptions creds,
-        CancellationToken ct = default)
+        CancellationToken cancellationToken = default)
     {
-        bool acquired = await _elevatedSemaphore.WaitAsync(_elevatedAcquireTimeoutMs, ct).ConfigureAwait(false);
+        bool acquired = await _elevatedSemaphore.WaitAsync(_elevatedAcquireTimeoutMs, cancellationToken).ConfigureAwait(false);
         if (!acquired)
             throw new PoolExhaustedException(
-                $"All {_elevatedWorkers.Length} elevated SAP worker slots are busy with other users' requests. " +
+                $"All {_options.ElevatedWorkerCount} elevated SAP session slots are busy with other users' requests. " +
                 $"Timed out after {_elevatedAcquireTimeoutMs / 1000}s waiting for one to free up — please retry shortly.");
 
-        if (!_elevatedFreeList.TryDequeue(out var worker))
-        {
-            _elevatedSemaphore.Release();
-            throw new InvalidOperationException(
-                "Elevated SAP NCo worker semaphore and free-list are out of sync — this is a bug.");
-        }
-
+        int slotId = Interlocked.Increment(ref _nextSlotId);
         try
         {
-            await worker.LogonElevatedAsync(creds).ConfigureAwait(false);
+            var worker = await NcoWorker.ConnectAsync(
+                slotId, _options.MaxQueueDepth, _registry, creds, isElevated: true,
+                _loggerFactory.CreateLogger<NcoWorker>(), cancellationToken).ConfigureAwait(false);
+            _activeSessions[slotId] = worker;
+            return new SapWorkerHandle(worker);
         }
         catch
         {
-            _elevatedFreeList.Enqueue(worker);
             _elevatedSemaphore.Release();
             throw;
         }
-
-        return new SapWorkerHandle(worker);
     }
 
     public async Task ReleaseElevatedWorkerAsync(SapWorkerHandle handle)
     {
-        var worker = handle.Worker;
+        _activeSessions.TryRemove(handle.Worker.SlotId, out _);
         try
         {
-            await worker.LogoffElevatedAsync().ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex,
-                "Error disconnecting elevated SAP NCo slot {SlotId} on release — releasing the slot back to the pool anyway.",
-                worker.SlotId);
+            await Task.Run(() => handle.Worker.Dispose()).ConfigureAwait(false);
         }
         finally
         {
-            _elevatedFreeList.Enqueue(worker);
             _elevatedSemaphore.Release();
         }
     }
@@ -172,8 +188,9 @@ public sealed class NcoConnectionPool : ISapConnectionPool, IDisposable
     }
 
     /// <inheritdoc/>
+    /// <remarks>Reflects only currently-active pinned/elevated sessions — the always-on stateless pool has no per-connection state NCo exposes to report.</remarks>
     public IReadOnlyList<WorkerStatus> GetPoolStatus() =>
-        _workers.Concat(_elevatedWorkers).Select(w => new WorkerStatus
+        _activeSessions.Values.Select(w => new WorkerStatus
         {
             SlotId       = w.SlotId,
             IsConnected  = w.IsConnected,
@@ -183,58 +200,13 @@ public sealed class NcoConnectionPool : ISapConnectionPool, IDisposable
         }).ToList();
 
     /// <inheritdoc/>
-    public void PingIdleWorkers(TimeSpan idleThreshold)
-    {
-        var cutoff = DateTime.UtcNow - idleThreshold;
-        foreach (var worker in _workers)
-        {
-            if (worker.IsConnected && worker.LastActivity < cutoff)
-            {
-                _logger.LogDebug(
-                    "Slot {SlotId} idle since {LastActivity:u}, sending keep-alive ping.",
-                    worker.SlotId, worker.LastActivity);
-                worker.Ping();
-            }
-        }
-    }
-
-    private int _nextWorkerIndex = -1;
-
-    /// <summary>
-    /// Selects the worker with the shortest queue depth, round-robining among
-    /// every worker currently tied at that minimum — same two-pass
-    /// least-loaded-with-rotating-tiebreak logic as the old COM pool's
-    /// SelectWorker (a plain first-minimum-wins scan previously serialized
-    /// bursts of concurrent calls onto slot 0; see that history in the COM
-    /// implementation this replaced).
-    /// </summary>
-    private NcoWorker SelectWorker()
-    {
-        int n = _workers.Length;
-        int minDepth = _workers[0].QueueDepth;
-        for (int i = 1; i < n; i++)
-        {
-            int depth = _workers[i].QueueDepth;
-            if (depth < minDepth) minDepth = depth;
-        }
-
-        int start = Interlocked.Increment(ref _nextWorkerIndex);
-        for (int offset = 0; offset < n; offset++)
-        {
-            int idx = (int)(((uint)(start + offset)) % n);
-            if (_workers[idx].QueueDepth == minDepth)
-                return _workers[idx];
-        }
-
-        return _workers[0];
-    }
+    public void PingKeepAlive() => _statelessPool.PingAll();
 
     public void Dispose()
     {
-        foreach (var worker in _workers)
+        foreach (var worker in _activeSessions.Values)
             worker.Dispose();
-        foreach (var worker in _elevatedWorkers)
-            worker.Dispose();
+        _pinnedSemaphore.Dispose();
         _elevatedSemaphore.Dispose();
     }
 }

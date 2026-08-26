@@ -10,8 +10,9 @@ The desktop application required SAP GUI to be installed on every workstation. E
 
 SapServer centralises SAP access:
 
-- A **single service account** is kept permanently connected per worker thread — no per-request login latency.
-- A **configurable pool of worker threads** handles concurrent RFC calls safely.
+- Ordinary RFC calls run against SAP NCo's own internal, thread-safe connection pool — no per-request login latency, and no dedicated .NET thread per connection either.
+- A **configurable pool size** (not a thread count) handles concurrent RFC calls safely.
+- Transactional sequences (create-BAPI + commit/rollback) get a short-lived, exclusive pinned SAP session for just the duration of that one request.
 - The existing enterprise website can trigger SAP operations directly via HTTP, authenticated through the same user accounts already managed by sql2005-bridge.
 
 ---
@@ -31,20 +32,24 @@ sql2005-bridge frontend  (browser)
 │    │  permission check (SQL Server)   │
 │    │  → ISapConnectionPool            │
 │    │      │                           │
-│    │      │  least-loaded worker      │
 │    │      ▼                           │
 │  ┌──────────────────────────────┐     │
 │  │  NcoConnectionPool           │     │
-│  │  ┌────────┐ ┌────────┐ ...  │     │
-│  │  │Worker 0│ │Worker 1│      │     │
-│  │  │thread  │ │thread  │      │     │
-│  │  │SAP NCo │ │SAP NCo │      │     │
-│  │  └────────┘ └────────┘      │     │
+│  │                               │     │
+│  │  Stateless pool (ExecuteAsync):    │
+│  │   NCo's own pooled connections     │
+│  │   (PoolSize/MaxPoolSize) — no      │
+│  │   dedicated thread                 │
+│  │                                     │
+│  │  Pinned sessions (AcquireWorkerAsync/│
+│  │   AcquireElevatedWorkerAsync):       │
+│  │   ephemeral thread + BeginContext,   │
+│  │   connect-on-acquire /               │
+│  │   disconnect-on-release              │
 │  └──────────────────────────────┘     │
 │                                       │
 │  SapSessionMonitor (Timer)            │
-│    → pings idle workers               │
-│    → logs disconnected slots          │
+│    → keeps the stateless pool warm    │
 └───────────────────────────────────────┘
         │
         │  SAP NCo (SAP.Middleware.Connector)
@@ -52,30 +57,24 @@ sql2005-bridge frontend  (browser)
    SAP Application Server
 ```
 
-### Worker Pool
+### Two execution paths, sized independently
 
-Each `NcoWorker` owns one dedicated background thread and one SAP NCo connection pinned to it via `RfcSessionManager.BeginContext` — needed so a create-BAPI + `BAPI_TRANSACTION_COMMIT`/`ROLLBACK` sequence lands on the same SAP session's LUW, a SAP-level requirement independent of transport. HTTP request handlers post `RfcRequest` work items (containing a `TaskCompletionSource`) to the worker's `BlockingCollection`; the worker thread executes the RFC call synchronously via NCo and sets the result on the TCS, which resumes the awaiting HTTP handler on the thread pool.
+`NcoConnectionPool` has two paths, deliberately not sharing a thread model:
 
-### Pool sizing
+| Path | Used by | Thread model | Sized by |
+|------|---------|---------------|----------|
+| **Stateless pool** | `ExecuteAsync` — every ordinary, non-transactional RFC call (the large majority of traffic) | No dedicated thread. Calls run via `Task.Run` straight against NCo's own thread-safe internal connection pool. | `SapNco:PoolSize`/`MaxPoolSize` (default `10`/`20`) — a real connection-pool size, independent of any thread count |
+| **Pinned sessions** | `AcquireWorkerAsync`/`AcquireElevatedWorkerAsync` + `ExecuteOnWorkerAsync` — a create-BAPI followed by `BAPI_TRANSACTION_COMMIT`/`ROLLBACK` that must land on the same SAP session's LUW | A fresh dedicated thread + `RfcSessionManager.BeginContext`-pinned connection, created on acquire and torn down on release — alive only for that one request | `SapNco:MaxConcurrentPinnedSessions`/`ElevatedWorkerCount` (default `4`/`2`) — a concurrency cap, not a thread pool size |
 
-The pool is split into two groups of workers, each configured in `appsettings.json` under `SapNco`:
+The stateless pool is what most traffic uses, and NCo's pool is already thread-safe — no pinning needed for a single, standalone call. Pinning (`BeginContext`) is reserved for the one case that genuinely requires it: a multi-call sequence that must stay on one physical connection. `SapNco:PinnedAcquireTimeoutSeconds`/`ElevatedAcquireTimeoutSeconds` (default `30` each) cap how long a caller waits for a free pinned/elevated slot if all of them are busy. Callers of `AcquireWorkerAsync`/`AcquireElevatedWorkerAsync` **must** release the handle (`ReleaseWorkerAsync`/`ReleaseElevatedWorkerAsync`) in a `finally` block — every controller endpoint using them already does.
 
-| Group | Setting | Behaviour |
-|-------|---------|-----------|
-| Service | `SapNco:ServiceWorkerCount` (default `4`) | Always connected. Handles every ordinary RFC call. |
-| Elevated | `SapNco:ElevatedWorkerCount` (default `2`) | Created **unconnected**. Only connected on demand with one specific user's own SAP credentials, for the duration of one elevated request (e.g. PO creation), then disconnected. Prevents one user's elevated session ever being reused for another user. |
+Size `PoolSize`/`MaxPoolSize` and the pinned/elevated concurrency caps against your SAP system's concurrent-user licence count, not CPU count — there's no fixed thread count started at app boot the way an earlier design (and the COM-era app before it) required.
 
-`SapNco:ElevatedAcquireTimeoutSeconds` (default `30`) caps how long a caller waits for a free elevated slot if all of them are busy.
-
-Each worker holds its own thread; a service worker also holds one pinned SAP NCo connection for the app's lifetime, while an elevated worker only holds one for the duration of a single elevated request. Set `ServiceWorkerCount`/`ElevatedWorkerCount` based on your SAP system's concurrent user licence count, not just CPU count — total worker threads started is `ServiceWorkerCount + ElevatedWorkerCount`.
-
-**Service account(s):** by default every service worker connects as the single `SapNco:ServiceAccount`. To instead give each service worker its own distinct SAP login — e.g. so concurrent postings aren't all attributed to one shared account in SAP's own change logs, or to sidestep whatever behaviour your SAP system has for the same account logging in multiple times at once — populate `SapNco:ServiceAccounts` as an array. Worker *i* connects as `ServiceAccounts[i % ServiceAccounts.Count]`, wrapping round-robin if there are fewer accounts than workers (e.g. 2 accounts covering 4 workers). `ServiceAccount` (singular) still has to be filled in even when `ServiceAccounts` is used — `PurchasingController`/`PackagingController`'s elevated endpoints read its AppServerHost/Client/SystemNumber/Language as the shared connection profile regardless. Leave `ServiceAccounts` empty/unset to keep the original single-account behaviour.
+**Service account(s):** by default the stateless pool connects as the single `SapNco:ServiceAccount`. To instead give it several distinct SAP logins — e.g. so concurrent postings aren't all attributed to one shared account in SAP's own change logs, or to sidestep whatever behaviour your SAP system has for the same account logging in multiple times at once — populate `SapNco:ServiceAccounts` as an array; one destination is registered per entry and calls round-robin across them. `ServiceAccount` (singular) still has to be filled in even when `ServiceAccounts` is used — `PurchasingController`/`PackagingController`'s elevated endpoints read its AppServerHost/Client/SystemNumber/Language as the shared connection profile regardless. Leave `ServiceAccounts` empty/unset to keep a single shared account.
 
 ### Session keep-alive
 
-SAP application servers can drop an idle pooled RFC connection after a period of inactivity, much as SAP GUI did for COM sessions. `SapSessionMonitor` runs every `HealthCheckIntervalSeconds` and sends an `RFC_PING` to any worker whose `LastActivity` exceeds `IdleTimeoutSeconds`. This resets the SAP idle timer without any user-visible delay.
-
-If a worker is found disconnected, it logs a warning and defers reconnection to the next real request via `EnsureConnected()` — the monitor itself does not block. That warning repeats at most once per `DisconnectedWarningRepeatSeconds` while the same slot stays down, instead of on every health-check tick, so a slot with no traffic for a while doesn't bury real errors in the log.
+SAP application servers can drop an idle pooled RFC connection after a period of inactivity, much as SAP GUI did for COM sessions. `SapSessionMonitor` runs every `HealthCheckIntervalSeconds` and sends an `RFC_PING` to every stateless-pool destination, keeping it warm. Pinned/elevated sessions aren't pinged — they only exist for the duration of one active request, so there's no idle window for them to fall into between health-check ticks.
 
 ---
 
@@ -161,8 +160,10 @@ Copy `appsettings.example.json` → `appsettings.json` and fill in all values:
 ```json
 {
   "SapNco": {
-    "ServiceWorkerCount": 4,
+    "MaxConcurrentPinnedSessions": 4,
     "ElevatedWorkerCount": 2,
+    "PoolSize": 10,
+    "MaxPoolSize": 20,
     "ServiceAccount": {
       "AppServerHost": "your-sap-app-server",
       "SystemNumber":  "00",
@@ -188,7 +189,7 @@ Copy `appsettings.example.json` → `appsettings.json` and fill in all values:
 }
 ```
 
-`ServiceAccounts` is optional — omit it (and just fill in `ServiceAccount`) to keep every service worker connected as one shared account, the original behaviour. When present, worker *i* connects as `ServiceAccounts[i % ServiceAccounts.Count]`.
+`ServiceAccounts` is optional — omit it (and just fill in `ServiceAccount`) to keep the stateless pool connected as one shared account. When present, one destination is registered per entry and calls round-robin across them.
 
 > **Security:** Keep `appsettings.json`/`appsettings.Production.json` out of source control (both already `.gitignore`'d) — that's what protects the secrets kept directly in the config file: `SapNco:ServiceAccount`/`ServiceAccounts` (SAP credentials) and `Auth:JwtSecret`. Neither is set via a machine environment variable — a plain config file is much easier to maintain than env vars once there's more than one value to keep track of, and `install.ps1` no longer prompts for either.
 
@@ -281,7 +282,7 @@ Execute an RFC function call. Requires a valid JWT.
 
 ### GET /api/rfc/status
 
-Returns the current health of all pool workers. Requires `admin` or `superadmin` role.
+Returns the current health of every currently-active pinned/elevated session (transient — the stateless pool has no per-connection state to report). Requires `admin` or `superadmin` role.
 
 ```json
 {
@@ -309,7 +310,7 @@ All errors use the same envelope:
 | 403 | `FORBIDDEN` | User's departments do not include this RFC function |
 | 422 | `RFC_ERROR` | SAP returned false / RETURN table contains an error |
 | 503 | `SAP_UNAVAILABLE` | SAP connection is down (reconnect in progress) |
-| 503 | `POOL_EXHAUSTED` | All worker queues are full — reduce request rate |
+| 503 | `POOL_EXHAUSTED` | All pinned/elevated session slots are busy — reduce request rate |
 | 500 | `INTERNAL_ERROR` | Unexpected server error |
 
 ---
@@ -318,15 +319,15 @@ All errors use the same envelope:
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `SapNco:ServiceWorkerCount` | `4` | Always-connected workers for ordinary RFC calls |
-| `SapNco:ElevatedWorkerCount` | `2` | Unconnected-by-default workers for per-user elevated calls |
-| `SapNco:ServiceAccounts` | *(empty)* | Optional array of per-worker service accounts — worker *i* uses `ServiceAccounts[i % Count]`; falls back to the single `ServiceAccount` for every worker when empty |
+| `SapNco:MaxConcurrentPinnedSessions` | `4` | Concurrency cap for ephemeral pinned sessions (non-elevated), not a thread count |
+| `SapNco:ElevatedWorkerCount` | `2` | Concurrency cap for ephemeral elevated (per-user) sessions |
+| `SapNco:ServiceAccounts` | *(empty)* | Optional array of per-destination accounts for the stateless pool — destination *i* uses `ServiceAccounts[i % Count]`; falls back to the single `ServiceAccount` when empty |
+| `SapNco:PinnedAcquireTimeoutSeconds` | `30` | Max wait for a free pinned session slot |
 | `SapNco:ElevatedAcquireTimeoutSeconds` | `30` | Max wait for a free elevated slot |
-| `SapNco:MaxQueueDepth` | `50` | Max queued requests per worker |
-| `SapNco:IdleTimeoutSeconds` | `300` | Ping threshold (5 min) |
-| `SapNco:HealthCheckIntervalSeconds` | `60` | Monitor tick interval |
-| `SapNco:ReconnectDelayMs` | `5000` | Delay before reconnect attempt |
-| `SapNco:PoolSize` / `MaxPoolSize` | `2` / `4` | NCo's own internal RFC connection pool size per destination |
+| `SapNco:MaxQueueDepth` | `50` | Max queued RFC calls per pinned session |
+| `SapNco:HealthCheckIntervalSeconds` | `60` | How often the monitor pings the stateless pool to keep it warm |
+| `SapNco:ReconnectDelayMs` | `2000` | Backoff before the stateless pool's single retry after a connection failure |
+| `SapNco:PoolSize` / `MaxPoolSize` | `10` / `20` | NCo's own internal RFC connection pool size per stateless-pool destination — the real concurrency knob for ordinary calls |
 | `Auth:PermissionCacheSeconds` | `60` | How long permissions are cached |
 
 ---
@@ -354,12 +355,14 @@ SapServer/
 │   │   ├── ISapConnectionPool.cs
 │   │   └── IPermissionService.cs
 │   ├── Nco/
-│   │   ├── NcoWorkItem.cs              # Queue item bridging HTTP thread ↔ worker thread
-│   │   ├── NcoWorker.cs                # Dedicated thread + pinned SAP NCo connection
-│   │   ├── NcoConnectionPool.cs        # Pool of workers, least-loaded routing
+│   │   ├── NcoRfcExecutor.cs           # Shared CreateFunction/Invoke/read-back logic
+│   │   ├── NcoStatelessPool.cs         # Ordinary calls — NCo's own pool, no dedicated thread
+│   │   ├── NcoWorkItem.cs              # Queue item bridging HTTP thread ↔ pinned session thread
+│   │   ├── NcoWorker.cs                # Ephemeral pinned session — thread + BeginContext, per request
+│   │   ├── NcoConnectionPool.cs        # Routes ExecuteAsync vs Acquire*WorkerAsync to the two paths above
 │   │   └── NcoDestinationRegistry.cs   # IDestinationConfiguration for NCo
-│   ├── SapWorkerHandle.cs      # Opaque handle to a pinned worker
-│   ├── SapSessionMonitor.cs    # Timer-based keep-alive + health logging
+│   ├── SapWorkerHandle.cs      # Opaque handle to a pinned session
+│   ├── SapSessionMonitor.cs    # Timer-based stateless-pool keep-alive
 │   ├── DevAuthMiddleware.cs    # Dev-bypass OWIN auth middleware
 │   ├── ServiceProviderDependencyResolver.cs   # Bridges Microsoft.Extensions.DI into Web API 2
 │   └── PermissionService.cs    # SQL Server permission lookup with caching

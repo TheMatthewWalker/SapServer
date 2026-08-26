@@ -198,7 +198,7 @@ public class WarehouseControllerTests
         var result = await _controller.CreateStockAdjustment(new StockAdjustmentRequest { MovementType = "999" }, dryRun: false, CancellationToken.None);
 
         ControllerTestHelpers.AssertUnprocessableEntity(result);
-        _pool.Verify(p => p.AcquireWorker(), Times.Never);
+        _pool.Verify(p => p.AcquireWorkerAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -212,7 +212,7 @@ public class WarehouseControllerTests
         var ok = ControllerTestHelpers.AssertOk(result);
         var body = Assert.IsType<ApiResponse<RfcRequest>>(ok);
         Assert.Equal(StockAdjustmentHelper.FnGoodsMvtCreate, body.Data!.FunctionName);
-        _pool.Verify(p => p.AcquireWorker(), Times.Never);
+        _pool.Verify(p => p.AcquireWorkerAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -541,7 +541,7 @@ public class WarehouseControllerTests
         var ok = ControllerTestHelpers.AssertOk(result);
         var body = Assert.IsType<ApiResponse<RfcRequest>>(ok);
         Assert.Equal(StockAdjustmentHelper.FnGoodsMvtCreate, body.Data!.FunctionName);
-        _pool.Verify(p => p.AcquireWorker(), Times.Never);
+        _pool.Verify(p => p.AcquireWorkerAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]

@@ -16,7 +16,7 @@ namespace SapServer.Helpers;
 /// confirmed working against this SAP system so far.
 ///
 /// Like StockAdjustmentHelper/MixingScrapHelper, this is a real BAPI: the
-/// caller must acquire a pinned worker (ISapConnectionPool.AcquireWorker())
+/// caller must acquire a pinned worker (ISapConnectionPool.AcquireWorkerAsync())
 /// and issue an explicit BAPI_TRANSACTION_COMMIT/ROLLBACK on that same
 /// worker afterward — see ProductionController.PostMixingScrap for the
 /// pattern this mirrors.

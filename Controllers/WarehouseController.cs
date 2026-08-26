@@ -189,29 +189,35 @@ public sealed class WarehouseController : SapControllerBase
         if (dryRun)
             return Ok(ApiResponse<RfcRequest>.Ok(request));
 
-        var worker = _pool.AcquireWorker();
-
-        var data     = await _pool.ExecuteOnWorkerAsync(worker, request, ct);
-        var response = StockAdjustmentHelper.ParseStockAdjustmentResponse(data);
-
-        if (body.TestRun)
+        var worker = await _pool.AcquireWorkerAsync(ct);
+        try
         {
-            // A test run never creates a real document, so there's nothing
-            // to commit — roll back to release whatever SAP locked while
-            // simulating the posting.
-            await _pool.ExecuteOnWorkerAsync(worker, CommitHelper.BuildBapiRollback(), ct);
+            var data     = await _pool.ExecuteOnWorkerAsync(worker, request, ct);
+            var response = StockAdjustmentHelper.ParseStockAdjustmentResponse(data);
+
+            if (body.TestRun)
+            {
+                // A test run never creates a real document, so there's nothing
+                // to commit — roll back to release whatever SAP locked while
+                // simulating the posting.
+                await _pool.ExecuteOnWorkerAsync(worker, CommitHelper.BuildBapiRollback(), ct);
+                return Ok(ApiResponse<StockAdjustmentResponse>.Ok(response));
+            }
+
+            if (!response.Success)
+            {
+                await _pool.ExecuteOnWorkerAsync(worker, CommitHelper.BuildBapiRollback(), ct);
+                return Content((HttpStatusCode)422, ApiResponse<StockAdjustmentResponse>.Fail(
+                    "422", "SAP rejected the stock adjustment. Transaction rolled back.", response));
+            }
+
+            await _pool.ExecuteOnWorkerAsync(worker, CommitHelper.BuildBapiCommit(), ct);
             return Ok(ApiResponse<StockAdjustmentResponse>.Ok(response));
         }
-
-        if (!response.Success)
+        finally
         {
-            await _pool.ExecuteOnWorkerAsync(worker, CommitHelper.BuildBapiRollback(), ct);
-            return Content((HttpStatusCode)422, ApiResponse<StockAdjustmentResponse>.Fail(
-                "422", "SAP rejected the stock adjustment. Transaction rolled back.", response));
+            await _pool.ReleaseWorkerAsync(worker);
         }
-
-        await _pool.ExecuteOnWorkerAsync(worker, CommitHelper.BuildBapiCommit(), ct);
-        return Ok(ApiResponse<StockAdjustmentResponse>.Ok(response));
     }
 
     // ── POST /api/warehouse/picksheet-stock ───────────────────────────────────
@@ -593,58 +599,65 @@ public sealed class WarehouseController : SapControllerBase
         // The two LT01 legs stay on ordinary ExecuteAsync calls (via
         // L_TO_CREATE_SINGLE) — that RFC commits itself, same as the plain
         // transfer-order endpoint already relies on.
-        var worker   = _pool.AcquireWorker();
-        var mb1bData = await _pool.ExecuteOnWorkerAsync(worker, mb1bRequest, ct);
-
-        if (body.TestRun)
+        var worker = await _pool.AcquireWorkerAsync(ct);
+        try
         {
-            // A test run never creates a real material document — nothing
-            // to commit, and nothing sensible to build the two transfer
-            // orders against, so stop here (mirrors CreateStockAdjustment's
-            // TestRun handling).
-            await _pool.ExecuteOnWorkerAsync(worker, CommitHelper.BuildBapiRollback(), ct);
-            return Ok(ApiResponse<ConsignmentMb1bResponse>.Ok(WarehouseHelpers.ParseMb1bOnly(mb1bData)));
+            var mb1bData = await _pool.ExecuteOnWorkerAsync(worker, mb1bRequest, ct);
+
+            if (body.TestRun)
+            {
+                // A test run never creates a real material document — nothing
+                // to commit, and nothing sensible to build the two transfer
+                // orders against, so stop here (mirrors CreateStockAdjustment's
+                // TestRun handling).
+                await _pool.ExecuteOnWorkerAsync(worker, CommitHelper.BuildBapiRollback(), ct);
+                return Ok(ApiResponse<ConsignmentMb1bResponse>.Ok(WarehouseHelpers.ParseMb1bOnly(mb1bData)));
+            }
+
+            await _pool.ExecuteOnWorkerAsync(worker, WarehouseHelpers.Mb1bSucceeded(mb1bData)
+                ? CommitHelper.BuildBapiCommit()
+                : CommitHelper.BuildBapiRollback(), ct);
+
+            // Both LT01 legs still run unconditionally, same as before the BDC
+            // replacement — a rejected MB1B (deficit stock, etc.) is reported
+            // alongside whatever the transfer-order legs did rather than
+            // short-circuited, so the combined message always reflects every
+            // leg's real outcome.
+            var toNonC = await _pool.ExecuteAsync(WarehouseHelpers.BuildToNonConsignRequest(body), ct);
+            var toC    = await _pool.ExecuteAsync(WarehouseHelpers.BuildToConsignRequest(body),    ct);
+            var result = WarehouseHelpers.ParseConsignmentResponse(mb1bData, toNonC, toC);
+
+            // Any leg reporting an SAP error (deficit stock, missing
+            // authorization, etc.) means the consignment issue never actually
+            // posted — surface it as a real failure instead of 200/success so
+            // callers (routes/staging.js's Staging Post delivery flow) don't
+            // record a delivery that never happened in SAP.
+            if (!result.Success)
+            {
+                var messages = new List<string>();
+
+                if (!string.IsNullOrWhiteSpace(result.Mb1bMessage))
+                    messages.Add($"MB1B: {result.Mb1bMessage}");
+
+                if (!string.IsNullOrWhiteSpace(result.ToNonConsignMessage))
+                    messages.Add($"To Non-Consign: {result.ToNonConsignMessage}");
+
+                if (!string.IsNullOrWhiteSpace(result.ToConsignMessage))
+                    messages.Add($"To Consign: {result.ToConsignMessage}");
+
+                return Content((HttpStatusCode)422,
+                    ApiResponse<ConsignmentMb1bResponse>.Fail(
+                        "422",
+                        string.Join(" | ", messages),
+                        result));
+            }
+
+            return Ok(ApiResponse<ConsignmentMb1bResponse>.Ok(result));
         }
-
-        await _pool.ExecuteOnWorkerAsync(worker, WarehouseHelpers.Mb1bSucceeded(mb1bData)
-            ? CommitHelper.BuildBapiCommit()
-            : CommitHelper.BuildBapiRollback(), ct);
-
-        // Both LT01 legs still run unconditionally, same as before the BDC
-        // replacement — a rejected MB1B (deficit stock, etc.) is reported
-        // alongside whatever the transfer-order legs did rather than
-        // short-circuited, so the combined message always reflects every
-        // leg's real outcome.
-        var toNonC = await _pool.ExecuteAsync(WarehouseHelpers.BuildToNonConsignRequest(body), ct);
-        var toC    = await _pool.ExecuteAsync(WarehouseHelpers.BuildToConsignRequest(body),    ct);
-        var result = WarehouseHelpers.ParseConsignmentResponse(mb1bData, toNonC, toC);
-
-        // Any leg reporting an SAP error (deficit stock, missing
-        // authorization, etc.) means the consignment issue never actually
-        // posted — surface it as a real failure instead of 200/success so
-        // callers (routes/staging.js's Staging Post delivery flow) don't
-        // record a delivery that never happened in SAP.
-        if (!result.Success)
+        finally
         {
-            var messages = new List<string>();
-
-            if (!string.IsNullOrWhiteSpace(result.Mb1bMessage))
-                messages.Add($"MB1B: {result.Mb1bMessage}");
-
-            if (!string.IsNullOrWhiteSpace(result.ToNonConsignMessage))
-                messages.Add($"To Non-Consign: {result.ToNonConsignMessage}");
-
-            if (!string.IsNullOrWhiteSpace(result.ToConsignMessage))
-                messages.Add($"To Consign: {result.ToConsignMessage}");
-
-            return Content((HttpStatusCode)422, 
-                ApiResponse<ConsignmentMb1bResponse>.Fail(
-                    "422",
-                    string.Join(" | ", messages),
-                    result));
+            await _pool.ReleaseWorkerAsync(worker);
         }
-
-        return Ok(ApiResponse<ConsignmentMb1bResponse>.Ok(result));
     }
 
     // ── POST /api/warehouse/set-delivery-weight ───────────────────────────────

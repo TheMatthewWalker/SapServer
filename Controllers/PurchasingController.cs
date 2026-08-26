@@ -50,19 +50,25 @@ public sealed class PurchasingController : SapControllerBase
         if (dryRun)
             return Ok(ApiResponse<RfcRequest>.Ok(request));
 
-        var worker = _pool.AcquireWorker();
-
-        var data = await _pool.ExecuteOnWorkerAsync(worker, request, ct);
-        var response = PurchasingHelper.ParsePoCreateResult(data);
-
-        if (!response.Success)
+        var worker = await _pool.AcquireWorkerAsync(ct);
+        try
         {
-            await _pool.ExecuteOnWorkerAsync(worker, CommitHelper.BuildBapiRollback(), ct);
-            return Content(HttpStatusCode.BadRequest, ApiResponse<PoCreateRow>.Fail("INVALID_DATA", "Purchase order creation failed. Transaction rolled back.", response));
-        }
+            var data = await _pool.ExecuteOnWorkerAsync(worker, request, ct);
+            var response = PurchasingHelper.ParsePoCreateResult(data);
 
-        await _pool.ExecuteOnWorkerAsync(worker, CommitHelper.BuildBapiCommit(), ct);
-        return Ok(ApiResponse<PoCreateRow>.Ok(response));
+            if (!response.Success)
+            {
+                await _pool.ExecuteOnWorkerAsync(worker, CommitHelper.BuildBapiRollback(), ct);
+                return Content(HttpStatusCode.BadRequest, ApiResponse<PoCreateRow>.Fail("INVALID_DATA", "Purchase order creation failed. Transaction rolled back.", response));
+            }
+
+            await _pool.ExecuteOnWorkerAsync(worker, CommitHelper.BuildBapiCommit(), ct);
+            return Ok(ApiResponse<PoCreateRow>.Ok(response));
+        }
+        finally
+        {
+            await _pool.ReleaseWorkerAsync(worker);
+        }
     }
 
     /// <summary>

@@ -25,7 +25,7 @@ namespace SapServer.Helpers;
 /// Normanton-Nexus only.
 ///
 /// Like StockAdjustmentHelper, this is a real BAPI: the caller must acquire
-/// a pinned worker (ISapConnectionPool.AcquireWorker()) and issue an
+/// a pinned worker (ISapConnectionPool.AcquireWorkerAsync()) and issue an
 /// explicit BAPI_TRANSACTION_COMMIT/ROLLBACK on that same worker afterward
 /// — see WarehouseController.CreateStockAdjustment for the pattern this
 /// mirrors (ProductionController.PostMixingScrap does the same).

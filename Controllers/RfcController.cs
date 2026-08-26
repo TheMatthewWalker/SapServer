@@ -31,7 +31,7 @@ public sealed class RfcController : ApiController
     }
 
     /// <summary>
-    /// Execute an RFC function call on an available STA pool worker.
+    /// Execute an RFC function call against the stateless SAP NCo connection pool.
     /// The caller specifies which export parameters and output tables to read back.
     /// </summary>
     /// <remarks>
@@ -71,7 +71,7 @@ public sealed class RfcController : ApiController
     }
 
     /// <summary>
-    /// Returns the live health status of every STA pool worker.
+    /// Returns the live health status of every currently-active pinned/elevated SAP session.
     /// Restricted to admin and superadmin roles.
     /// </summary>
     [HttpGet]

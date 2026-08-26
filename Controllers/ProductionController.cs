@@ -396,31 +396,37 @@ public sealed class ProductionController : SapControllerBase
         if (dryRun)
             return Ok(ApiResponse<RfcRequest>.Ok(request));
 
-        var worker = _pool.AcquireWorker();
-
-        var data     = await _pool.ExecuteOnWorkerAsync(worker, request, ct);
-        var response = StockAdjustmentHelper.ParseStockAdjustmentResponse(data);
-
-        _logger.LogInformation($"Posting mixing scrap: {body.Material} x {body.Quantity} KG from {storageLocation} || MatDoc {response.MaterialDocument}");
-
-        if (body.TestRun)
+        var worker = await _pool.AcquireWorkerAsync(ct);
+        try
         {
-            // A test run never creates a real document, so there's nothing
-            // to commit — roll back to release whatever SAP locked while
-            // simulating the posting.
-            await _pool.ExecuteOnWorkerAsync(worker, CommitHelper.BuildBapiRollback(), ct);
+            var data     = await _pool.ExecuteOnWorkerAsync(worker, request, ct);
+            var response = StockAdjustmentHelper.ParseStockAdjustmentResponse(data);
+
+            _logger.LogInformation($"Posting mixing scrap: {body.Material} x {body.Quantity} KG from {storageLocation} || MatDoc {response.MaterialDocument}");
+
+            if (body.TestRun)
+            {
+                // A test run never creates a real document, so there's nothing
+                // to commit — roll back to release whatever SAP locked while
+                // simulating the posting.
+                await _pool.ExecuteOnWorkerAsync(worker, CommitHelper.BuildBapiRollback(), ct);
+                return Ok(ApiResponse<StockAdjustmentResponse>.Ok(response));
+            }
+
+            if (!response.Success)
+            {
+                await _pool.ExecuteOnWorkerAsync(worker, CommitHelper.BuildBapiRollback(), ct);
+                return Content((HttpStatusCode)422, ApiResponse<StockAdjustmentResponse>.Fail(
+                    "422", "SAP rejected the mixing scrap posting. Transaction rolled back.", response));
+            }
+
+            await _pool.ExecuteOnWorkerAsync(worker, CommitHelper.BuildBapiCommit(), ct);
             return Ok(ApiResponse<StockAdjustmentResponse>.Ok(response));
         }
-
-        if (!response.Success)
+        finally
         {
-            await _pool.ExecuteOnWorkerAsync(worker, CommitHelper.BuildBapiRollback(), ct);
-            return Content((HttpStatusCode)422, ApiResponse<StockAdjustmentResponse>.Fail(
-                "422", "SAP rejected the mixing scrap posting. Transaction rolled back.", response));
+            await _pool.ReleaseWorkerAsync(worker);
         }
-
-        await _pool.ExecuteOnWorkerAsync(worker, CommitHelper.BuildBapiCommit(), ct);
-        return Ok(ApiResponse<StockAdjustmentResponse>.Ok(response));
     }
 
 
@@ -472,28 +478,34 @@ public sealed class ProductionController : SapControllerBase
         if (dryRun)
             return Ok(ApiResponse<RfcRequest>.Ok(request));
 
-        var worker = _pool.AcquireWorker();
-
-        var data     = await _pool.ExecuteOnWorkerAsync(worker, request, ct);
-        var response = GoodsMovementHelper.ParseGoodsMovementResponse(data);
-
-        _logger.LogInformation($"Concession goods movement for {body.Material} ({body.Header}): {body.Components.Count} component(s) || MatDoc {response.MaterialDocument}");
-
-        if (body.TestRun)
+        var worker = await _pool.AcquireWorkerAsync(ct);
+        try
         {
-            await _pool.ExecuteOnWorkerAsync(worker, CommitHelper.BuildBapiRollback(), ct);
+            var data     = await _pool.ExecuteOnWorkerAsync(worker, request, ct);
+            var response = GoodsMovementHelper.ParseGoodsMovementResponse(data);
+
+            _logger.LogInformation($"Concession goods movement for {body.Material} ({body.Header}): {body.Components.Count} component(s) || MatDoc {response.MaterialDocument}");
+
+            if (body.TestRun)
+            {
+                await _pool.ExecuteOnWorkerAsync(worker, CommitHelper.BuildBapiRollback(), ct);
+                return Ok(ApiResponse<GoodsMovementResponse>.Ok(response));
+            }
+
+            if (!response.Success)
+            {
+                await _pool.ExecuteOnWorkerAsync(worker, CommitHelper.BuildBapiRollback(), ct);
+                return Content((HttpStatusCode)422, ApiResponse<GoodsMovementResponse>.Fail(
+                    "422", "SAP rejected the concession goods movement. Transaction rolled back.", response));
+            }
+
+            await _pool.ExecuteOnWorkerAsync(worker, CommitHelper.BuildBapiCommit(), ct);
             return Ok(ApiResponse<GoodsMovementResponse>.Ok(response));
         }
-
-        if (!response.Success)
+        finally
         {
-            await _pool.ExecuteOnWorkerAsync(worker, CommitHelper.BuildBapiRollback(), ct);
-            return Content((HttpStatusCode)422, ApiResponse<GoodsMovementResponse>.Fail(
-                "422", "SAP rejected the concession goods movement. Transaction rolled back.", response));
+            await _pool.ReleaseWorkerAsync(worker);
         }
-
-        await _pool.ExecuteOnWorkerAsync(worker, CommitHelper.BuildBapiCommit(), ct);
-        return Ok(ApiResponse<GoodsMovementResponse>.Ok(response));
     }
 
 

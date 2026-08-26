@@ -65,7 +65,7 @@ public sealed class SapServerTestFactory : IDisposable
                 ["Auth:PermissionCacheSeconds"] = "60",
                 ["Auth:DevBypassAuth"] = "false",
                 ["Auth:BypassPermissions"] = "false",
-                ["SapNco:ServiceWorkerCount"] = "0",
+                ["SapNco:MaxConcurrentPinnedSessions"] = "0",
                 ["SapNco:ElevatedWorkerCount"] = "0",
                 ["AllowedOrigins:0"] = "https://test-frontend.invalid",
             })

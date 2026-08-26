@@ -44,7 +44,7 @@ public class PurchasingControllerTests
 
         var ok = ControllerTestHelpers.AssertOk(result);
         Assert.IsType<ApiResponse<RfcRequest>>(ok);
-        _pool.Verify(p => p.AcquireWorker(), Times.Never);
+        _pool.Verify(p => p.AcquireWorkerAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]

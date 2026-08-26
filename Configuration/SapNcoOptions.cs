@@ -4,82 +4,99 @@ namespace SapServer.Configuration;
 /// Configuration for the SAP NCo connection pool (Services/Nco/*) — the sole
 /// SAP transport after the .NET Framework 4.8 + NCo rebuild (replaces the old
 /// SapPoolOptions/SAPFunctions64 COM shape). See CLAUDE.md's architecture
-/// section for the full NcoWorker/NcoConnectionPool design.
+/// section for the full NcoConnectionPool design.
+///
+/// Two distinct groups, sized independently, matching NcoConnectionPool's
+/// two execution paths:
+///   - Ordinary, non-transactional RFC calls (ExecuteAsync — the bulk of
+///     traffic) run straight against NCo's own internal per-destination
+///     connection pool (<see cref="PoolSize"/>/<see cref="MaxPoolSize"/>).
+///     No .NET thread is dedicated to this at all; NCo's pool is already
+///     thread-safe and handles concurrency internally.
+///   - Transactional sequences that must land on one SAP session's LUW (a
+///     create-BAPI followed by BAPI_TRANSACTION_COMMIT/ROLLBACK, via
+///     AcquireWorkerAsync/AcquireElevatedWorkerAsync + ExecuteOnWorkerAsync)
+///     need RfcSessionManager.BeginContext to pin one managed thread to one
+///     physical connection — but only for the duration of that one caller's
+///     sequence, not for the app's whole lifetime. <see
+///     cref="MaxConcurrentPinnedSessions"/>/<see cref="ElevatedWorkerCount"/>
+///     are concurrency caps on these ephemeral, per-request sessions, not a
+///     count of always-alive threads.
 /// </summary>
 public sealed class SapNcoOptions
 {
     public const string SectionName = "SapNco";
 
     /// <summary>
-    /// Number of "service" NCo worker threads — always connected (as either
-    /// <see cref="ServiceAccount"/> or one entry of <see cref="ServiceAccounts"/>)
-    /// for the lifetime of the process. Each owns one dedicated managed thread
-    /// pinned (via RfcSessionManager.BeginContext) to one physical pooled
-    /// connection — needed so a create-BAPI + COMMIT/ROLLBACK sequence
-    /// (AcquireWorker/ExecuteOnWorkerAsync) lands on the same SAP session's
-    /// LUW, a SAP-level requirement independent of COM vs NCo.
+    /// Max concurrent pinned sessions for non-elevated transactional
+    /// sequences (AcquireWorkerAsync/ExecuteOnWorkerAsync), connected with
+    /// the shared <see cref="ServiceAccount"/>. Each acquisition connects a
+    /// fresh dedicated thread + SAP session on demand and tears it down on
+    /// release — this bounds how many such sequences can be in flight at
+    /// once, not a fixed thread pool size.
     /// </summary>
-    public int ServiceWorkerCount { get; init; } = 4;
+    public int MaxConcurrentPinnedSessions { get; init; } = 4;
 
     /// <summary>
-    /// Number of "elevated" NCo worker threads — created unconnected, and only
-    /// connected on demand with a specific user's own SAP credentials for the
-    /// duration of one elevated request (e.g. PO creation), then disconnected.
+    /// Max concurrent elevated pinned sessions — same ephemeral,
+    /// connect-on-acquire/disconnect-on-release lifetime as <see
+    /// cref="MaxConcurrentPinnedSessions"/>, but connected with a specific
+    /// user's own SAP credentials (AcquireElevatedWorkerAsync) instead of
+    /// the shared service account.
     /// </summary>
     public int ElevatedWorkerCount { get; init; } = 2;
 
     /// <summary>
-    /// How long a caller will queue and wait for a free elevated worker
-    /// before giving up, if all <see cref="ElevatedWorkerCount"/> slots are
-    /// already busy with another user's elevated request.
+    /// How long a caller will queue and wait for a free pinned session slot
+    /// before giving up, if all <see cref="MaxConcurrentPinnedSessions"/>
+    /// slots are already busy.
+    /// </summary>
+    public int PinnedAcquireTimeoutSeconds { get; init; } = 30;
+
+    /// <summary>
+    /// How long a caller will queue and wait for a free elevated session
+    /// slot before giving up, if all <see cref="ElevatedWorkerCount"/> slots
+    /// are already busy with another user's elevated request.
     /// </summary>
     public int ElevatedAcquireTimeoutSeconds { get; init; } = 30;
 
-    /// <summary>Total worker threads started at startup (service + elevated).</summary>
-    public int TotalWorkerCount => ServiceWorkerCount + ElevatedWorkerCount;
-
-    /// <summary>Maximum number of queued work items per worker before rejecting new requests.</summary>
+    /// <summary>Maximum number of queued RFC calls per pinned session before rejecting new work on it.</summary>
     public int MaxQueueDepth { get; init; } = 50;
 
-    /// <summary>
-    /// Seconds of inactivity after which the session monitor sends an
-    /// RFC_PING keep-alive — SAP application servers can idle-timeout a
-    /// pooled RFC connection much like SAP GUI does a COM session.
-    /// </summary>
-    public int IdleTimeoutSeconds { get; init; } = 300;
-
-    /// <summary>How often (seconds) the background session monitor runs its health check.</summary>
+    /// <summary>How often (seconds) the background session monitor sends a keep-alive ping to the stateless pool.</summary>
     public int HealthCheckIntervalSeconds { get; init; } = 60;
 
-    /// <summary>Minimum seconds between repeated "slot N is DISCONNECTED" warnings for the same slot.</summary>
-    public int DisconnectedWarningRepeatSeconds { get; init; } = 600;
-
-    /// <summary>Milliseconds to wait before retrying after a failed reconnection attempt.</summary>
-    public int ReconnectDelayMs { get; init; } = 5000;
+    /// <summary>Milliseconds to back off before the stateless pool's single retry after a connection failure.</summary>
+    public int ReconnectDelayMs { get; init; } = 2000;
 
     /// <summary>
-    /// SAP service-account credentials used by every service (non-elevated)
-    /// worker when <see cref="ServiceAccounts"/> is empty/unset. Also the
-    /// source of AppServerHost/SystemNumber/Client/Language for
-    /// elevated-credential building at PurchasingController/
+    /// SAP service-account credentials used by every pinned (non-elevated)
+    /// session, and by the stateless pool when <see cref="ServiceAccounts"/>
+    /// is empty/unset. Also the source of AppServerHost/SystemNumber/Client/
+    /// Language for elevated-credential building at PurchasingController/
     /// PackagingController's "-elevated" endpoints — those only need the
     /// shared system connection profile, not a specific login.
     /// </summary>
     public SapConnectionOptions ServiceAccount { get; init; } = new();
 
     /// <summary>
-    /// Optional per-worker service accounts. When non-empty, service worker i
-    /// connects as <c>ServiceAccounts[i % ServiceAccounts.Count]</c> instead of
-    /// the single shared <see cref="ServiceAccount"/>. Falls back to
-    /// <see cref="ServiceAccount"/> for every worker when empty.
+    /// Optional per-account credentials for the stateless pool. When
+    /// non-empty, one NCo destination is registered per entry (round-robined
+    /// across calls) instead of a single destination for the shared <see
+    /// cref="ServiceAccount"/>.
     /// </summary>
     public IReadOnlyList<SapConnectionOptions> ServiceAccounts { get; init; } = Array.Empty<SapConnectionOptions>();
 
-    /// <summary>NCo's own internal RFC connection pool size per destination — not a thread count.</summary>
-    public int PoolSize { get; init; } = 2;
+    /// <summary>
+    /// NCo's own internal RFC connection pool size for each stateless-pool
+    /// destination — governs real concurrency for ordinary single-call RFCs
+    /// directly, independent of any .NET thread count. Size this against
+    /// your SAP system's concurrent-user license, not CPU count.
+    /// </summary>
+    public int PoolSize { get; init; } = 10;
 
-    /// <summary>Ceiling NCo will grow a destination's connection pool to under load.</summary>
-    public int MaxPoolSize { get; init; } = 4;
+    /// <summary>Ceiling NCo will grow a stateless-pool destination's connection pool to under load.</summary>
+    public int MaxPoolSize { get; init; } = 20;
 }
 
 /// <summary>

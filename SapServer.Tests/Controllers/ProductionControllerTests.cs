@@ -104,7 +104,7 @@ public class ProductionControllerTests : IClassFixture<SapServerTestFactory>
         });
 
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
-        _factory.PoolMock.Verify(p => p.AcquireWorker(), Times.Never);
+        _factory.PoolMock.Verify(p => p.AcquireWorkerAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -124,7 +124,7 @@ public class ProductionControllerTests : IClassFixture<SapServerTestFactory>
         });
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        _factory.PoolMock.Verify(p => p.AcquireWorker(), Times.Never); // never even reaches the BAPI
+        _factory.PoolMock.Verify(p => p.AcquireWorkerAsync(It.IsAny<CancellationToken>()), Times.Never); // never even reaches the BAPI
     }
 
     [Fact]
@@ -146,7 +146,7 @@ public class ProductionControllerTests : IClassFixture<SapServerTestFactory>
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var body = await response.Content.ReadFromJsonAsync<ApiResponse<RfcRequest>>();
         Assert.Equal(StockAdjustmentHelper.FnGoodsMvtCreate, body!.Data!.FunctionName);
-        _factory.PoolMock.Verify(p => p.AcquireWorker(), Times.Never);
+        _factory.PoolMock.Verify(p => p.AcquireWorkerAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
