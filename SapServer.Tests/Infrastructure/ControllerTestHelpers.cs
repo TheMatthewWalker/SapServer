@@ -19,14 +19,18 @@ public static class ControllerTestHelpers
         controller.User = new ClaimsPrincipal(identity);
     }
 
-    // Web API 2's Ok(x)/Content(status, x) all return one generic family
-    // (OkNegotiatedContentResult<T> : NegotiatedContentResult<T>) instead of
-    // ASP.NET Core's distinct OkObjectResult/BadRequestObjectResult/etc. types
-    // — asserting on the exact closed generic type at ~150 call sites across
+    // Web API 2's Ok(x) and Content(status, x) return two DIFFERENT sibling
+    // types — OkNegotiatedContentResult<T> and NegotiatedContentResult<T> —
+    // not a base/derived pair as originally assumed here (confirmed the hard
+    // way: every AssertOk call against a real Ok(x) result threw
+    // "OkNegotiatedContentResult<T> has no StatusCode property" once this ran
+    // against the real System.Web.Http assembly in CI). OkNegotiatedContentResult<T>
+    // has no StatusCode property at all — it implicitly always means 200, so
+    // that case is special-cased below instead of read via reflection.
+    // Both types do carry .Content, which ContentOf reads via reflection —
+    // asserting on the exact closed generic type at ~150 call sites across
     // these test files would mean hand-supplying the precise ApiResponse<T>
-    // for every assertion. These helpers assert on .StatusCode and return
-    // .Content via reflection instead, working for any T without needing it
-    // named at the call site — test-only code, so the reflection cost is fine.
+    // for every assertion instead.
     public static object? AssertOk(IHttpActionResult result) => AssertStatus(result, HttpStatusCode.OK);
     public static object? AssertBadRequest(IHttpActionResult result) => AssertStatus(result, HttpStatusCode.BadRequest);
     public static object? AssertNotFound(IHttpActionResult result) => AssertStatus(result, HttpStatusCode.NotFound);
@@ -40,8 +44,12 @@ public static class ControllerTestHelpers
 
     private static HttpStatusCode StatusOf(IHttpActionResult result)
     {
-        var prop = result.GetType().GetProperty("StatusCode")
-            ?? throw new InvalidOperationException($"{result.GetType()} has no StatusCode property — not a NegotiatedContentResult<T>?");
+        var type = result.GetType();
+        if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(System.Web.Http.Results.OkNegotiatedContentResult<>))
+            return HttpStatusCode.OK;
+
+        var prop = type.GetProperty("StatusCode")
+            ?? throw new InvalidOperationException($"{type} has no StatusCode property — not a NegotiatedContentResult<T>?");
         return (HttpStatusCode)prop.GetValue(result)!;
     }
 

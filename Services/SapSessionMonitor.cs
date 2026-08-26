@@ -26,7 +26,7 @@ public sealed class SapSessionMonitor : IDisposable
     private readonly ILogger _logger;
     private Timer? _timer;
 
-    public SapSessionMonitor(ISapConnectionPool pool, SapNcoOptions options, ILogger logger)
+    public SapSessionMonitor(ISapConnectionPool pool, SapNcoOptions options, ILogger<SapSessionMonitor> logger)
     {
         _pool    = pool;
         _options = options;

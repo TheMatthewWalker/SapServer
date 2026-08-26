@@ -14,6 +14,19 @@ namespace SapServer.Middleware;
 /// </summary>
 public sealed class ExceptionHandlingMiddleware : OwinMiddleware
 {
+    // System.Text.Json.JsonSerializer.Serialize defaults to PascalCase
+    // (matching the C# property names exactly) unless told otherwise — under
+    // ASP.NET Core, MVC's JSON output defaulted to camelCase automatically,
+    // a default this OWIN-hosted middleware doesn't inherit since it calls
+    // JsonSerializer directly rather than going through any ASP.NET Core
+    // formatter pipeline. Explicit here so the wire shape actually matches
+    // the lowercase envelope documented in CLAUDE.md/README.md (and what
+    // SapServer.Tests/Middleware's real-JSON-parsing assertions expect).
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+    };
+
     private readonly ILogger _logger;
 
     public ExceptionHandlingMiddleware(OwinMiddleware next, ILogger logger) : base(next)
@@ -61,6 +74,6 @@ public sealed class ExceptionHandlingMiddleware : OwinMiddleware
         };
 
         var body = ApiResponse<object>.Fail(errorCode, message, safeError);
-        await context.Response.WriteAsync(JsonSerializer.Serialize(body), context.Request.CallCancelled);
+        await context.Response.WriteAsync(JsonSerializer.Serialize(body, JsonOptions), context.Request.CallCancelled);
     }
 }
