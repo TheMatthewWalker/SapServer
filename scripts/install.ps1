@@ -8,12 +8,29 @@
 # see CLAUDE.md's "SAP NCo Spike" / architecture sections for the full
 # rationale behind the .NET Framework 4.8 + NCo rebuild.
 #
-# Run as Administrator, on a machine with the IIS role (and ASP.NET 4.8)
-# installed: Install-WindowsFeature Web-Server, Web-Asp-Net45.
+# Run as Administrator, on a machine with IIS + its PowerShell management
+# tools installed:
+#   - Windows Server: Install-WindowsFeature Web-Server, Web-Asp-Net45, Web-Scripting-Tools
+#     (Web-Scripting-Tools specifically is what provides the WebAdministration
+#     module below — easy to miss, since Web-Server/Web-Asp-Net45 alone install
+#     IIS itself but not its PowerShell cmdlets.)
+#   - Windows 10/11 (client): Enable-WindowsOptionalFeature -Online -All -FeatureName
+#     IIS-WebServerRole, IIS-WebServer, IIS-CommonHttpFeatures, IIS-HttpErrors,
+#     IIS-ApplicationDevelopment, IIS-NetFxExtensibility45, IIS-ISAPIExtensions,
+#     IIS-ISAPIFilter, IIS-ASPNET45, IIS-ManagementConsole, IIS-ManagementScriptingTools
 #Requires -RunAsAdministrator
 
 $ErrorActionPreference = 'Stop'
-Import-Module WebAdministration
+try {
+    Import-Module WebAdministration -ErrorAction Stop
+} catch {
+    Write-Host ""
+    Write-Host "IIS's PowerShell management tools aren't installed on this machine." -ForegroundColor Red
+    Write-Host "On Windows Server:  Install-WindowsFeature Web-Server, Web-Asp-Net45, Web-Scripting-Tools" -ForegroundColor Yellow
+    Write-Host "On Windows 10/11:   Enable-WindowsOptionalFeature -Online -All -FeatureName IIS-WebServerRole, IIS-WebServer, IIS-CommonHttpFeatures, IIS-HttpErrors, IIS-ApplicationDevelopment, IIS-NetFxExtensibility45, IIS-ISAPIExtensions, IIS-ISAPIFilter, IIS-ASPNET45, IIS-ManagementConsole, IIS-ManagementScriptingTools" -ForegroundColor Yellow
+    Write-Host ""
+    throw
+}
 
 $siteName   = 'SapServer'
 $appPoolName = 'SapServer'
