@@ -114,7 +114,8 @@ public class GoodsReceiptHelperTests
         var selectIndex = rows.FindLastIndex(r => r.GetValueOrDefault("FNAM") as string == "BDC_OKCODE" && (string?)r["FVAL"] == "=SELE");
 
         Assert.True(qtyIndex >= 0, "Expected an MSEG-ERFMG(01) row when a quantity is supplied.");
-        Assert.Equal(42.5m, rows[qtyIndex]["FVAL"]);
+        Assert.Equal("42.5", rows[qtyIndex]["FVAL"]); // FVAL is CHAR132 - see BdcBuilder.Field(decimal)
+
         Assert.True(cursorIndex < qtyIndex && qtyIndex < selectIndex,
             "Expected MSEG-ERFMG(01) to be written after the cursor positions on it and before the row is selected.");
     }

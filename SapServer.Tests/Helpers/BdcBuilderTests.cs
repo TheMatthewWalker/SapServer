@@ -50,17 +50,30 @@ public class BdcBuilderTests
         Assert.Equal("=BU", rows[4]["FVAL"]);
     }
 
+    /// <summary>
+    /// FVAL (BDCDATA's field-value column) is always CHAR132 - confirmed for
+    /// real against a live IIS deploy that passing a raw decimal/int through
+    /// as object crashes with RfcTypeConversionException ("cannot convert
+    /// Double into CHAR132"): SAP NCo's typed RfcDataContainer.SetValue has
+    /// no auto-conversion from a numeric type into a CHAR field the way a
+    /// COM VARIANT did. This test previously asserted the opposite (see git
+    /// history) - it encoded exactly the wrong assumption that caused that
+    /// crash, so it's corrected here rather than just having the assertion
+    /// values swapped.
+    /// </summary>
     [Fact]
-    public void Field_overloads_accept_decimal_and_int_values_without_stringifying_them()
+    public void Field_overloads_stringify_decimal_and_int_values_for_the_CHAR132_FVAL_column()
     {
         var request = BdcBuilder.For("MB1B")
             .Field("MSEG-ERFMG(01)", 12.5m)
             .Field("SOME-INT-FIELD", 7)
+            .Field("WHOLE-NUMBER-QTY", 15m)
             .Build();
 
         var rows = request.InputTablesItems["BDCTABLE"];
-        Assert.Equal(12.5m, rows[0]["FVAL"]);
-        Assert.Equal(7, rows[1]["FVAL"]);
+        Assert.Equal("12.5", rows[0]["FVAL"]);
+        Assert.Equal("7", rows[1]["FVAL"]);
+        Assert.Equal("15", rows[2]["FVAL"]); // no trailing ".0"/".000000"
     }
 
     [Fact]

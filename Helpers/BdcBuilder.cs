@@ -1,3 +1,4 @@
+using System.Globalization;
 using SapServer.Models;
 
 namespace SapServer.Helpers;
@@ -65,24 +66,32 @@ public sealed class BdcBuilder
         });
         return this;
     }
-    public BdcBuilder Field(string name, decimal value)
-    {
-        _rows.Add(new Dictionary<string, object?>
-        {
-            ["FNAM"] = name,
-            ["FVAL"] = value
-        });
-        return this;
-    }
-    public BdcBuilder Field(string name, int value)
-    {
-        _rows.Add(new Dictionary<string, object?>
-        {
-            ["FNAM"] = name,
-            ["FVAL"] = value
-        });
-        return this;
-    }
+    /// <summary>
+    /// FVAL (BDCDATA's field-value column) is always CHAR132 - the same
+    /// fixed-length text field a real user's keystrokes would populate on
+    /// screen, so it must be a real string, never a raw numeric type passed
+    /// through as object. The old COM/VARIANT transport silently stringified
+    /// this; confirmed for real against a live IIS deploy that SAP NCo's
+    /// typed RfcDataContainer.SetValue throws RfcTypeConversionException
+    /// ("cannot convert Double into CHAR132") instead - NcoRfcExecutor.Unwrap
+    /// converts a boxed decimal to double before handing it to NCo, and NCo
+    /// has no auto-conversion from a numeric type into a CHAR field the way
+    /// a COM VARIANT did.
+    ///
+    /// UNVERIFIED: which decimal separator this SAP system's screen input
+    /// actually expects for the calling service account (transaction SU3's
+    /// "Decimal Notation" user parameter) - formatted with InvariantCulture
+    /// (period) here as the more common default for an RFC/technical user.
+    /// If a fractional quantity gets rejected by screen validation, or
+    /// silently posts a value that's off by a power of ten (same failure
+    /// shape as RfcRowHelpers.GetDecimal's documented comma/period bug),
+    /// check that setting and swap to a comma-decimal format instead.
+    /// </summary>
+    public BdcBuilder Field(string name, decimal value) =>
+        Field(name, value.ToString("0.######", CultureInfo.InvariantCulture));
+
+    public BdcBuilder Field(string name, int value) =>
+        Field(name, value.ToString(CultureInfo.InvariantCulture));
 
 
     /// <summary>
