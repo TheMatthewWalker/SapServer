@@ -44,6 +44,26 @@
     </None>
   </ItemGroup>
 
+  <!--
+    web.config carries the OWIN startup wiring (owin:AppStartup) and the
+    IIS module registration (OwinHttpModule) that makes IIS actually route
+    requests into the app at all — without it in the published output,
+    every request just hits IIS's own default StaticFileModule and 404s,
+    confirmed for real: it was present on an early publish (likely copied
+    incidentally, e.g. by a NuGet package's own build targets) but silently
+    dropped by a later one. Unlike Microsoft.NET.Sdk.Web, plain
+    Microsoft.NET.Sdk has no built-in "always publish web.config" handling,
+    so it must be pinned explicitly — Update (not Include) because SDK-style
+    default item globs already pick it up implicitly as a None item; adding
+    it again via Include would be a duplicate-item error.
+  -->
+  <ItemGroup>
+    <None Update="web.config">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
+    </None>
+  </ItemGroup>
+
   <!-- .NET Framework GAC assemblies needed by System.Web.Http / OWIN-hosted-in-IIS.
        System.ComponentModel.DataAnnotations isn't implicitly referenced on a
        plain net48 Microsoft.NET.Sdk target the way it is under Microsoft.NET.Sdk.Web
