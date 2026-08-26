@@ -54,9 +54,13 @@ $port       = 7200
 # ASPNETCORE_ENVIRONMENT has to be an env var - it's what Startup.cs's
 # BuildConfiguration() uses to pick which appsettings.{Environment}.json
 # layers on top of appsettings.json, so there's no config-file equivalent to
-# put it in instead. IIS app pool worker processes inherit machine-level env
-# vars at process start - an app pool recycle (Stop/Start-WebAppPool, or
-# just deploy.ps1) is required after changing this.
+# put it in instead. A plain app pool recycle (Stop/Start-WebAppPool, or just
+# deploy.ps1) is NOT enough to pick up a change to this - confirmed for real:
+# new worker processes get their environment block from the Windows Process
+# Activation Service (WAS), which caches the machine environment when WAS
+# itself last started, not a live read of the registry on every recycle. A
+# changed value here needs a full `iisreset` (which restarts WAS itself), or
+# a machine reboot, before a new app pool worker will actually see it.
 Write-Host "Setting environment variables..."
 [System.Environment]::SetEnvironmentVariable('ASPNETCORE_ENVIRONMENT', 'Production', 'Machine')
 
