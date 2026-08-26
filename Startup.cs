@@ -166,6 +166,39 @@ public class Startup
         };
         httpConfig.MapHttpAttributeRoutes();
 
+        // Web API 2's built-in JsonMediaTypeFormatter (System.Net.Http.Formatting,
+        // wrapping Newtonsoft.Json) defaults to PascalCase property names -
+        // confirmed for real against a live deploy: GET /api/rfc/status
+        // returned {"Success":true,"Data":[],"Error":null} instead of the
+        // documented {success,data,error} envelope every caller (Normanton-
+        // Nexus's routes/*.js included) actually checks. This is a separate
+        // serializer from SapExceptionMapper's manually-built error envelope
+        // (System.Text.Json with explicit camelCase JsonOptions - see
+        // WebApiExceptionHandler), which is why only the error path ever came
+        // out lowercase: every ordinary Ok(...)/Content(...) success response
+        // across every controller was silently treated as a failure by any
+        // consumer checking response.success. Invisible to every test in this
+        // suite too - none of them deserialize the raw JSON body; they all
+        // assert on the C# ApiResponse<T> object directly via reflection
+        // (ControllerTestHelpers.AssertOk/etc.), never the actual wire format.
+        // ProcessDictionaryKeys must be forced off - CamelCasePropertyNamesContractResolver
+        // defaults it on, which would also camelCase Dictionary<string,object?>
+        // keys. RfcResponse.Parameters/Tables are exactly that shape, keyed by
+        // literal SAP field/table names (e.g. "STATUS", "MATNR") that callers
+        // depend on verbatim - only declared C# property names (Success/Data/
+        // Error, etc.) should be camelCased, confirmed necessary by a real
+        // test failure (a dictionary lookup on "STATUS" started missing once
+        // the resolver's default silently lowercased that key too).
+        httpConfig.Formatters.JsonFormatter.SerializerSettings.ContractResolver =
+            new Newtonsoft.Json.Serialization.CamelCasePropertyNamesContractResolver
+            {
+                NamingStrategy = new Newtonsoft.Json.Serialization.CamelCaseNamingStrategy
+                {
+                    ProcessDictionaryKeys = false,
+                    OverrideSpecifiedNames = true
+                }
+            };
+
         // Web API 2's HttpServer catches any exception raised during
         // controller construction/filters/action execution ITSELF and
         // converts it to a response before it can ever reach

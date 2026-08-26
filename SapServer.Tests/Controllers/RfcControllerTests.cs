@@ -90,4 +90,34 @@ public class RfcControllerTests : IClassFixture<SapServerTestFactory>
         Assert.Single(body!.Data!);
         Assert.Equal(0, body.Data![0].SlotId);
     }
+
+    /// <summary>
+    /// Guards the real wire format, not just the deserialized C# object -
+    /// Web API 2's default JsonMediaTypeFormatter serializes ApiResponse&lt;T&gt;'s
+    /// PascalCase C# property names as-is unless a camelCase contract
+    /// resolver is configured (see Startup.ConfigurePipeline). Every other
+    /// test in this class deserializes the response back into
+    /// ApiResponse&lt;T&gt; via ReadFromJsonAsync, which matches property names
+    /// case-insensitively and so stayed green even when the live wire format
+    /// was PascalCase ({"Success":true,...} instead of {"success":true,...})
+    /// - confirmed for real against a live IIS deploy, where every external
+    /// caller checking response.success/.data/.error (lowercase, per the
+    /// documented envelope) silently treated every successful response as a
+    /// failure. Only a raw string check on the actual response body catches
+    /// this class of regression.
+    /// </summary>
+    [Fact]
+    public async Task Status_response_body_uses_camelCase_property_names()
+    {
+        _factory.PoolMock
+            .Setup(p => p.GetPoolStatus())
+            .Returns([]);
+
+        var client = _factory.CreateAuthenticatedClient(userId: 1, role: "admin");
+        var response = await client.GetAsync("/api/rfc/status");
+
+        var raw = await response.Content.ReadAsStringAsync();
+        Assert.Contains("\"success\":", raw);
+        Assert.DoesNotContain("\"Success\":", raw);
+    }
 }
