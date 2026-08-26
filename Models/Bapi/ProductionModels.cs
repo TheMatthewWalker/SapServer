@@ -110,7 +110,7 @@ public sealed class Zf40nRequest
 // ── MF41 Reverse Backflush ───────────────────────────────────────────────────
 public sealed class Mf41Request
 {
-    [Required, Length(10, 10)]  public string  MaterialDocument  { get; init; } = string.Empty; // MBLNR → RM07M-MBLNR
+    [Required, StringLength(10, MinimumLength = 10)]  public string  MaterialDocument  { get; init; } = string.Empty; // MBLNR → RM07M-MBLNR
 }
 
 
@@ -118,13 +118,13 @@ public sealed class Mf41Request
 // ── MB11 Posting ───────────────────────────────────────────────────
 public sealed class BomScrapRequest
 {
-    [Required, Length(1, 18)] public string  Material        { get; init; } = string.Empty;
+    [Required, StringLength(18, MinimumLength = 1)] public string  Material        { get; init; } = string.Empty;
                              public string  ComponentUnit        { get; init; } = string.Empty;
     [Range(0.001, double.MaxValue, ErrorMessage = "Quantity must be greater than zero.")]
                              public decimal Quantity        { get; init; }
     [Required, MinLength(1)] public string  Header          { get; init; } = string.Empty;
-    [Required, Length(3, 3)] public string  MovementType    { get; init; } = string.Empty;
-    [Length(4, 4)]           public string  ScrapReason     { get; init; } = string.Empty;
+    [Required, StringLength(3, MinimumLength = 3)] public string  MovementType    { get; init; } = string.Empty;
+    [StringLength(4, MinimumLength = 4)]           public string  ScrapReason     { get; init; } = string.Empty;
                              public string StorageLocation { get; init; } = string.Empty;
                              public string ProfitCentre { get; init; } = string.Empty;
 }
@@ -144,7 +144,7 @@ public sealed class BomScrapRequest
 // when not supplied, same as PostScrap already does per BOM component.
 public sealed class MixingScrapRequest
 {
-    [Required, Length(1, 18)] public string  Material        { get; init; } = string.Empty;
+    [Required, StringLength(18, MinimumLength = 1)] public string  Material        { get; init; } = string.Empty;
                              public string? Plant             { get; init; }
                              public string? StorageLocation   { get; init; }
     [Range(0.001, double.MaxValue, ErrorMessage = "Quantity must be greater than zero.")]
@@ -152,7 +152,7 @@ public sealed class MixingScrapRequest
                              public string  Unit               { get; init; } = "KG";
 
     /// <summary>Reason for movement — GOODSMVT_ITEM-MOVE_REAS, 4-char SAP code.</summary>
-    [Length(4, 4)]           public string? ScrapReason       { get; init; }
+    [StringLength(4, MinimumLength = 4)]           public string? ScrapReason       { get; init; }
 
     /// <summary>Reference text on the resulting material document — GOODSMVT_HEADER-REF_DOC_NO (max 16 chars). The mix ref, for traceability inside SAP's own document text even though SAP itself carries no batch.</summary>
     [Required, MinLength(1)] public string  Header            { get; init; } = string.Empty;
@@ -216,7 +216,7 @@ public sealed class ProducedBatchRow
 // last time this exact BAPI failed here).
 public sealed class GoodsMovementComponent
 {
-    [Required, Length(1, 18)] public string  Material        { get; init; } = string.Empty; // -> GOODSMVT_ITEM-MATERIAL
+    [Required, StringLength(18, MinimumLength = 1)] public string  Material        { get; init; } = string.Empty; // -> GOODSMVT_ITEM-MATERIAL
     [Range(0.001, double.MaxValue, ErrorMessage = "Quantity must be greater than zero.")]
                              public decimal Quantity          { get; init; }                  // -> GOODSMVT_ITEM-ENTRY_QNT
                              public string  Unit               { get; init; } = string.Empty; // -> GOODSMVT_ITEM-ENTRY_UOM

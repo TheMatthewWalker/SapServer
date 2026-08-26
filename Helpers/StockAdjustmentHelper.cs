@@ -48,7 +48,7 @@ internal static class StockAdjustmentHelper
             {
                 PSTNG_DATE = postingDate,
                 DOC_DATE   = documentDate,
-                REF_DOC_NO = (body.Reference ?? "").Length > 16 ? body.Reference![..16] : (body.Reference ?? ""),
+                REF_DOC_NO = (body.Reference ?? "").Length > 16 ? body.Reference!.Substring(0, 16) : (body.Reference ?? ""), // net48 lacks string range indexers
             })
             .StructImport("GOODSMVT_CODE", new { GM_CODE = GmCodeOtherGoodsMovement })
             .Import("TESTRUN", body.TestRun ? "X" : "");

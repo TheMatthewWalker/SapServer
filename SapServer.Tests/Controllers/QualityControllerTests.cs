@@ -1,4 +1,3 @@
-using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using SapServer.Controllers;
@@ -8,6 +7,7 @@ using SapServer.Models;
 using SapServer.Models.Bapi;
 using SapServer.Services.Interfaces;
 using SapServer.Tests.Infrastructure;
+using System.Web.Http;
 
 namespace SapServer.Tests.Controllers;
 
@@ -50,7 +50,7 @@ public class QualityControllerTests
 
         var result = await _controller.BlockStock(SampleRequest("3012"), CancellationToken.None); // not 1710/1711
 
-        Assert.IsType<OkObjectResult>(result);
+        ControllerTestHelpers.AssertOk(result);
         _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Once); // only the MB1B call
     }
 
@@ -66,7 +66,7 @@ public class QualityControllerTests
 
         var result = await _controller.BlockStock(SampleRequest("1710"), CancellationToken.None);
 
-        Assert.IsType<OkObjectResult>(result);
+        ControllerTestHelpers.AssertOk(result);
         _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Exactly(5));
     }
 
@@ -79,8 +79,8 @@ public class QualityControllerTests
 
         var result = await _controller.BlockStock(SampleRequest("1711"), CancellationToken.None);
 
-        var unprocessable = Assert.IsType<UnprocessableEntityObjectResult>(result);
-        Assert.IsType<ApiResponse<QualityMb1bResponse>>(unprocessable.Value);
+        var unprocessable = ControllerTestHelpers.AssertUnprocessableEntity(result);
+        Assert.IsType<ApiResponse<QualityMb1bResponse>>(unprocessable);
         _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Exactly(2)); // never reaches the transfer orders
     }
 
@@ -92,7 +92,7 @@ public class QualityControllerTests
 
         var result = await _controller.UnblockStock(SampleRequest("3012"), CancellationToken.None);
 
-        Assert.IsType<OkObjectResult>(result);
+        ControllerTestHelpers.AssertOk(result);
         _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
@@ -115,8 +115,8 @@ public class QualityControllerTests
 
         var result = await _controller.BlockStock(SampleRequest("3012"), CancellationToken.None); // not 1710/1711
 
-        var unprocessable = Assert.IsType<UnprocessableEntityObjectResult>(result);
-        var body = Assert.IsType<ApiResponse<QualityMb1bResponse>>(unprocessable.Value);
+        var unprocessable = ControllerTestHelpers.AssertUnprocessableEntity(result);
+        var body = Assert.IsType<ApiResponse<QualityMb1bResponse>>(unprocessable);
         Assert.False(body.Success);
         Assert.False(body.Data!.Success);
         Assert.Contains("Deficit of SL stock", body.Error!.Message);
@@ -134,6 +134,6 @@ public class QualityControllerTests
 
         var result = await _controller.BlockStock(SampleRequest("1710"), CancellationToken.None);
 
-        Assert.IsType<UnprocessableEntityObjectResult>(result);
+        ControllerTestHelpers.AssertUnprocessableEntity(result);
     }
 }

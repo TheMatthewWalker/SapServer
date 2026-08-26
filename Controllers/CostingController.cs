@@ -1,4 +1,5 @@
-using Microsoft.AspNetCore.Mvc;
+using System.Net;
+using System.Web.Http;
 using SapServer.Helpers;
 using SapServer.Models;
 using SapServer.Models.Bapi;
@@ -6,7 +7,7 @@ using SapServer.Services.Interfaces;
 
 namespace SapServer.Controllers;
 
-[Route("api/costing")]
+[RoutePrefix("api/costing")]
 public sealed class CostingController : SapControllerBase
 {
     public CostingController(
@@ -16,12 +17,13 @@ public sealed class CostingController : SapControllerBase
         : base(pool, permissions, logger) { }
 
 
-    [HttpPost("cost-sheet")]
-    [ProducesResponseType(typeof(ApiResponse<CostSheetRow[]>), 200)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
-    public async Task<IActionResult> GetCostSheet(
+    [HttpPost]
+
+
+    [Route("cost-sheet")]
+    public async Task<IHttpActionResult> GetCostSheet(
         [FromBody] CostSheetRequest body,
-        [FromQuery] bool dryRun,
+        [FromUri] bool dryRun,
         CancellationToken ct)
     {
         await CheckPermissionAsync(GetUserId(), CostingHelper.FnReadTables, ct);
@@ -39,10 +41,11 @@ public sealed class CostingController : SapControllerBase
     }
 
 
-    [HttpPost("period-balance")]
-    [ProducesResponseType(typeof(ApiResponse<List<PeriodBalanceRow>>), 200)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
-    public async Task<IActionResult> GetPeriodBalance(
+    [HttpPost]
+
+
+    [Route("period-balance")]
+    public async Task<IHttpActionResult> GetPeriodBalance(
         [FromBody] PeriodBalanceRequest body,
         CancellationToken ct)
     {
@@ -71,10 +74,12 @@ public sealed class CostingController : SapControllerBase
 
 
 
-    [HttpPost("profit-center")]
-    [ProducesResponseType(typeof(ApiResponse<ProfitCenterRow[]>), 200)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
-    public async Task<IActionResult> GetProfitCenter(
+    [HttpPost]
+
+
+
+    [Route("profit-center")]
+    public async Task<IHttpActionResult> GetProfitCenter(
         [FromBody] ProfitCenterRequest body,
         CancellationToken ct)
     {
@@ -91,10 +96,11 @@ public sealed class CostingController : SapControllerBase
     }
 
 
-    [HttpPost("freight-posting")]
-    [ProducesResponseType(typeof(ApiResponse<FreightPostingRow>), 200)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
-    public async Task<IActionResult> PostFreight(
+    [HttpPost]
+
+
+    [Route("freight-posting")]
+    public async Task<IHttpActionResult> PostFreight(
         [FromBody] FreightPostingRequest body,
         CancellationToken ct)
     {
@@ -112,7 +118,7 @@ public sealed class CostingController : SapControllerBase
         if (string.IsNullOrEmpty(response.AccountingNumber))
         {
             var rollback = await _pool.ExecuteOnWorkerAsync(worker, CommitHelper.BuildBapiRollback(), ct);
-            return BadRequest(ApiResponse<FreightPostingRow>.Fail("INVALID_DATA", "Freight posting failed. Transaction rolled back.", response));
+            return Content(HttpStatusCode.BadRequest, ApiResponse<FreightPostingRow>.Fail("INVALID_DATA", "Freight posting failed. Transaction rolled back.", response));
         }
 
         var commit = await _pool.ExecuteOnWorkerAsync(worker, CommitHelper.BuildBapiCommit(), ct);
@@ -121,8 +127,12 @@ public sealed class CostingController : SapControllerBase
 
 
 
-    [HttpPost("freight-posting-batch")]
-    public async Task<IActionResult> PostFreightBatch(
+    [HttpPost]
+
+
+
+    [Route("freight-posting-batch")]
+    public async Task<IHttpActionResult> PostFreightBatch(
         [FromBody] List<FreightPostingRequest> requests,
         CancellationToken ct)
     {
@@ -146,7 +156,7 @@ public sealed class CostingController : SapControllerBase
                 var parsed = CostingHelper.ParseFreightPostingRows(data);
 
                 lock (results) // protect shared list
-                { results.AddRange(parsed); }
+                { results.Add(parsed); } // ParseFreightPostingRows returns one row, not a collection
             }
             finally
             { semaphore.Release(); }

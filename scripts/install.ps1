@@ -1,61 +1,75 @@
-# install.ps1 — Register SapServer as a Task Scheduler startup task.
-# Runs in the interactive user session, which is required for SAP GUI COM objects.
-# Run as Administrator.
+# install.ps1 — Register SapServer as an IIS site + application pool.
+#
+# Replaces the old Task Scheduler + self-contained-Kestrel deploy model.
+# That model existed solely because the SAPFunctions64 COM OCX needed an
+# interactive Windows session (IIS app pools run in Session 0, which caused
+# AccessViolationException). SAP NCo is not COM and has no such constraint,
+# so this app can now run as an ordinary IIS-hosted ASP.NET application —
+# see CLAUDE.md's "SAP NCo Spike" / architecture sections for the full
+# rationale behind the .NET Framework 4.8 + NCo rebuild.
+#
+# Run as Administrator, on a machine with the IIS role (and ASP.NET 4.8)
+# installed: Install-WindowsFeature Web-Server, Web-Asp-Net45.
 #Requires -RunAsAdministrator
 
 $ErrorActionPreference = 'Stop'
+Import-Module WebAdministration
 
-$taskName   = 'SapServer'
-$exePath    = "$PSScriptRoot\..\publish\SapServer.exe"
-$exePath    = (Resolve-Path $exePath).Path
-$workingDir = Split-Path $exePath
+$siteName   = 'SapServer'
+$appPoolName = 'SapServer'
+$publishDir = (Resolve-Path "$PSScriptRoot\..\publish").Path
+$port       = 7200
 
 # ---- Machine environment variables ----------------------------------------
-# ASPNETCORE_ENVIRONMENT has to be an env var (or command-line arg) — it's what
-# tells ASP.NET Core which appsettings.{Environment}.json to layer on top of
-# appsettings.json in the first place, so there's no config-file equivalent to
-# put it in instead.
+# ASPNETCORE_ENVIRONMENT has to be an env var — it's what Startup.cs's
+# BuildConfiguration() uses to pick which appsettings.{Environment}.json
+# layers on top of appsettings.json, so there's no config-file equivalent to
+# put it in instead. IIS app pool worker processes inherit machine-level env
+# vars at process start — an app pool recycle (Stop/Start-WebAppPool, or
+# just deploy.ps1) is required after changing this.
 Write-Host "Setting environment variables..."
 [System.Environment]::SetEnvironmentVariable('ASPNETCORE_ENVIRONMENT', 'Production', 'Machine')
 
 # ---- Secrets ----------------------------------------------------------------
 # Deliberately NOT prompted for here / set as env vars — Auth:JwtSecret and
-# SapPool:ServiceAccount(s) (SAP service account credentials — one or several,
-# see README.md) live directly in appsettings.Production.json instead, same as
-# every other setting. That file is already .gitignore'd, same protection env
-# vars would have given, but much easier to maintain — no separate step to
-# remember, no re-running this script just to rotate a value.
+# SapNco:ServiceAccount(s) (SAP service account credentials) live directly in
+# appsettings.Production.json instead, same as every other setting. That
+# file is already .gitignore'd, same protection env vars would have given,
+# but much easier to maintain.
 Write-Host ""
 Write-Host "Reminder: fill in Auth:JwtSecret (shared with sql2005-bridge) and"        -ForegroundColor Yellow
-Write-Host "SapPool:ServiceAccount / ServiceAccounts directly in"                     -ForegroundColor Yellow
-Write-Host "appsettings.Production.json before starting the service — neither is"     -ForegroundColor Yellow
-Write-Host "set via this script."                                                     -ForegroundColor Yellow
+Write-Host "SapNco:ServiceAccount / ServiceAccounts directly in"                     -ForegroundColor Yellow
+Write-Host "appsettings.Production.json before starting the site — neither is"       -ForegroundColor Yellow
+Write-Host "set via this script."                                                    -ForegroundColor Yellow
 
-# ---- Register Task Scheduler task ------------------------------------------
-Write-Host "Registering scheduled task '$taskName'..."
+# ---- Application pool -------------------------------------------------------
+Write-Host ""
+Write-Host "Creating application pool '$appPoolName'..."
+if (Test-Path "IIS:\AppPools\$appPoolName") {
+    Write-Host "App pool already exists — leaving its settings as-is." -ForegroundColor DarkGray
+} else {
+    New-WebAppPool -Name $appPoolName | Out-Null
+}
+# Classic .NET Framework CLR (v4.0 covers 4.8) in Integrated pipeline mode —
+# required for System.Web.Http / Microsoft.Owin.Host.SystemWeb's ASP.NET
+# module integration.
+Set-ItemProperty "IIS:\AppPools\$appPoolName" managedRuntimeVersion 'v4.0'
+Set-ItemProperty "IIS:\AppPools\$appPoolName" managedPipelineMode 'Integrated'
+# 64-bit worker process — matches SapServer.csproj's PlatformTarget=x64
+# (needed for the SAP NCo native binaries, which are x64-only).
+Set-ItemProperty "IIS:\AppPools\$appPoolName" enable32BitAppOnWin64 $false
 
-$action  = New-ScheduledTaskAction -Execute $exePath -WorkingDirectory $workingDir
-$trigger = New-ScheduledTaskTrigger -AtLogon
-$settings = New-ScheduledTaskSettingsSet `
-    -ExecutionTimeLimit 0 `
-    -RestartCount 3 `
-    -RestartInterval (New-TimeSpan -Minutes 1) `
-    -StartWhenAvailable
-
-# Run as current user so SAP COM objects have access to the user session
-$principal = New-ScheduledTaskPrincipal `
-    -UserId ([System.Security.Principal.WindowsIdentity]::GetCurrent().Name) `
-    -LogonType Interactive `
-    -RunLevel Highest
-
-Register-ScheduledTask `
-    -TaskName $taskName `
-    -Action   $action `
-    -Trigger  $trigger `
-    -Settings $settings `
-    -Principal $principal `
-    -Force | Out-Null
+# ---- Site ---------------------------------------------------------------
+Write-Host "Creating site '$siteName' (physical path: $publishDir, port: $port)..."
+if (Get-Website -Name $siteName -ErrorAction SilentlyContinue) {
+    Write-Host "Site already exists — leaving its bindings as-is." -ForegroundColor DarkGray
+} else {
+    New-Website -Name $siteName -PhysicalPath $publishDir -ApplicationPool $appPoolName -Port $port | Out-Null
+}
 
 Write-Host ""
-Write-Host "Task registered. Run 'start.ps1' to start it now." -ForegroundColor Green
-Write-Host "It will also start automatically at next logon."   -ForegroundColor Green
+Write-Host "Site registered on http://localhost:$port — for HTTPS, bind a" -ForegroundColor Yellow
+Write-Host "certificate via IIS Manager or New-WebBinding + netsh http add sslcert" -ForegroundColor Yellow
+Write-Host "(a one-time manual step; not automated here since it needs a real cert)." -ForegroundColor Yellow
+Write-Host ""
+Write-Host "Run 'deploy.ps1' to publish the app into $publishDir and start the site." -ForegroundColor Green

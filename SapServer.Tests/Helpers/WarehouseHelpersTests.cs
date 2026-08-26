@@ -407,7 +407,7 @@ public class WarehouseHelpersTests
         var fields = request.InputTablesItems["query_FIELDS"];
 
         Assert.Contains(fields, f => f["TABNAME"]!.Equals("LTBP") && f["FIELDNAME"]!.Equals("CHARG"));
-        Assert.Equal("CHARG", fields[^1]["FIELDNAME"]); // last-registered, matching OpenTrColumns' appended position
+        Assert.Equal("CHARG", fields[fields.Count - 1]["FIELDNAME"]); // last-registered, matching OpenTrColumns' appended position (net48 lacks the ^ index operator)
     }
 
     [Fact]

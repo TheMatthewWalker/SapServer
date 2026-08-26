@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Mvc;
+using System.Web.Http;
 using SapServer.Helpers;
 using SapServer.Models;
 using SapServer.Models.Bapi;
@@ -6,7 +6,7 @@ using SapServer.Services.Interfaces;
 
 namespace SapServer.Controllers;
 
-[Route("api/logistics")]
+[RoutePrefix("api/logistics")]
 public sealed class LogisticsController : SapControllerBase
 {
     public LogisticsController(
@@ -17,10 +17,10 @@ public sealed class LogisticsController : SapControllerBase
 
     // ── GET /api/logistics/picksheets/open ──────────────────────────────────────────────
 
-    [HttpGet("picksheets/open")]
-    [ProducesResponseType(typeof(ApiResponse<PicksheetRow[]>), 200)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
-    public async Task<IActionResult> GetOpenPicksheets(CancellationToken ct)
+    [HttpGet]
+
+    [Route("picksheets/open")]
+    public async Task<IHttpActionResult> GetOpenPicksheets(CancellationToken ct)
     {
         await CheckPermissionAsync(GetUserId(), LogisticsHelpers.FnReadTables, ct);
 

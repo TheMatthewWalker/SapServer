@@ -1,4 +1,3 @@
-using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using SapServer.Controllers;
@@ -9,6 +8,7 @@ using SapServer.Models.Bapi;
 using SapServer.Services;
 using SapServer.Services.Interfaces;
 using SapServer.Tests.Infrastructure;
+using System.Web.Http;
 
 namespace SapServer.Tests.Controllers;
 
@@ -50,8 +50,8 @@ public class WarehouseControllerTests
                 },
             });
 
-        var result = Assert.IsType<OkObjectResult>(await _controller.GetStock(new StockQuery(), CancellationToken.None));
-        var body = Assert.IsType<ApiResponse<StockRow[]>>(result.Value);
+        var result = ControllerTestHelpers.AssertOk(await _controller.GetStock(new StockQuery(), CancellationToken.None));
+        var body = Assert.IsType<ApiResponse<StockRow[]>>(result);
         Assert.Single(body.Data!);
         Assert.Equal("30005R", body.Data![0].Material);
         Assert.Equal("20260110", body.Data![0].GrDate);
@@ -78,8 +78,8 @@ public class WarehouseControllerTests
                 },
             });
 
-        var result = Assert.IsType<OkObjectResult>(await _controller.GetStock(new StockQuery(), CancellationToken.None));
-        var body = Assert.IsType<ApiResponse<StockRow[]>>(result.Value);
+        var result = ControllerTestHelpers.AssertOk(await _controller.GetStock(new StockQuery(), CancellationToken.None));
+        var body = Assert.IsType<ApiResponse<StockRow[]>>(result);
 
         Assert.Equal("", body.Data![0].ProfitCentre);
         _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Once);
@@ -116,8 +116,8 @@ public class WarehouseControllerTests
             .ReturnsAsync(stockResponse)
             .ReturnsAsync(pcResponse);
 
-        var result = Assert.IsType<OkObjectResult>(await _controller.GetStock(new StockQuery { ProfitCentre = "9912" }, CancellationToken.None));
-        var body = Assert.IsType<ApiResponse<StockRow[]>>(result.Value);
+        var result = ControllerTestHelpers.AssertOk(await _controller.GetStock(new StockQuery { ProfitCentre = "9912" }, CancellationToken.None));
+        var body = Assert.IsType<ApiResponse<StockRow[]>>(result);
 
         Assert.Single(body.Data!);
         Assert.Equal("30005R", body.Data![0].Material);
@@ -150,8 +150,8 @@ public class WarehouseControllerTests
                 },
             });
 
-        var result = Assert.IsType<OkObjectResult>(await _controller.GetImStock(new ImStockQuery { StorageLocation = "1716" }, CancellationToken.None));
-        var body = Assert.IsType<ApiResponse<ImStockRow[]>>(result.Value);
+        var result = ControllerTestHelpers.AssertOk(await _controller.GetImStock(new ImStockQuery { StorageLocation = "1716" }, CancellationToken.None));
+        var body = Assert.IsType<ApiResponse<ImStockRow[]>>(result);
         Assert.Single(body.Data!);
         Assert.Equal("30005R", body.Data![0].Material);
         Assert.Equal(42.5m, body.Data![0].AvailableQty);
@@ -167,8 +167,8 @@ public class WarehouseControllerTests
         var result = await _controller.CreateTransferOrder(
             new CreateTransferOrderRequest { DestinationType = "999", DestinationBin = "BADBIN" }, CancellationToken.None);
 
-        var unprocessable = Assert.IsType<UnprocessableEntityObjectResult>(result);
-        var body = Assert.IsType<ApiResponse<CreateTransferOrderResponse>>(unprocessable.Value);
+        var unprocessable = ControllerTestHelpers.AssertUnprocessableEntity(result);
+        var body = Assert.IsType<ApiResponse<CreateTransferOrderResponse>>(unprocessable);
         Assert.False(body.Success);
         _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Once); // only the bin check
     }
@@ -184,8 +184,8 @@ public class WarehouseControllerTests
         var result = await _controller.CreateTransferOrder(
             new CreateTransferOrderRequest { DestinationType = "999", DestinationBin = "BIN-001" }, CancellationToken.None);
 
-        var ok = Assert.IsType<OkObjectResult>(result);
-        var body = Assert.IsType<ApiResponse<CreateTransferOrderResponse>>(ok.Value);
+        var ok = ControllerTestHelpers.AssertOk(result);
+        var body = Assert.IsType<ApiResponse<CreateTransferOrderResponse>>(ok);
         Assert.Equal("0000001234", body.Data!.TransferOrderNumber);
         _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
     }
@@ -197,7 +197,7 @@ public class WarehouseControllerTests
 
         var result = await _controller.CreateStockAdjustment(new StockAdjustmentRequest { MovementType = "999" }, dryRun: false, CancellationToken.None);
 
-        Assert.IsType<UnprocessableEntityObjectResult>(result);
+        ControllerTestHelpers.AssertUnprocessableEntity(result);
         _pool.Verify(p => p.AcquireWorker(), Times.Never);
     }
 
@@ -209,8 +209,8 @@ public class WarehouseControllerTests
         var result = await _controller.CreateStockAdjustment(
             new StockAdjustmentRequest { MovementType = "711", Material = "30005R" }, dryRun: true, CancellationToken.None);
 
-        var ok = Assert.IsType<OkObjectResult>(result);
-        var body = Assert.IsType<ApiResponse<RfcRequest>>(ok.Value);
+        var ok = ControllerTestHelpers.AssertOk(result);
+        var body = Assert.IsType<ApiResponse<RfcRequest>>(ok);
         Assert.Equal(StockAdjustmentHelper.FnGoodsMvtCreate, body.Data!.FunctionName);
         _pool.Verify(p => p.AcquireWorker(), Times.Never);
     }
@@ -225,7 +225,7 @@ public class WarehouseControllerTests
         var result = await _controller.CreateStockAdjustment(
             new StockAdjustmentRequest { MovementType = "711", Material = "30005R" }, dryRun: false, CancellationToken.None);
 
-        Assert.IsType<OkObjectResult>(result);
+        ControllerTestHelpers.AssertOk(result);
         _pool.Verify(p => p.ExecuteOnWorkerAsync(It.IsAny<SapWorkerHandle>(),
             It.Is<RfcRequest>(r => r.FunctionName == "BAPI_TRANSACTION_COMMIT"), It.IsAny<CancellationToken>()), Times.Once);
         _pool.Verify(p => p.ExecuteOnWorkerAsync(It.IsAny<SapWorkerHandle>(),
@@ -242,7 +242,7 @@ public class WarehouseControllerTests
         var result = await _controller.CreateStockAdjustment(
             new StockAdjustmentRequest { MovementType = "711", Material = "30005R" }, dryRun: false, CancellationToken.None);
 
-        Assert.IsType<UnprocessableEntityObjectResult>(result);
+        ControllerTestHelpers.AssertUnprocessableEntity(result);
         _pool.Verify(p => p.ExecuteOnWorkerAsync(It.IsAny<SapWorkerHandle>(),
             It.Is<RfcRequest>(r => r.FunctionName == "BAPI_TRANSACTION_ROLLBACK"), It.IsAny<CancellationToken>()), Times.Once);
     }
@@ -257,7 +257,7 @@ public class WarehouseControllerTests
         var result = await _controller.CreateStockAdjustment(
             new StockAdjustmentRequest { MovementType = "711", Material = "30005R", TestRun = true }, dryRun: false, CancellationToken.None);
 
-        Assert.IsType<OkObjectResult>(result);
+        ControllerTestHelpers.AssertOk(result);
         _pool.Verify(p => p.ExecuteOnWorkerAsync(It.IsAny<SapWorkerHandle>(),
             It.Is<RfcRequest>(r => r.FunctionName == "BAPI_TRANSACTION_ROLLBACK"), It.IsAny<CancellationToken>()), Times.Once);
         _pool.Verify(p => p.ExecuteOnWorkerAsync(It.IsAny<SapWorkerHandle>(),
@@ -269,8 +269,8 @@ public class WarehouseControllerTests
     {
         var result = await _controller.PicksheetStock(new PicksheetStockRequest { Materials = [] }, CancellationToken.None);
 
-        var ok = Assert.IsType<OkObjectResult>(result);
-        var body = Assert.IsType<ApiResponse<PicksheetBatchRow[]>>(ok.Value);
+        var ok = ControllerTestHelpers.AssertOk(result);
+        var body = Assert.IsType<ApiResponse<PicksheetBatchRow[]>>(ok);
         Assert.Empty(body.Data!);
         _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Never);
     }
@@ -284,7 +284,7 @@ public class WarehouseControllerTests
 
         var result = await _controller.CreateLt04(new CreateLt04Request { Material = "30005R", PalletOrBatch = "BATCH1" }, CancellationToken.None);
 
-        Assert.IsType<UnprocessableEntityObjectResult>(result);
+        ControllerTestHelpers.AssertUnprocessableEntity(result);
         _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Once); // only the quality check
     }
 
@@ -297,8 +297,8 @@ public class WarehouseControllerTests
 
         var result = await _controller.GetBinStorageTypes("", CancellationToken.None);
 
-        var ok = Assert.IsType<OkObjectResult>(result);
-        var body = Assert.IsType<ApiResponse<string[]>>(ok.Value);
+        var ok = ControllerTestHelpers.AssertOk(result);
+        var body = Assert.IsType<ApiResponse<string[]>>(ok);
         Assert.Empty(body.Data!);
         _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Never);
     }
@@ -312,8 +312,8 @@ public class WarehouseControllerTests
 
         var result = await _controller.GetBinStorageTypes("123", CancellationToken.None);
 
-        var ok = Assert.IsType<OkObjectResult>(result);
-        var body = Assert.IsType<ApiResponse<string[]>>(ok.Value);
+        var ok = ControllerTestHelpers.AssertOk(result);
+        var body = Assert.IsType<ApiResponse<string[]>>(ok);
         Assert.Equal(["SA"], body.Data!);
         _pool.Verify(p => p.ExecuteAsync(
             It.Is<RfcRequest>(r => r.InputTablesItems["where_clause"].Any(row => ((string)row["TEXT"]!).Contains("0000000123"))),
@@ -341,7 +341,7 @@ public class WarehouseControllerTests
 
         var result = await _controller.DeleteTr(new DeleteTrRequest { TrNumber = "4500001234" }, CancellationToken.None);
 
-        Assert.IsType<OkObjectResult>(result);
+        ControllerTestHelpers.AssertOk(result);
         _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Exactly(2)); // delete + verify
     }
 
@@ -354,8 +354,8 @@ public class WarehouseControllerTests
 
         var result = await _controller.DeleteTr(new DeleteTrRequest { TrNumber = "4500001234" }, CancellationToken.None);
 
-        var unprocessable = Assert.IsType<UnprocessableEntityObjectResult>(result);
-        var body = Assert.IsType<ApiResponse<BdcResponse>>(unprocessable.Value);
+        var unprocessable = ControllerTestHelpers.AssertUnprocessableEntity(result);
+        var body = Assert.IsType<ApiResponse<BdcResponse>>(unprocessable);
         Assert.False(body.Success);
         // Only the primary delete attempt — no unverified fallback BDC and no
         // exists-check, since the refusal is already a definitive answer.
@@ -377,8 +377,8 @@ public class WarehouseControllerTests
 
         var result = await _controller.DeleteTr(new DeleteTrRequest { TrNumber = "4500001234" }, CancellationToken.None);
 
-        var unprocessable = Assert.IsType<UnprocessableEntityObjectResult>(result);
-        var body = Assert.IsType<ApiResponse<BdcResponse>>(unprocessable.Value);
+        var unprocessable = ControllerTestHelpers.AssertUnprocessableEntity(result);
+        var body = Assert.IsType<ApiResponse<BdcResponse>>(unprocessable);
         Assert.False(body.Success);
         Assert.Contains("still exists", body.Error!.Message);
         _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
@@ -394,7 +394,7 @@ public class WarehouseControllerTests
 
         var result = await _controller.DeleteTr(new DeleteTrRequest { TrNumber = "4500001234" }, CancellationToken.None);
 
-        Assert.IsType<UnprocessableEntityObjectResult>(result);
+        ControllerTestHelpers.AssertUnprocessableEntity(result);
         _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
     }
 
@@ -409,7 +409,7 @@ public class WarehouseControllerTests
 
         var result = await _controller.GetTrCleanupCandidates(CancellationToken.None);
 
-        Assert.IsType<OkObjectResult>(result);
+        ControllerTestHelpers.AssertOk(result);
         _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Once); // only the base query
     }
 
@@ -433,8 +433,8 @@ public class WarehouseControllerTests
 
         var result = await _controller.GetTrCleanupCandidates(CancellationToken.None);
 
-        var ok = Assert.IsType<OkObjectResult>(result);
-        var body = Assert.IsType<ApiResponse<TrCleanupCandidateRow[]>>(ok.Value);
+        var ok = ControllerTestHelpers.AssertOk(result);
+        var body = Assert.IsType<ApiResponse<TrCleanupCandidateRow[]>>(ok);
         Assert.Single(body.Data!);
         Assert.Contains(WarehouseHelpers.ReasonSloc1710, body.Data![0].Reasons);
         _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
@@ -480,8 +480,8 @@ public class WarehouseControllerTests
 
         var result = await _controller.ConsignmentMb1b(SampleConsignmentBody(), dryRun: false, CancellationToken.None);
 
-        var ok = Assert.IsType<OkObjectResult>(result);
-        var body = Assert.IsType<ApiResponse<ConsignmentMb1bResponse>>(ok.Value);
+        var ok = ControllerTestHelpers.AssertOk(result);
+        var body = Assert.IsType<ApiResponse<ConsignmentMb1bResponse>>(ok);
         Assert.True(body.Data!.Success);
         _pool.Verify(p => p.ExecuteOnWorkerAsync(It.IsAny<SapWorkerHandle>(),
             It.Is<RfcRequest>(r => r.FunctionName == "BAPI_TRANSACTION_COMMIT"), It.IsAny<CancellationToken>()), Times.Once);
@@ -507,8 +507,8 @@ public class WarehouseControllerTests
 
         var result = await _controller.ConsignmentMb1b(SampleConsignmentBody(), dryRun: false, CancellationToken.None);
 
-        var unprocessable = Assert.IsType<UnprocessableEntityObjectResult>(result);
-        var body = Assert.IsType<ApiResponse<ConsignmentMb1bResponse>>(unprocessable.Value);
+        var unprocessable = ControllerTestHelpers.AssertUnprocessableEntity(result);
+        var body = Assert.IsType<ApiResponse<ConsignmentMb1bResponse>>(unprocessable);
         Assert.False(body.Success);
         Assert.False(body.Data!.Success);
         Assert.Contains("Deficit of SL stock", body.Error!.Message);
@@ -528,7 +528,7 @@ public class WarehouseControllerTests
 
         var result = await _controller.ConsignmentMb1b(SampleConsignmentBody(), dryRun: false, CancellationToken.None);
 
-        Assert.IsType<UnprocessableEntityObjectResult>(result);
+        ControllerTestHelpers.AssertUnprocessableEntity(result);
     }
 
     [Fact]
@@ -538,8 +538,8 @@ public class WarehouseControllerTests
 
         var result = await _controller.ConsignmentMb1b(SampleConsignmentBody(), dryRun: true, CancellationToken.None);
 
-        var ok = Assert.IsType<OkObjectResult>(result);
-        var body = Assert.IsType<ApiResponse<RfcRequest>>(ok.Value);
+        var ok = ControllerTestHelpers.AssertOk(result);
+        var body = Assert.IsType<ApiResponse<RfcRequest>>(ok);
         Assert.Equal(StockAdjustmentHelper.FnGoodsMvtCreate, body.Data!.FunctionName);
         _pool.Verify(p => p.AcquireWorker(), Times.Never);
     }
@@ -553,7 +553,7 @@ public class WarehouseControllerTests
 
         var result = await _controller.ConsignmentMb1b(SampleConsignmentBody(testRun: true), dryRun: false, CancellationToken.None);
 
-        Assert.IsType<OkObjectResult>(result);
+        ControllerTestHelpers.AssertOk(result);
         _pool.Verify(p => p.ExecuteOnWorkerAsync(It.IsAny<SapWorkerHandle>(),
             It.Is<RfcRequest>(r => r.FunctionName == "BAPI_TRANSACTION_ROLLBACK"), It.IsAny<CancellationToken>()), Times.Once);
         _pool.Verify(p => p.ExecuteOnWorkerAsync(It.IsAny<SapWorkerHandle>(),
@@ -569,7 +569,7 @@ public class WarehouseControllerTests
 
         var result = await _controller.GetZdelflagLikpAblad("0080001234", CancellationToken.None);
 
-        Assert.IsType<OkObjectResult>(result);
+        ControllerTestHelpers.AssertOk(result);
         _permissions.Verify(p => p.CanExecuteAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 }

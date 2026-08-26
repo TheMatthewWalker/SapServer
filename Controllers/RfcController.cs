@@ -1,6 +1,5 @@
 using System.Security.Claims;
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
+using System.Web.Http;
 using SapServer.Exceptions;
 using SapServer.Models;
 using SapServer.Services.Interfaces;
@@ -13,10 +12,9 @@ namespace SapServer.Controllers;
 /// Authentication: JWT Bearer token issued by sql2005-bridge.
 /// Authorization:  per-function permissions stored in dbo.SapDepartmentPermissions.
 /// </summary>
-[ApiController]
-[Route("api/[controller]")]
+[RoutePrefix("api/rfc")]
 [Authorize]
-public sealed class RfcController : ControllerBase
+public sealed class RfcController : ApiController
 {
     private readonly ISapConnectionPool _pool;
     private readonly IPermissionService _permissions;
@@ -53,12 +51,9 @@ public sealed class RfcController : ControllerBase
     /// }
     /// </code>
     /// </remarks>
-    [HttpPost("execute")]
-    [ProducesResponseType(typeof(ApiResponse<RfcResponse>), 200)]
-    [ProducesResponseType(typeof(ApiResponse<object>),      403)]
-    [ProducesResponseType(typeof(ApiResponse<object>),      422)]
-    [ProducesResponseType(typeof(ApiResponse<object>),      503)]
-    public async Task<IActionResult> Execute(
+    [HttpPost]
+    [Route("execute")]
+    public async Task<IHttpActionResult> Execute(
         [FromBody] RfcRequest request,
         CancellationToken cancellationToken)
     {
@@ -79,10 +74,10 @@ public sealed class RfcController : ControllerBase
     /// Returns the live health status of every STA pool worker.
     /// Restricted to admin and superadmin roles.
     /// </summary>
-    [HttpGet("status")]
+    [HttpGet]
+    [Route("status")]
     [Authorize(Roles = "admin,superadmin")]
-    [ProducesResponseType(typeof(ApiResponse<IReadOnlyList<WorkerStatus>>), 200)]
-    public IActionResult Status()
+    public IHttpActionResult Status()
     {
         var status = _pool.GetPoolStatus();
         return Ok(ApiResponse<IReadOnlyList<WorkerStatus>>.Ok(status));
@@ -97,8 +92,14 @@ public sealed class RfcController : ControllerBase
     /// </summary>
     private int GetUserId()
     {
-        var claim = User.FindFirst("userId")
-                 ?? User.FindFirst(ClaimTypes.NameIdentifier)
+        // System.Web.Http.ApiController.User is IPrincipal — JWT claims only
+        // reach us via the underlying ClaimsPrincipal Startup.cs's OWIN JWT
+        // bearer middleware actually populates, so this cast is required
+        // (ASP.NET Core's ControllerBase.User was already typed as
+        // ClaimsPrincipal directly).
+        var principal = (ClaimsPrincipal)User;
+        var claim = principal.FindFirst("userId")
+                 ?? principal.FindFirst(ClaimTypes.NameIdentifier)
                  ?? throw new UnauthorizedAccessException("JWT is missing the 'userId' claim.");
 
         if (!int.TryParse(claim.Value, out int userId))

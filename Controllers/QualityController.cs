@@ -1,4 +1,5 @@
-using Microsoft.AspNetCore.Mvc;
+using System.Net;
+using System.Web.Http;
 using SapServer.Helpers;
 using SapServer.Models;
 using SapServer.Models.Bapi;
@@ -6,7 +7,7 @@ using SapServer.Services.Interfaces;
 
 namespace SapServer.Controllers;
 
-[Route("api/quality")]
+[RoutePrefix("api/quality")]
 public sealed class QualityController : SapControllerBase
 {
     public QualityController(
@@ -17,10 +18,10 @@ public sealed class QualityController : SapControllerBase
 
     // ── GET /api/quality/display ──────────────────────────────────────────────
 
-    [HttpGet("display")]
-    [ProducesResponseType(typeof(ApiResponse<StockRow[]>), 200)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
-    public async Task<IActionResult> GetBlockedStock([FromQuery] StockQuery query, CancellationToken ct)
+    [HttpGet]
+
+    [Route("display")]
+    public async Task<IHttpActionResult> GetBlockedStock([FromUri] StockQuery query, CancellationToken ct)
     {
         await CheckPermissionAsync(GetUserId(), QualityHelpers.FnReadTables, ct);
 
@@ -34,11 +35,10 @@ public sealed class QualityController : SapControllerBase
 
     // ── POST /api/quality/block ──────────────────────────────────
 
-    [HttpPost("block")]
-    [ProducesResponseType(typeof(ApiResponse<QualityMb1bResponse>), 200)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 422)]
-    public async Task<IActionResult> BlockStock(
+    [HttpPost]
+
+    [Route("block")]
+    public async Task<IHttpActionResult> BlockStock(
         [FromBody] QualityMb1bRequest body,
         CancellationToken ct)
     {
@@ -71,11 +71,10 @@ public sealed class QualityController : SapControllerBase
 
     // ── POST /api/quality/unblock ──────────────────────────────────
 
-    [HttpPost("unblock")]
-    [ProducesResponseType(typeof(ApiResponse<QualityMb1bResponse>), 200)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 422)]
-    public async Task<IActionResult> UnblockStock(
+    [HttpPost]
+
+    [Route("unblock")]
+    public async Task<IHttpActionResult> UnblockStock(
         [FromBody] QualityMb1bRequest body,
         CancellationToken ct)
     {
@@ -109,14 +108,14 @@ public sealed class QualityController : SapControllerBase
     // either WHM transfer-order leg) means the stock movement never
     // actually happened — surface it as a real failure instead of 200/
     // success, mirroring WarehouseController.ConsignmentMb1b.
-    private IActionResult ToActionResult(QualityMb1bResponse result)
+    private IHttpActionResult ToActionResult(QualityMb1bResponse result)
     {
         if (!result.Success)
         {
             var msg = new[] { result.Mb1bMessage, result.ToNonBlockedMessage, result.ToBlockedMessage }
                 .FirstOrDefault(m => m.StartsWith("E ", StringComparison.Ordinal))
                 ?? "SAP rejected the quality stock movement.";
-            return UnprocessableEntity(ApiResponse<QualityMb1bResponse>.Fail("422", msg, result));
+            return Content((HttpStatusCode)422, ApiResponse<QualityMb1bResponse>.Fail("422", msg, result));
         }
 
         return Ok(ApiResponse<QualityMb1bResponse>.Ok(result));
@@ -132,7 +131,7 @@ public sealed class QualityController : SapControllerBase
     // simplest and cheapest to check both rather than work out which one is
     // user-supplied for BLOCK vs UNBLOCK. Returns null if both bins exist, or
     // an UnprocessableEntity result to return directly if either is missing.
-    private async Task<IActionResult?> CheckDestinationBinsAsync(
+    private async Task<IHttpActionResult?> CheckDestinationBinsAsync(
         CreateTransferOrderRequest req1, CreateTransferOrderRequest req2, CancellationToken ct)
     {
         foreach (var req in new[] { req1, req2 })
@@ -151,7 +150,7 @@ public sealed class QualityController : SapControllerBase
             if (!WarehouseHelpers.BinExists(binCheck))
             {
                 var msg = $"Destination bin {req.DestinationType}/{destinationBin} does not exist in SAP warehouse {WarehouseHelpers.Warehouse}. Check the storage type and bin and try again.";
-                return UnprocessableEntity(ApiResponse<QualityMb1bResponse>.Fail("422", msg, new QualityMb1bResponse()));
+                return Content((HttpStatusCode)422, ApiResponse<QualityMb1bResponse>.Fail("422", msg, new QualityMb1bResponse()));
             }
         }
         return null;

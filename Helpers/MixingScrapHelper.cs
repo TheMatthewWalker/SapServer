@@ -50,7 +50,7 @@ internal static class MixingScrapHelper
             {
                 PSTNG_DATE = today,
                 DOC_DATE   = today,
-                REF_DOC_NO = body.Header.Length > 16 ? body.Header[..16] : body.Header,
+                REF_DOC_NO = body.Header.Length > 16 ? body.Header.Substring(0, 16) : body.Header, // net48 lacks string range indexers
             })
             .StructImport("GOODSMVT_CODE", new { GM_CODE = StockAdjustmentHelper.GmCodeOtherGoodsMovement })
             .Import("TESTRUN", body.TestRun ? "X" : "");

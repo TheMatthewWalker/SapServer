@@ -750,7 +750,7 @@ internal static class PerformanceHelpers
 
             var material = NormaliseMaterial(Str(matnrList[idx - 1], "MATNR"));
             var period   = Str(req, "PERIOD"); // "YYYYMM"
-            if (period.Length != 6 || !int.TryParse(period[..4], out var y) || !int.TryParse(period[4..], out var m))
+            if (period.Length != 6 || !int.TryParse(period.Substring(0, 4), out var y) || !int.TryParse(period.Substring(4), out var m)) // net48 lacks string range indexers
                 continue;
 
             var offset = (y - today.Year) * 12 + (m - today.Month);
@@ -1094,7 +1094,7 @@ internal static class PerformanceHelpers
         bool historyMode,
         Dictionary<string, decimal>? consignmentStock = null)
     {
-        turnMonths = Math.Clamp(turnMonths, 1, 12);
+        turnMonths = turnMonths < 1 ? 1 : turnMonths > 12 ? 12 : turnMonths; // net48 lacks Math.Clamp
         var today   = DateTime.Today;
         var results = new List<TurnsValClassRow>(materialMasterRows.Count);
 

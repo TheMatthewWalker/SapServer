@@ -1,15 +1,13 @@
 using System.Text.Json;
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
+using System.Web.Http;
 using SapServer.Helpers;
 using SapServer.Models;
 using SapServer.Services.Interfaces;
 
 namespace SapServer.Controllers;
 
-[ApiController]
 [Authorize]
-[Route("api/customs")]
+[RoutePrefix("api/customs")]
 public sealed class CustomsController : SapControllerBase
 {
     private static readonly JsonSerializerOptions _debugJson = new() { WriteIndented = true };
@@ -19,9 +17,10 @@ public sealed class CustomsController : SapControllerBase
         ILogger<CostingController> logger)
         : base(pool, permissions, logger) { }
 
-    [HttpPost("lips")]
-    [ProducesResponseType(typeof(ApiResponse<LipsRow[]>), 200)]
-    public async Task<IActionResult> Lips([FromBody] LipsRequest request, CancellationToken ct)
+    [HttpPost]
+
+    [Route("lips")]
+    public async Task<IHttpActionResult> Lips([FromBody] LipsRequest request, CancellationToken ct)
     {
         if (request.Deliveries.Count == 0)
             return Ok(ApiResponse<LipsRow[]>.Ok([]));
@@ -35,9 +34,10 @@ public sealed class CustomsController : SapControllerBase
         return Ok(ApiResponse<LipsRow[]>.Ok(CustomsHelpers.ParseLipsRows(response)));
     }
 
-    [HttpPost("likp")]
-    [ProducesResponseType(typeof(ApiResponse<LikpRow[]>), 200)]
-    public async Task<IActionResult> Likp([FromBody] LikpRequest request, CancellationToken ct)
+    [HttpPost]
+
+    [Route("likp")]
+    public async Task<IHttpActionResult> Likp([FromBody] LikpRequest request, CancellationToken ct)
     {
         if (request.Deliveries.Count == 0)
             return Ok(ApiResponse<LikpRow[]>.Ok([]));
@@ -51,9 +51,10 @@ public sealed class CustomsController : SapControllerBase
         return Ok(ApiResponse<LikpRow[]>.Ok(CustomsHelpers.ParseLikpRows(response)));
     }
 
-    [HttpPost("vbfa")]
-    [ProducesResponseType(typeof(ApiResponse<VbfaRow[]>), 200)]
-    public async Task<IActionResult> Vbfa([FromBody] VbfaRequest request, CancellationToken ct)
+    [HttpPost]
+
+    [Route("vbfa")]
+    public async Task<IHttpActionResult> Vbfa([FromBody] VbfaRequest request, CancellationToken ct)
     {
         if (request.Lines.Count == 0)
             return Ok(ApiResponse<VbfaRow[]>.Ok([]));
@@ -67,9 +68,10 @@ public sealed class CustomsController : SapControllerBase
         return Ok(ApiResponse<VbfaRow[]>.Ok(CustomsHelpers.ParseVbfaRows(response, request)));
     }
 
-    [HttpPost("marc")]
-    [ProducesResponseType(typeof(ApiResponse<MarcRow[]>), 200)]
-    public async Task<IActionResult> Marc([FromBody] MarcRequest request, CancellationToken ct)
+    [HttpPost]
+
+    [Route("marc")]
+    public async Task<IHttpActionResult> Marc([FromBody] MarcRequest request, CancellationToken ct)
     {
         if (request.Materials.Count == 0)
             return Ok(ApiResponse<MarcRow[]>.Ok([]));
@@ -83,9 +85,10 @@ public sealed class CustomsController : SapControllerBase
         return Ok(ApiResponse<MarcRow[]>.Ok(CustomsHelpers.ParseMarcRows(response)));
     }
 
-    [HttpPost("kna1")]
-    [ProducesResponseType(typeof(ApiResponse<Kna1Row[]>), 200)]
-    public async Task<IActionResult> Kna1([FromBody] Kna1Request request, CancellationToken ct)
+    [HttpPost]
+
+    [Route("kna1")]
+    public async Task<IHttpActionResult> Kna1([FromBody] Kna1Request request, CancellationToken ct)
     {
         if (request.Customers.Count == 0)
             return Ok(ApiResponse<Kna1Row[]>.Ok([]));
@@ -126,9 +129,9 @@ public sealed class CustomsController : SapControllerBase
     // only ever called via the Node-side shared service token (userId 0), so
     // there's no per-user identity for PermissionService to check — the real
     // gate is requirePermission('LOG_CUSTOMS_REPORT') on the Normanton-Nexus route.
-    [HttpPost("vbrk")]
-    [ProducesResponseType(typeof(ApiResponse<VbrkRow[]>), 200)]
-    public async Task<IActionResult> Vbrk([FromBody] VbrkRequest request, CancellationToken ct)
+    [HttpPost]
+    [Route("vbrk")]
+    public async Task<IHttpActionResult> Vbrk([FromBody] VbrkRequest request, CancellationToken ct)
     {
         if (request.Invoices.Count == 0)
             return Ok(ApiResponse<VbrkRow[]>.Ok([]));
@@ -148,9 +151,9 @@ public sealed class CustomsController : SapControllerBase
     // two separate calls (A005 for the condition record, then KONP for the
     // rate/currency/pricing unit), joined here rather than in SAP — see
     // CustomsHelpers.BuildA005Request for the full rationale.
-    [HttpPost("consignment-price")]
-    [ProducesResponseType(typeof(ApiResponse<ConsignmentPriceRow[]>), 200)]
-    public async Task<IActionResult> ConsignmentPrice([FromBody] ConsignmentPriceRequest request, CancellationToken ct)
+    [HttpPost]
+    [Route("consignment-price")]
+    public async Task<IHttpActionResult> ConsignmentPrice([FromBody] ConsignmentPriceRequest request, CancellationToken ct)
     {
         if (request.Lines.Count == 0)
             return Ok(ApiResponse<ConsignmentPriceRow[]>.Ok([]));

@@ -1,5 +1,6 @@
 using System.Data;
-using Microsoft.AspNetCore.Mvc;
+using System.Net;
+using System.Web.Http;
 using Microsoft.Identity.Client.NativeInterop;
 using SapServer.Helpers;
 using SapServer.Models;
@@ -8,7 +9,7 @@ using SapServer.Services.Interfaces;
 
 namespace SapServer.Controllers;
 
-[Route("api/production")]
+[RoutePrefix("api/production")]
 public sealed class ProductionController : SapControllerBase
 {
     public ProductionController(
@@ -19,10 +20,10 @@ public sealed class ProductionController : SapControllerBase
 
     // ── POST /api/production/backflush ──────────────────────────────────
 
-    [HttpPost("backflush")]
-    [ProducesResponseType(typeof(ApiResponse<BdcResponse>), 200)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
-    public async Task<IActionResult> Backflush(
+    [HttpPost]
+
+    [Route("backflush")]
+    public async Task<IHttpActionResult> Backflush(
 
         [FromBody] Zf40nRequest body,
         CancellationToken ct)
@@ -62,10 +63,10 @@ public sealed class ProductionController : SapControllerBase
 // just the backflush result (same "always 200, Node reads Type" convention
 // as plain /backflush).
 
-    [HttpPost("drumming-backflush")]
-    [ProducesResponseType(typeof(ApiResponse<DrumBackflushResponse>), 200)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
-    public async Task<IActionResult> DrummingBackflush(
+    [HttpPost]
+
+    [Route("drumming-backflush")]
+    public async Task<IHttpActionResult> DrummingBackflush(
 
         [FromBody] DrumBackflushRequest body,
         CancellationToken ct)
@@ -150,10 +151,10 @@ public sealed class ProductionController : SapControllerBase
 // drum's own backflush runs. Optional Component filter (IDNRK) narrows to
 // one row instead of the whole BOM.
 
-    [HttpGet("bom")]
-    [ProducesResponseType(typeof(ApiResponse<BomRow[]>), 200)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
-    public async Task<IActionResult> GetBom(
+    [HttpGet]
+
+    [Route("bom")]
+    public async Task<IHttpActionResult> GetBom(
 
         [FromBody] BomQuery body,
         CancellationToken ct)
@@ -169,10 +170,10 @@ public sealed class ProductionController : SapControllerBase
 
 // ── POST /api/production/scrap/post ──────────────────────────────────
 
-    [HttpGet("check-profit-centre")]
-    [ProducesResponseType(typeof(ApiResponse<BdcWrapper>), 200)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
-    public async Task<IActionResult> CheckProfitCentre(
+    [HttpGet]
+
+    [Route("check-profit-centre")]
+    public async Task<IHttpActionResult> CheckProfitCentre(
 
         [FromBody] ProfitCentreRequest body,
         CancellationToken ct)
@@ -198,10 +199,10 @@ public sealed class ProductionController : SapControllerBase
 // hand-written SAP batch number rather than something to resolve) vs. a
 // portal-tracked semi-finished material.
 
-    [HttpGet("check-profit-centres")]
-    [ProducesResponseType(typeof(ApiResponse<ProfitCentreRow[]>), 200)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
-    public async Task<IActionResult> CheckProfitCentres(
+    [HttpGet]
+
+    [Route("check-profit-centres")]
+    public async Task<IHttpActionResult> CheckProfitCentres(
 
         [FromBody] ProfitCentresRequest body,
         CancellationToken ct)
@@ -220,11 +221,10 @@ public sealed class ProductionController : SapControllerBase
 
 // ── GET /api/production/find-cost-collector ──────────────────────────
 
-    [HttpGet("find-cost-collector")]
-    [ProducesResponseType(typeof(ApiResponse<string>), 200)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 400)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
-    public async Task<IActionResult> FindCostCollector(
+    [HttpGet]
+
+    [Route("find-cost-collector")]
+    public async Task<IHttpActionResult> FindCostCollector(
 
         [FromBody] ProfitCentreRequest body,
         CancellationToken ct)
@@ -235,7 +235,7 @@ public sealed class ProductionController : SapControllerBase
         var costCollector = ProductionHelpers.ParseSingleSapResult(costCollectorArray);
 
         if (string.IsNullOrWhiteSpace(costCollector))
-            return BadRequest(ApiResponse<string>.Fail("400", $"No cost collector (AFKO) found for material '{body.Material}'.", null!));
+            return Content(HttpStatusCode.BadRequest, ApiResponse<string>.Fail("400", $"No cost collector (AFKO) found for material '{body.Material}'.", null!));
 
         return Ok(ApiResponse<string>.Ok(costCollector));
     }
@@ -243,10 +243,10 @@ public sealed class ProductionController : SapControllerBase
 
 // ── POST /api/production/reverse-backflush ──────────────────────────────────
 
-    [HttpPost("reverse-backflush")]
-    [ProducesResponseType(typeof(ApiResponse<BdcResponse>), 200)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
-    public async Task<IActionResult> ReverseBackflush(
+    [HttpPost]
+
+    [Route("reverse-backflush")]
+    public async Task<IHttpActionResult> ReverseBackflush(
 
         [FromBody] Mf41Request body,
         CancellationToken ct)
@@ -267,11 +267,10 @@ public sealed class ProductionController : SapControllerBase
 
 // ── POST /api/production/find-backflush-document ──────────────────────────
 
-    [HttpPost("find-backflush-document")]
-    [ProducesResponseType(typeof(ApiResponse<BackflushDocumentRow>), 200)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 400)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
-    public async Task<IActionResult> FindBackflushDocument(
+    [HttpPost]
+
+    [Route("find-backflush-document")]
+    public async Task<IHttpActionResult> FindBackflushDocument(
 
         [FromBody] FindBackflushDocumentRequest body,
         CancellationToken ct)
@@ -282,7 +281,7 @@ public sealed class ProductionController : SapControllerBase
         var row  = ProductionHelpers.ParseBackflushDocumentRows(mseg).FirstOrDefault();
 
         if (row == null)
-            return BadRequest(ApiResponse<BackflushDocumentRow>.Fail("400", $"No backflush (movement 131) found for batch '{body.Batch}'.", null!));
+            return Content(HttpStatusCode.BadRequest, ApiResponse<BackflushDocumentRow>.Fail("400", $"No backflush (movement 131) found for batch '{body.Batch}'.", null!));
 
         return Ok(ApiResponse<BackflushDocumentRow>.Ok(row));
     }
@@ -290,10 +289,10 @@ public sealed class ProductionController : SapControllerBase
 
 // ── POST /api/production/scrap/post ──────────────────────────────────
 
-    [HttpPost("scrap/post")]
-    [ProducesResponseType(typeof(ApiResponse<BdcWrapper>), 200)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
-    public async Task<IActionResult> PostScrap(
+    [HttpPost]
+
+    [Route("scrap/post")]
+    public async Task<IHttpActionResult> PostScrap(
 
         [FromBody] BomScrapRequest body,
         CancellationToken ct)
@@ -315,7 +314,7 @@ public sealed class ProductionController : SapControllerBase
         if (bomResponse.Length > 0)
             { _logger.LogInformation($"Scrapping {body.Quantity} x {body.Material} - found {bomResponse.Length} components in BOM");  }
         else
-            { return BadRequest(ApiResponse<RfcResponse>.Fail("403","No Components in BOM - Unable to Scrap", bom)); }
+            { return Content(HttpStatusCode.BadRequest, ApiResponse<RfcResponse>.Fail("403","No Components in BOM - Unable to Scrap", bom)); }
  
         var kgToUnit = await _pool.ExecuteAsync(ProductionHelpers.BuildKgToUnitRequest(new KgToUnitQuery { Material = body.Material }), ct);
         var kgToUnitResponse = ProductionHelpers.ParseKgToUnit(kgToUnit).FirstOrDefault();
@@ -323,7 +322,7 @@ public sealed class ProductionController : SapControllerBase
         decimal units = 0;
 
         try { units = Math.Round(body.Quantity / kgToUnitResponse.KgConversion, 3); }
-        catch { return BadRequest(ApiResponse<RfcResponse>.Fail("403","Missing Weight", kgToUnit)); }
+        catch { return Content(HttpStatusCode.BadRequest, ApiResponse<RfcResponse>.Fail("403","Missing Weight", kgToUnit)); }
 
         foreach (var row in bomResponse)
         {
@@ -370,14 +369,13 @@ public sealed class ProductionController : SapControllerBase
 // needs an explicit BAPI_TRANSACTION_COMMIT/ROLLBACK on the same pinned
 // worker afterward, or nothing actually persists in SAP.
 
-    [HttpPost("mixing-scrap")]
-    [ProducesResponseType(typeof(ApiResponse<StockAdjustmentResponse>), 200)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 422)]
-    public async Task<IActionResult> PostMixingScrap(
+    [HttpPost]
+
+    [Route("mixing-scrap")]
+    public async Task<IHttpActionResult> PostMixingScrap(
 
         [FromBody] MixingScrapRequest body,
-        [FromQuery] bool dryRun,
+        [FromUri] bool dryRun,
         CancellationToken ct)
     {
         await CheckPermissionAsync(GetUserId(), ProductionHelpers.FnCreate, ct);
@@ -391,7 +389,7 @@ public sealed class ProductionController : SapControllerBase
         }
 
         if (string.IsNullOrWhiteSpace(storageLocation))
-            return BadRequest(ApiResponse<StockAdjustmentResponse>.Fail("400", $"No storage location (MARC-LGPRO) found for material '{body.Material}'.", null!));
+            return Content(HttpStatusCode.BadRequest, ApiResponse<StockAdjustmentResponse>.Fail("400", $"No storage location (MARC-LGPRO) found for material '{body.Material}'.", null!));
 
         var request = MixingScrapHelper.BuildMixingScrapRequest(body, storageLocation);
 
@@ -417,7 +415,7 @@ public sealed class ProductionController : SapControllerBase
         if (!response.Success)
         {
             await _pool.ExecuteOnWorkerAsync(worker, CommitHelper.BuildBapiRollback(), ct);
-            return UnprocessableEntity(ApiResponse<StockAdjustmentResponse>.Fail(
+            return Content((HttpStatusCode)422, ApiResponse<StockAdjustmentResponse>.Fail(
                 "422", "SAP rejected the mixing scrap posting. Transaction rolled back.", response));
         }
 
@@ -440,14 +438,13 @@ public sealed class ProductionController : SapControllerBase
 // BAPI_TRANSACTION_COMMIT/ROLLBACK on the same pinned worker afterward, or
 // nothing actually persists in SAP.
 
-    [HttpPost("goods-movement-backflush")]
-    [ProducesResponseType(typeof(ApiResponse<GoodsMovementResponse>), 200)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 422)]
-    public async Task<IActionResult> PostGoodsMovementBackflush(
+    [HttpPost]
+
+    [Route("goods-movement-backflush")]
+    public async Task<IHttpActionResult> PostGoodsMovementBackflush(
 
         [FromBody] GoodsMovementRequest body,
-        [FromQuery] bool dryRun,
+        [FromUri] bool dryRun,
         CancellationToken ct)
     {
         await CheckPermissionAsync(GetUserId(), ProductionHelpers.FnCreate, ct);
@@ -491,7 +488,7 @@ public sealed class ProductionController : SapControllerBase
         if (!response.Success)
         {
             await _pool.ExecuteOnWorkerAsync(worker, CommitHelper.BuildBapiRollback(), ct);
-            return UnprocessableEntity(ApiResponse<GoodsMovementResponse>.Fail(
+            return Content((HttpStatusCode)422, ApiResponse<GoodsMovementResponse>.Fail(
                 "422", "SAP rejected the concession goods movement. Transaction rolled back.", response));
         }
 
@@ -502,10 +499,10 @@ public sealed class ProductionController : SapControllerBase
 
 // ── POST /api/production/scrap/reverse ──────────────────────────────────
 
-    [HttpPost("scrap/reverse")]
-    [ProducesResponseType(typeof(ApiResponse<BdcResponse>), 200)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
-    public async Task<IActionResult> ReverseScrap(
+    [HttpPost]
+
+    [Route("scrap/reverse")]
+    public async Task<IHttpActionResult> ReverseScrap(
 
         [FromBody] Mf41Request body,
         CancellationToken ct)
@@ -525,7 +522,7 @@ public sealed class ProductionController : SapControllerBase
         var matDoc = ProductionHelpers.ParseMaterialDocument(matDocData).FirstOrDefault();
 
         if (matDoc == null) {
-            return BadRequest(ApiResponse<BdcResponse>.Fail("403",response.RawMessage,response));
+            return Content(HttpStatusCode.BadRequest, ApiResponse<BdcResponse>.Fail("403",response.RawMessage,response));
         }
 
         if (matDoc.StorageLocation == "1710" || matDoc.StorageLocation == "1711") {
@@ -550,13 +547,13 @@ public sealed class ProductionController : SapControllerBase
 // reading a cached/synced table. textId defaults to "004" (special
 // instructions) via a query string override (?textId=) if ever needed.
 
-    [HttpGet("order-text/{salesDocument}/{item}")]
-    [ProducesResponseType(typeof(ApiResponse<string>), 200)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
-    public async Task<IActionResult> GetOrderText(
+    [HttpGet]
+
+    [Route("order-text/{salesDocument}/{item}")]
+    public async Task<IHttpActionResult> GetOrderText(
         string salesDocument,
         string item,
-        [FromQuery] string? textId,
+        [FromUri] string? textId,
         CancellationToken ct)
     {
         await CheckPermissionAsync(GetUserId(), ProductionHelpers.FnCreate, ct);

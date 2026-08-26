@@ -1,4 +1,3 @@
-using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using SapServer.Controllers;
@@ -6,6 +5,7 @@ using SapServer.Helpers;
 using SapServer.Models;
 using SapServer.Services.Interfaces;
 using SapServer.Tests.Infrastructure;
+using System.Web.Http;
 
 namespace SapServer.Tests.Controllers;
 
@@ -26,8 +26,8 @@ public class CustomsControllerTests
     {
         var result = await _controller.Lips(new LipsRequest { Deliveries = [] }, CancellationToken.None);
 
-        var ok = Assert.IsType<OkObjectResult>(result);
-        Assert.Empty(Assert.IsType<ApiResponse<LipsRow[]>>(ok.Value).Data!);
+        var ok = ControllerTestHelpers.AssertOk(result);
+        Assert.Empty(Assert.IsType<ApiResponse<LipsRow[]>>(ok).Data!);
         _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -36,7 +36,7 @@ public class CustomsControllerTests
     {
         _pool.Setup(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>())).ReturnsAsync(new RfcResponse());
         var result = await _controller.Lips(new LipsRequest { Deliveries = ["0080001234"] }, CancellationToken.None);
-        Assert.IsType<OkObjectResult>(result);
+        ControllerTestHelpers.AssertOk(result);
         _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
@@ -44,7 +44,7 @@ public class CustomsControllerTests
     public async Task Likp_short_circuits_on_an_empty_deliveries_list()
     {
         var result = await _controller.Likp(new LikpRequest { Deliveries = [] }, CancellationToken.None);
-        Assert.Empty(Assert.IsType<ApiResponse<LikpRow[]>>(Assert.IsType<OkObjectResult>(result).Value).Data!);
+        Assert.Empty(Assert.IsType<ApiResponse<LikpRow[]>>(ControllerTestHelpers.AssertOk(result)).Data!);
         _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -52,7 +52,7 @@ public class CustomsControllerTests
     public async Task Vbfa_short_circuits_on_an_empty_lines_list()
     {
         var result = await _controller.Vbfa(new VbfaRequest { Lines = [] }, CancellationToken.None);
-        Assert.Empty(Assert.IsType<ApiResponse<VbfaRow[]>>(Assert.IsType<OkObjectResult>(result).Value).Data!);
+        Assert.Empty(Assert.IsType<ApiResponse<VbfaRow[]>>(ControllerTestHelpers.AssertOk(result)).Data!);
         _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -60,7 +60,7 @@ public class CustomsControllerTests
     public async Task Marc_short_circuits_on_an_empty_materials_list()
     {
         var result = await _controller.Marc(new MarcRequest { Materials = [] }, CancellationToken.None);
-        Assert.Empty(Assert.IsType<ApiResponse<MarcRow[]>>(Assert.IsType<OkObjectResult>(result).Value).Data!);
+        Assert.Empty(Assert.IsType<ApiResponse<MarcRow[]>>(ControllerTestHelpers.AssertOk(result)).Data!);
         _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -68,7 +68,7 @@ public class CustomsControllerTests
     public async Task Kna1_short_circuits_on_an_empty_customers_list()
     {
         var result = await _controller.Kna1(new Kna1Request { Customers = [] }, CancellationToken.None);
-        Assert.Empty(Assert.IsType<ApiResponse<Kna1Row[]>>(Assert.IsType<OkObjectResult>(result).Value).Data!);
+        Assert.Empty(Assert.IsType<ApiResponse<Kna1Row[]>>(ControllerTestHelpers.AssertOk(result)).Data!);
         _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -83,14 +83,14 @@ public class CustomsControllerTests
 
         // The important assertion is that the KNVV failure doesn't propagate/500 —
         // the endpoint still returns 200 with whatever KNA1 already produced.
-        Assert.IsType<OkObjectResult>(result);
+        ControllerTestHelpers.AssertOk(result);
     }
 
     [Fact]
     public async Task Vbrk_short_circuits_on_an_empty_invoices_list()
     {
         var result = await _controller.Vbrk(new VbrkRequest { Invoices = [] }, CancellationToken.None);
-        Assert.Empty(Assert.IsType<ApiResponse<VbrkRow[]>>(Assert.IsType<OkObjectResult>(result).Value).Data!);
+        Assert.Empty(Assert.IsType<ApiResponse<VbrkRow[]>>(ControllerTestHelpers.AssertOk(result)).Data!);
         _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -99,7 +99,7 @@ public class CustomsControllerTests
     {
         _pool.Setup(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>())).ReturnsAsync(new RfcResponse());
         var result = await _controller.Vbrk(new VbrkRequest { Invoices = ["0004500099999"] }, CancellationToken.None);
-        Assert.IsType<OkObjectResult>(result);
+        ControllerTestHelpers.AssertOk(result);
         _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
@@ -107,7 +107,7 @@ public class CustomsControllerTests
     public async Task ConsignmentPrice_short_circuits_on_an_empty_lines_list()
     {
         var result = await _controller.ConsignmentPrice(new ConsignmentPriceRequest { Lines = [] }, CancellationToken.None);
-        Assert.Empty(Assert.IsType<ApiResponse<ConsignmentPriceRow[]>>(Assert.IsType<OkObjectResult>(result).Value).Data!);
+        Assert.Empty(Assert.IsType<ApiResponse<ConsignmentPriceRow[]>>(ControllerTestHelpers.AssertOk(result)).Data!);
         _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -116,7 +116,7 @@ public class CustomsControllerTests
     {
         _pool.Setup(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>())).ReturnsAsync(new RfcResponse());
         var result = await _controller.ConsignmentPrice(new ConsignmentPriceRequest { Lines = [new ConsignmentPriceLine("363533", "CP1166")] }, CancellationToken.None);
-        Assert.IsType<OkObjectResult>(result);
+        ControllerTestHelpers.AssertOk(result);
         _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 }

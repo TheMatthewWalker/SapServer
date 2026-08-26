@@ -1,15 +1,20 @@
-# stop.ps1 - Stop the SapServer scheduled task.
+# stop.ps1 - Stop the SapServer IIS application pool.
 $ErrorActionPreference = 'Stop'
+Import-Module WebAdministration
 
-$taskName = 'SapServer'
+$appPoolName = 'SapServer'
 
-$task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
-if (-not $task -or $task.State -ne 'Running') {
-    $state = if ($task) { $task.State } else { 'not registered' }
-    Write-Host "Task '$taskName' is not running (state: $state)." -ForegroundColor Yellow
+if (-not (Test-Path "IIS:\AppPools\$appPoolName")) {
+    Write-Host "App pool '$appPoolName' is not registered." -ForegroundColor Yellow
     exit 0
 }
 
-Write-Host "Stopping '$taskName'..."
-Stop-ScheduledTask -TaskName $taskName
+$state = (Get-WebAppPoolState -Name $appPoolName).Value
+if ($state -ne 'Started') {
+    Write-Host "App pool '$appPoolName' is not running (state: $state)." -ForegroundColor Yellow
+    exit 0
+}
+
+Write-Host "Stopping '$appPoolName'..."
+Stop-WebAppPool -Name $appPoolName
 Write-Host "Stopped." -ForegroundColor Green

@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Mvc;
+using System.Web.Http;
 using SapServer.Helpers;
 using SapServer.Models;
 using SapServer.Services.Interfaces;
@@ -11,7 +11,7 @@ namespace SapServer.Controllers;
 // N:\Config\Office\Templates\AT_46c\sd_waterfall.xltm — see that plan's
 // Context section for the full reverse-engineering trail from the legacy
 // tool's exported VBA module (get_data.bas).
-[Route("api/sales")]
+[RoutePrefix("api/sales")]
 public sealed class SalesController : SapControllerBase
 {
     public SalesController(
@@ -22,10 +22,10 @@ public sealed class SalesController : SapControllerBase
 
     // ── POST /api/sales/schedule-waterfall ───────────────────────────────
 
-    [HttpPost("schedule-waterfall")]
-    [ProducesResponseType(typeof(ApiResponse<ScheduleWaterfallRow[]>), 200)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
-    public async Task<IActionResult> ScheduleWaterfall([FromBody] ScheduleWaterfallRequest request, CancellationToken ct)
+    [HttpPost]
+
+    [Route("schedule-waterfall")]
+    public async Task<IHttpActionResult> ScheduleWaterfall([FromBody] ScheduleWaterfallRequest request, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(request.SalesOrg) || request.ShipToParties.Count == 0)
             return Ok(ApiResponse<ScheduleWaterfallRow[]>.Ok([]));

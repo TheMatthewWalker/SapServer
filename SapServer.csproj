@@ -1,41 +1,29 @@
-<Project Sdk="Microsoft.NET.Sdk.Web">
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net48</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
     <RootNamespace>SapServer</RootNamespace>
     <AssemblyName>SapServer</AssemblyName>
     <PlatformTarget>x64</PlatformTarget>
-    <UserSecretsId>sap-server-secrets</UserSecretsId>
     <Platforms>AnyCPU;x64</Platforms>
+    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+    <GenerateBindingRedirectsOutputType>true</GenerateBindingRedirectsOutputType>
   </PropertyGroup>
+
   <!--
-    The real interop DLL wins whenever it's present (a real dev machine or
-    production build). When it's absent — a fresh checkout that hasn't
-    generated it yet, or any CI runner, which can never have a real SAP GUI
-    install — fall back to interop-stubs/SAPFunctions64.DevStub, which
-    supplies just enough of the same namespace/types for the solution
-    (including SapServer.Tests) to compile. See that project's
-    SAPFunctions64.cs for the full rationale; SapStaWorker.cs's actual COM
-    calls are explicitly out of scope for automated tests either way.
-  -->
-  <ItemGroup Condition="Exists('libs\Interop.SAPFunctions64.dll')">
-      <Reference Include="SAPFunctions64">
-        <HintPath>libs\Interop.SAPFunctions64.dll</HintPath>
-        <Private>true</Private>
-      </Reference>
-  </ItemGroup>
-  <ItemGroup Condition="!Exists('libs\Interop.SAPFunctions64.dll')">
-      <ProjectReference Include="interop-stubs\SAPFunctions64.DevStub\SAPFunctions64.DevStub.csproj" />
-  </ItemGroup>
-  <!--
-    SAP NCo rebuild spike (Services/Nco/*, see CLAUDE.md's "SAP NCo Spike"
-    section) — same present-DLL-wins pattern as SAPFunctions64 above. Drop
-    the real sapnco.dll/sapnco_utils.dll (downloaded from the SAP Support
-    Portal under a licensed S-user — see the earlier "newer sapnco" DLL
-    discussion) into libs\ to compile/run against the real API; until then
-    this falls back to interop-stubs\SapNco.DevStub, which only supplies
-    enough of SAP.Middleware.Connector's shape to compile.
+    SAP NCo — the only SAP transport now (SAPFunctions64 COM/STA pool was
+    removed in the .NET Framework 4.8 + NCo rebuild; see CLAUDE.md). Real
+    DLLs always win when present, same present-DLL-wins pattern used
+    throughout this file: drop sapnco.dll/sapnco_utils.dll (downloaded from
+    the SAP Support Portal under a licensed S-user) into libs\, and the
+    matched native binary set (librfc32.dll/librfcum.dll, icudt*/icuin*/
+    icuuc*.dll, matching VC++ runtime — never mix versions across NCo
+    releases) into libs\sapnco-native\. Until then this falls back to
+    interop-stubs\SapNco.DevStub, which only supplies enough of
+    SAP.Middleware.Connector's shape to compile — see that project for the
+    full rationale and its "not verified against the real assemblies" caveat.
   -->
   <ItemGroup Condition="Exists('libs\sapnco.dll') And Exists('libs\sapnco_utils.dll')">
       <Reference Include="sapnco">
@@ -50,41 +38,61 @@
   <ItemGroup Condition="!(Exists('libs\sapnco.dll') And Exists('libs\sapnco_utils.dll'))">
       <ProjectReference Include="interop-stubs\SapNco.DevStub\SapNco.DevStub.csproj" />
   </ItemGroup>
-  <!--
-    NCo's native unmanaged binaries (librfc32.dll/librfcum.dll, icudt*/icuin*/
-    icuuc*.dll, matching VC++ runtime) — copy the whole matched-version set
-    from the SAP NCo download into libs\sapnco-native\ (never mix DLL
-    versions across NCo releases — see the earlier "newer sapnco" discussion).
-  -->
   <ItemGroup Condition="Exists('libs\sapnco-native')">
     <None Include="libs\sapnco-native\*.dll">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </None>
   </ItemGroup>
+
+  <!-- .NET Framework GAC assemblies needed by System.Web.Http / OWIN-hosted-in-IIS. -->
   <ItemGroup>
-    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.*" />
+    <Reference Include="System.Web" />
+    <Reference Include="System.Net.Http" />
+    <Reference Include="System.Configuration" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Web API 2 hosted in IIS via OWIN (Microsoft.Owin.Host.SystemWeb) — keeps the
+         Startup.cs/OWIN-pipeline shape close to Program.cs's old minimal-hosting-model
+         pipeline, instead of the classic Global.asax/System.Web.Http.WebHost route. -->
+    <PackageReference Include="Microsoft.AspNet.WebApi.Owin" Version="5.3.*" />
+    <PackageReference Include="Microsoft.Owin.Host.SystemWeb" Version="4.2.*" />
+    <PackageReference Include="Microsoft.Owin.Security.Jwt" Version="4.2.*" />
+    <PackageReference Include="Microsoft.Owin.Cors" Version="4.2.*" />
+    <!-- No direct System.IdentityModel.Tokens.Jwt/Microsoft.IdentityModel.Tokens
+         reference — let Microsoft.Owin.Security.Jwt pull whatever version it
+         was actually built against transitively, rather than risk a version
+         mismatch against a much newer IdentityModel line pulled in directly. -->
+
+    <!-- Microsoft.Extensions.* still target netstandard2.0, so the same DI/config/options/
+         logging model from Program.cs carries over almost unchanged onto net48 — pinned to
+         the 8.x LTS line rather than 10.x specifically to stay on a well-established
+         netstandard2.0-compatible major version for a .NET Framework consumer. -->
+    <PackageReference Include="Microsoft.Extensions.Configuration" Version="9.*" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="9.*" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="9.*" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="9.*" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="9.*" />
+    <PackageReference Include="Microsoft.Extensions.Options" Version="9.*" />
+    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="9.*" />
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="9.*" />
+    <PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="9.*" />
+
     <PackageReference Include="Microsoft.Data.SqlClient" Version="6.*" />
-    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.5" />
-    <PackageReference Include="Serilog.AspNetCore" Version="9.*" />
+    <PackageReference Include="Serilog" Version="4.*" />
+    <PackageReference Include="Serilog.Settings.Configuration" Version="9.*" />
+    <PackageReference Include="Serilog.Extensions.Logging" Version="9.*" />
     <PackageReference Include="Serilog.Sinks.Console" Version="6.*" />
     <PackageReference Include="Serilog.Sinks.File" Version="6.*" />
-    <PackageReference Include="Swashbuckle.AspNetCore" Version="7.*" />
-  </ItemGroup>
-  <ItemGroup Condition="Exists('libs\Interop.SAPFunctions64.dll')">
-    <None Update="libs\Interop.SAPFunctions64.dll">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </None>
+    <PackageReference Include="Swashbuckle" Version="5.6.*" />
   </ItemGroup>
 
   <!--
     Both interop-stubs/ and SapServer.Tests/ are separate SDK projects nested
-    under this project's own directory. Web SDK's default item globs cover
-    more than just Compile — without excluding Content/None too, this
-    project would treat the OTHER projects' own bin/obj output as its own
-    content to copy on every build, which (since SapServer.Tests is nested
-    inside this directory) recursively nests SapServer.Tests/bin inside
-    itself deeper on every rebuild. Compile alone only fixes duplicate-type
-    compilation (CS0436); this fixes the file-copy recursion.
+    under this project's own directory — without excluding their own
+    Compile/Content/None items, this project would treat SapServer.Tests's
+    own bin/obj output as its own content to copy on every build (it's
+    nested inside this directory), recursively nesting it deeper each time.
   -->
   <ItemGroup>
     <Compile Remove="interop-stubs\**\*.cs" />
@@ -100,17 +108,4 @@
   <ItemGroup>
     <InternalsVisibleTo Include="SapServer.Tests" />
   </ItemGroup>
-  <ItemGroup>
-    <None Update="libs\wdtfuncs64.ocx">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </None>
-  </ItemGroup>
-
-  <!--
-    SAP GUI COM Interop DLL.
-    Copy SAPFunctions64.Interop.dll from an SAP GUI 7.x installation into the libs/ directory.
-    Typically found at: C:\Program Files (x86)\SAP\FrontEnd\SapGui\
-    You can also generate the interop assembly via Visual Studio:
-      Project > Add COM Reference > SAP Functions OCX
-  -->
 </Project>

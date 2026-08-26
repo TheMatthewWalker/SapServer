@@ -6,6 +6,7 @@ using SapServer.Models;
 using SapServer.Models.Bapi;
 using SapServer.Services;
 using SapServer.Tests.Infrastructure;
+using System.Web.Http;
 
 namespace SapServer.Tests.Controllers;
 
@@ -196,7 +197,7 @@ public class ProductionControllerTests : IClassFixture<SapServerTestFactory>
             Material = "30005R", Quantity = 25.5m, Header = "MX00000123", ScrapReason = "4917",
         });
 
-        Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
+        Assert.Equal((HttpStatusCode)422, response.StatusCode); // net48's HttpStatusCode enum predates UnprocessableEntity
         _factory.PoolMock.Verify(p => p.ExecuteOnWorkerAsync(It.IsAny<SapWorkerHandle>(),
             It.Is<RfcRequest>(r => r.FunctionName == "BAPI_TRANSACTION_ROLLBACK"), It.IsAny<CancellationToken>()), Times.Once);
     }

@@ -1,4 +1,5 @@
-using Microsoft.AspNetCore.Mvc;
+using System.Net;
+using System.Web.Http;
 using SapServer.Helpers;
 using SapServer.Models;
 using SapServer.Models.Bapi;
@@ -6,7 +7,7 @@ using SapServer.Services.Interfaces;
 
 namespace SapServer.Controllers;
 
-[Route("api/warehouse")]
+[RoutePrefix("api/warehouse")]
 public sealed class WarehouseController : SapControllerBase
 {
     public WarehouseController(
@@ -17,10 +18,10 @@ public sealed class WarehouseController : SapControllerBase
 
     // ── GET /api/warehouse/stock ──────────────────────────────────────────────
 
-    [HttpGet("stock")]
-    [ProducesResponseType(typeof(ApiResponse<StockRow[]>), 200)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
-    public async Task<IActionResult> GetStock([FromQuery] StockQuery query, CancellationToken ct)
+    [HttpGet]
+
+    [Route("stock")]
+    public async Task<IHttpActionResult> GetStock([FromUri] StockQuery query, CancellationToken ct)
     {
         await CheckPermissionAsync(GetUserId(), WarehouseHelpers.FnReadTables, ct);
 
@@ -60,10 +61,9 @@ public sealed class WarehouseController : SapControllerBase
     // never appears in LQUA, confirmed against the real SAP system. Same
     // FnReadTables permission gate as GetStock, since it's the same
     // underlying read-only RFC.
-    [HttpGet("im-stock")]
-    [ProducesResponseType(typeof(ApiResponse<ImStockRow[]>), 200)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
-    public async Task<IActionResult> GetImStock([FromQuery] ImStockQuery query, CancellationToken ct)
+    [HttpGet]
+    [Route("im-stock")]
+    public async Task<IHttpActionResult> GetImStock([FromUri] ImStockQuery query, CancellationToken ct)
     {
         await CheckPermissionAsync(GetUserId(), WarehouseHelpers.FnReadTables, ct);
 
@@ -73,10 +73,10 @@ public sealed class WarehouseController : SapControllerBase
 
     // ── GET /api/warehouse/stock/totals ───────────────────────────────────────
 
-    [HttpGet("stock/totals")]
-    [ProducesResponseType(typeof(ApiResponse<MaterialTotalRow[]>), 200)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
-    public async Task<IActionResult> GetStockTotals([FromQuery] StockQuery query, CancellationToken ct)
+    [HttpGet]
+
+    [Route("stock/totals")]
+    public async Task<IHttpActionResult> GetStockTotals([FromUri] StockQuery query, CancellationToken ct)
     {
         await CheckPermissionAsync(GetUserId(), WarehouseHelpers.FnReadTables, ct);
 
@@ -90,10 +90,10 @@ public sealed class WarehouseController : SapControllerBase
 
     // ── GET /api/warehouse/stock/bins ─────────────────────────────────────────
 
-    [HttpGet("stock/bins")]
-    [ProducesResponseType(typeof(ApiResponse<BinSummaryRow[]>), 200)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
-    public async Task<IActionResult> GetStockBins([FromQuery] StockQuery query, CancellationToken ct)
+    [HttpGet]
+
+    [Route("stock/bins")]
+    public async Task<IHttpActionResult> GetStockBins([FromUri] StockQuery query, CancellationToken ct)
     {
         await CheckPermissionAsync(GetUserId(), WarehouseHelpers.FnReadTables, ct);
 
@@ -115,11 +115,9 @@ public sealed class WarehouseController : SapControllerBase
     // indication of what was actually wrong, and cost the user a second
     // attempt while the session reconnected. Failing fast here means a bad
     // bin gets a clear, immediate 422 instead, and SAP is never called at all.
-    [HttpPost("transfer-order")]
-    [ProducesResponseType(typeof(ApiResponse<CreateTransferOrderResponse>), 200)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 422)]
-    public async Task<IActionResult> CreateTransferOrder(
+    [HttpPost]
+    [Route("transfer-order")]
+    public async Task<IHttpActionResult> CreateTransferOrder(
         [FromBody] CreateTransferOrderRequest body,
         CancellationToken ct)
     {
@@ -144,7 +142,7 @@ public sealed class WarehouseController : SapControllerBase
         if (!WarehouseHelpers.BinExists(binCheck))
         {
             var msg = $"Destination bin {body.DestinationType}/{destinationBin} does not exist in SAP warehouse {WarehouseHelpers.Warehouse}. Check the storage type and bin and try again.";
-            return UnprocessableEntity(ApiResponse<CreateTransferOrderResponse>.Fail("422", msg,
+            return Content((HttpStatusCode)422, ApiResponse<CreateTransferOrderResponse>.Fail("422", msg,
                 new CreateTransferOrderResponse { Success = false, Messages = [new SapReturnMessage { Type = "E", Message = msg }] }));
         }
 
@@ -172,19 +170,17 @@ public sealed class WarehouseController : SapControllerBase
     // real BAPI: like BAPI_PO_CREATE1 (PurchasingController.CreatePurchaseOrder),
     // it needs an explicit BAPI_TRANSACTION_COMMIT/ROLLBACK on the same pinned
     // worker, or nothing actually persists in SAP.
-    [HttpPost("stock-adjustment")]
-    [ProducesResponseType(typeof(ApiResponse<StockAdjustmentResponse>), 200)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 422)]
-    public async Task<IActionResult> CreateStockAdjustment(
+    [HttpPost]
+    [Route("stock-adjustment")]
+    public async Task<IHttpActionResult> CreateStockAdjustment(
         [FromBody] StockAdjustmentRequest body,
-        [FromQuery] bool dryRun,
+        [FromUri] bool dryRun,
         CancellationToken ct)
     {
         await CheckPermissionAsync(GetUserId(), StockAdjustmentHelper.FnGoodsMvtCreate, ct);
 
         if (!StockAdjustmentHelper.ExpectedMovementTypes.Contains(body.MovementType))
-            return UnprocessableEntity(ApiResponse<StockAdjustmentResponse>.Fail("422",
+            return Content((HttpStatusCode)422, ApiResponse<StockAdjustmentResponse>.Fail("422",
                 $"Movement type must be 711, 712, 717, or 718 for a stock adjustment (got '{body.MovementType}').",
                 new StockAdjustmentResponse { Success = false }));
 
@@ -210,7 +206,7 @@ public sealed class WarehouseController : SapControllerBase
         if (!response.Success)
         {
             await _pool.ExecuteOnWorkerAsync(worker, CommitHelper.BuildBapiRollback(), ct);
-            return UnprocessableEntity(ApiResponse<StockAdjustmentResponse>.Fail(
+            return Content((HttpStatusCode)422, ApiResponse<StockAdjustmentResponse>.Fail(
                 "422", "SAP rejected the stock adjustment. Transaction rolled back.", response));
         }
 
@@ -227,9 +223,10 @@ public sealed class WarehouseController : SapControllerBase
     // /api/sap/lips, /api/sap/likp etc., not the per-user token that
     // CheckPermissionAsync expects.
 
-    [HttpPost("picksheet-stock")]
-    [ProducesResponseType(typeof(ApiResponse<PicksheetBatchRow[]>), 200)]
-    public async Task<IActionResult> PicksheetStock([FromBody] PicksheetStockRequest request, CancellationToken ct)
+    [HttpPost]
+
+    [Route("picksheet-stock")]
+    public async Task<IHttpActionResult> PicksheetStock([FromBody] PicksheetStockRequest request, CancellationToken ct)
     {
         if (request.Materials.Count == 0)
             return Ok(ApiResponse<PicksheetBatchRow[]>.Ok([]));
@@ -246,9 +243,10 @@ public sealed class WarehouseController : SapControllerBase
     // once picked) — see PicksheetHelpers.LipsColumns for the full reasoning.
     // No CheckPermissionAsync gate, same as picksheet-stock above.
 
-    [HttpPost("picksheet-materials")]
-    [ProducesResponseType(typeof(ApiResponse<PicksheetLipsRow[]>), 200)]
-    public async Task<IActionResult> PicksheetMaterials([FromBody] PicksheetLipsRequest request, CancellationToken ct)
+    [HttpPost]
+
+    [Route("picksheet-materials")]
+    public async Task<IHttpActionResult> PicksheetMaterials([FromBody] PicksheetLipsRequest request, CancellationToken ct)
     {
         if (request.Deliveries.Count == 0)
             return Ok(ApiResponse<PicksheetLipsRow[]>.Ok([]));
@@ -275,10 +273,10 @@ public sealed class WarehouseController : SapControllerBase
     // No CheckPermissionAsync gate, same as the other picksheet-* endpoints —
     // called from Node via the shared service token.
 
-    [HttpPost("picksheet-stage-batch")]
-    [ProducesResponseType(typeof(ApiResponse<StagePicksheetBatchResponse>), 200)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 422)]
-    public async Task<IActionResult> PicksheetStageBatch(
+    [HttpPost]
+
+    [Route("picksheet-stage-batch")]
+    public async Task<IHttpActionResult> PicksheetStageBatch(
         [FromBody] StagePicksheetBatchRequest request,
         CancellationToken ct)
     {
@@ -293,7 +291,7 @@ public sealed class WarehouseController : SapControllerBase
         if (snapshot is null)
         {
             var msg = $"Batch {request.Batch} of material {request.Material} was not found in stock (LQUA). It may have already been moved or consumed.";
-            return UnprocessableEntity(ApiResponse<StagePicksheetBatchResponse>.Fail("422", msg, Failed(msg)));
+            return Content((HttpStatusCode)422, ApiResponse<StagePicksheetBatchResponse>.Fail("422", msg, Failed(msg)));
         }
 
         // 2. Destination bin = picksheet number, zero-padded to 10 digits
@@ -314,7 +312,7 @@ public sealed class WarehouseController : SapControllerBase
             if (!PicksheetHelpers.BinExists(recheckResponse))
             {
                 var msg = $"Could not create staging bin {destinationBin} (storage type {PicksheetHelpers.StagingStorageType}) in SAP. LS01 response: {createMessage}";
-                return UnprocessableEntity(ApiResponse<StagePicksheetBatchResponse>.Fail("422", msg, Failed(msg)));
+                return Content((HttpStatusCode)422, ApiResponse<StagePicksheetBatchResponse>.Fail("422", msg, Failed(msg)));
             }
 
             binWasCreated = true;
@@ -340,7 +338,7 @@ public sealed class WarehouseController : SapControllerBase
         if (ReturnTableHelper.HasBlockingError(toResult.Messages.Select(m => new ReturnTableHelper.SapMessage(m.Type, m.Message))))
         {
             const string msg = "SAP rejected the transfer order.";
-            return UnprocessableEntity(ApiResponse<StagePicksheetBatchResponse>.Fail("422", msg, Failed(msg, toResult.Messages)));
+            return Content((HttpStatusCode)422, ApiResponse<StagePicksheetBatchResponse>.Fail("422", msg, Failed(msg, toResult.Messages)));
         }
 
         return Ok(ApiResponse<StagePicksheetBatchResponse>.Ok(new StagePicksheetBatchResponse(
@@ -364,10 +362,10 @@ public sealed class WarehouseController : SapControllerBase
     // "nothing to reverse" handling (batch already picked/moved elsewhere).
     // No CheckPermissionAsync gate, same as the other picksheet-* endpoints.
 
-    [HttpPost("picksheet-unstage-batch")]
-    [ProducesResponseType(typeof(ApiResponse<PicksheetUnstageBatchResponse>), 200)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 422)]
-    public async Task<IActionResult> PicksheetUnstageBatch(
+    [HttpPost]
+
+    [Route("picksheet-unstage-batch")]
+    public async Task<IHttpActionResult> PicksheetUnstageBatch(
         [FromBody] PicksheetUnstageBatchRequest request,
         CancellationToken ct)
     {
@@ -394,7 +392,7 @@ public sealed class WarehouseController : SapControllerBase
         if (ReturnTableHelper.HasBlockingError(toResult.Messages.Select(m => new ReturnTableHelper.SapMessage(m.Type, m.Message))))
         {
             const string msg = "SAP rejected the reversing transfer order.";
-            return UnprocessableEntity(ApiResponse<PicksheetUnstageBatchResponse>.Fail("422", msg, Failed(msg, toResult.Messages)));
+            return Content((HttpStatusCode)422, ApiResponse<PicksheetUnstageBatchResponse>.Fail("422", msg, Failed(msg, toResult.Messages)));
         }
 
         return Ok(ApiResponse<PicksheetUnstageBatchResponse>.Ok(new PicksheetUnstageBatchResponse(
@@ -415,11 +413,11 @@ public sealed class WarehouseController : SapControllerBase
     // mrpController filter lets the frontend narrow the list the same way
     // the source Excel macro's operators already work by MRP controller.
 
-    [HttpGet("open-transfer-requirements")]
-    [ProducesResponseType(typeof(ApiResponse<OpenTransferRequirementRow[]>), 200)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
-    public async Task<IActionResult> GetOpenTransferRequirements(
-        [FromQuery] OpenTransferRequirementsQuery query,
+    [HttpGet]
+
+    [Route("open-transfer-requirements")]
+    public async Task<IHttpActionResult> GetOpenTransferRequirements(
+        [FromUri] OpenTransferRequirementsQuery query,
         CancellationToken ct)
     {
         await CheckPermissionAsync(GetUserId(), WarehouseHelpers.FnReadTables, ct);
@@ -438,10 +436,9 @@ public sealed class WarehouseController : SapControllerBase
     // flow, the LT04 modal, both Stock Management transfer forms, and the
     // Transfer Orders tile. Read-only (same FnReadTables gate as GetStock),
     // so no LOG_SUPER-style restriction — just a lookup.
-    [HttpGet("bin-storage-types")]
-    [ProducesResponseType(typeof(ApiResponse<string[]>), 200)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
-    public async Task<IActionResult> GetBinStorageTypes([FromQuery] string bin, CancellationToken ct)
+    [HttpGet]
+    [Route("bin-storage-types")]
+    public async Task<IHttpActionResult> GetBinStorageTypes([FromUri] string bin, CancellationToken ct)
     {
         await CheckPermissionAsync(GetUserId(), WarehouseHelpers.FnReadTables, ct);
 
@@ -471,11 +468,9 @@ public sealed class WarehouseController : SapControllerBase
     // rather than a bespoke permission — it's the same underlying RFC every
     // other BDC-driven transaction in this controller (consignment-mb1b) is
     // gated on.
-    [HttpPost("create-lt04")]
-    [ProducesResponseType(typeof(ApiResponse<BdcResponse>), 200)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 422)]
-    public async Task<IActionResult> CreateLt04(
+    [HttpPost]
+    [Route("create-lt04")]
+    public async Task<IHttpActionResult> CreateLt04(
         [FromBody] CreateLt04Request body,
         CancellationToken ct)
     {
@@ -487,7 +482,7 @@ public sealed class WarehouseController : SapControllerBase
         if (WarehouseHelpers.IsQualityBlocked(qualityCheck))
         {
             const string msg = "This has not been scanned out of firewall yet. Unable to LT04.";
-            return UnprocessableEntity(ApiResponse<BdcResponse>.Fail("422", msg,
+            return Content((HttpStatusCode)422, ApiResponse<BdcResponse>.Fail("422", msg,
                 new BdcResponse { Type = "E", Message = msg }));
         }
 
@@ -517,11 +512,9 @@ public sealed class WarehouseController : SapControllerBase
     //     failure (a field that doesn't exist on the target dynpro) that
     //     deleted nothing. Every non-blocked attempt is verified by
     //     re-querying LTBP before reporting success.
-    [HttpPost("delete-tr")]
-    [ProducesResponseType(typeof(ApiResponse<BdcResponse>), 200)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 422)]
-    public async Task<IActionResult> DeleteTr([FromBody] DeleteTrRequest body, CancellationToken ct)
+    [HttpPost]
+    [Route("delete-tr")]
+    public async Task<IHttpActionResult> DeleteTr([FromBody] DeleteTrRequest body, CancellationToken ct)
     {
         await CheckPermissionAsync(GetUserId(), WarehouseHelpers.FnConsignment, ct);
 
@@ -531,7 +524,7 @@ public sealed class WarehouseController : SapControllerBase
         if (WarehouseHelpers.IsDeleteTrItemBlocked(result))
         {
             var msg = $"SAP refused to delete TR {body.TrNumber}: {result.Message}. This TR needs a manual LB02 delete.";
-            return UnprocessableEntity(ApiResponse<BdcResponse>.Fail("422", msg,
+            return Content((HttpStatusCode)422, ApiResponse<BdcResponse>.Fail("422", msg,
                 new BdcResponse { Type = "E", Message = msg, RawMessage = result.RawMessage }));
         }
 
@@ -539,7 +532,7 @@ public sealed class WarehouseController : SapControllerBase
         if (WarehouseHelpers.TrStillExists(existsCheck))
         {
             var msg = $"SAP reported \"{result.Message}\" but TR {body.TrNumber} still exists — the delete did not take effect.";
-            return UnprocessableEntity(ApiResponse<BdcResponse>.Fail("422", msg,
+            return Content((HttpStatusCode)422, ApiResponse<BdcResponse>.Fail("422", msg,
                 new BdcResponse { Type = "E", Message = msg, RawMessage = result.RawMessage }));
         }
 
@@ -553,10 +546,9 @@ public sealed class WarehouseController : SapControllerBase
     // WarehouseHelpers.BuildTrCleanupCandidateRows for the three reason
     // conditions. Read-only (FnReadTables), so no LOG_SUPER restriction here;
     // only the resulting bulk delete (via delete-tr) needs it.
-    [HttpGet("tr-cleanup-candidates")]
-    [ProducesResponseType(typeof(ApiResponse<TrCleanupCandidateRow[]>), 200)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
-    public async Task<IActionResult> GetTrCleanupCandidates(CancellationToken ct)
+    [HttpGet]
+    [Route("tr-cleanup-candidates")]
+    public async Task<IHttpActionResult> GetTrCleanupCandidates(CancellationToken ct)
     {
         await CheckPermissionAsync(GetUserId(), WarehouseHelpers.FnReadTables, ct);
 
@@ -579,13 +571,12 @@ public sealed class WarehouseController : SapControllerBase
 
     // ── POST /api/warehouse/consignment-mb1b ──────────────────────────────────
 
-    [HttpPost("consignment-mb1b")]
-    [ProducesResponseType(typeof(ApiResponse<ConsignmentMb1bResponse>), 200)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 422)]
-    public async Task<IActionResult> ConsignmentMb1b(
+    [HttpPost]
+
+    [Route("consignment-mb1b")]
+    public async Task<IHttpActionResult> ConsignmentMb1b(
         [FromBody] ConsignmentMb1bRequest body,
-        [FromQuery] bool dryRun,
+        [FromUri] bool dryRun,
         CancellationToken ct)
     {
         await CheckPermissionAsync(GetUserId(), WarehouseHelpers.FnConsignment, ct);
@@ -646,7 +637,7 @@ public sealed class WarehouseController : SapControllerBase
             if (!string.IsNullOrWhiteSpace(result.ToConsignMessage))
                 messages.Add($"To Consign: {result.ToConsignMessage}");
 
-            return UnprocessableEntity(
+            return Content((HttpStatusCode)422, 
                 ApiResponse<ConsignmentMb1bResponse>.Fail(
                     "422",
                     string.Join(" | ", messages),
@@ -667,9 +658,10 @@ public sealed class WarehouseController : SapControllerBase
     // picksheet-* endpoints — called from Node via the shared service token
     // when a delivery is completed, not directly by a logged-in user.
 
-    [HttpPost("set-delivery-weight")]
-    [ProducesResponseType(typeof(ApiResponse<SetDeliveryWeightResponse>), 200)]
-    public async Task<IActionResult> SetDeliveryWeight(
+    [HttpPost]
+
+    [Route("set-delivery-weight")]
+    public async Task<IHttpActionResult> SetDeliveryWeight(
         [FromBody] SetDeliveryWeightRequest body,
         CancellationToken ct)
     {
@@ -690,33 +682,37 @@ public sealed class WarehouseController : SapControllerBase
     // picksheet-*/set-delivery-weight endpoints — called from Node via the
     // shared service token, not directly by a logged-in user.
 
-    [HttpGet("zdelflag/likp-ablad/{delivery}")]
-    [ProducesResponseType(typeof(ApiResponse<string>), 200)]
-    public async Task<IActionResult> GetZdelflagLikpAblad(string delivery, CancellationToken ct)
+    [HttpGet]
+
+    [Route("zdelflag/likp-ablad/{delivery}")]
+    public async Task<IHttpActionResult> GetZdelflagLikpAblad(string delivery, CancellationToken ct)
     {
         var response = await _pool.ExecuteAsync(ZdelflagHelpers.BuildLikpAbladRequest(delivery), ct);
         return Ok(ApiResponse<string>.Ok(ZdelflagHelpers.ParseLikpAblad(response)));
     }
 
-    [HttpGet("zdelflag/lips-items/{delivery}")]
-    [ProducesResponseType(typeof(ApiResponse<ZdelflagLipsItemRow[]>), 200)]
-    public async Task<IActionResult> GetZdelflagLipsItems(string delivery, CancellationToken ct)
+    [HttpGet]
+
+    [Route("zdelflag/lips-items/{delivery}")]
+    public async Task<IHttpActionResult> GetZdelflagLipsItems(string delivery, CancellationToken ct)
     {
         var response = await _pool.ExecuteAsync(ZdelflagHelpers.BuildLipsItemDetailRequest(delivery), ct);
         return Ok(ApiResponse<ZdelflagLipsItemRow[]>.Ok(ZdelflagHelpers.ParseLipsItemDetail(response)));
     }
 
-    [HttpGet("zdelflag/eikto/{customer}")]
-    [ProducesResponseType(typeof(ApiResponse<string>), 200)]
-    public async Task<IActionResult> GetZdelflagEikto(string customer, CancellationToken ct)
+    [HttpGet]
+
+    [Route("zdelflag/eikto/{customer}")]
+    public async Task<IHttpActionResult> GetZdelflagEikto(string customer, CancellationToken ct)
     {
         var response = await _pool.ExecuteAsync(ZdelflagHelpers.BuildKnvvEiktoRequest(customer), ct);
         return Ok(ApiResponse<string>.Ok(ZdelflagHelpers.ParseKnvvEikto(response)));
     }
 
-    [HttpPost("zdelflag/zbom-info")]
-    [ProducesResponseType(typeof(ApiResponse<ZbomInfoRow[]>), 200)]
-    public async Task<IActionResult> PostZdelflagZbomInfo([FromBody] ZbomInfoRequest body, CancellationToken ct)
+    [HttpPost]
+
+    [Route("zdelflag/zbom-info")]
+    public async Task<IHttpActionResult> PostZdelflagZbomInfo([FromBody] ZbomInfoRequest body, CancellationToken ct)
     {
         if (body.PackagingInstructions.Count == 0)
             return Ok(ApiResponse<ZbomInfoRow[]>.Ok([]));
@@ -725,9 +721,10 @@ public sealed class WarehouseController : SapControllerBase
         return Ok(ApiResponse<ZbomInfoRow[]>.Ok(ZdelflagHelpers.ParseZbomInfoRows(response)));
     }
 
-    [HttpPost("zdelflag/maintain")]
-    [ProducesResponseType(typeof(ApiResponse<MaintainZdelflagResponse>), 200)]
-    public async Task<IActionResult> PostZdelflagMaintain([FromBody] MaintainZdelflagRequest body, CancellationToken ct)
+    [HttpPost]
+
+    [Route("zdelflag/maintain")]
+    public async Task<IHttpActionResult> PostZdelflagMaintain([FromBody] MaintainZdelflagRequest body, CancellationToken ct)
     {
         if (body.DelflagRows.Count == 0)
             return Ok(ApiResponse<MaintainZdelflagResponse>.Ok(new MaintainZdelflagResponse("", [])));

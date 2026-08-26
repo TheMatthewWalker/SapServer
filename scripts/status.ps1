@@ -1,26 +1,29 @@
-# status.ps1 — Show the current state of the SapServer scheduled task and recent logs.
+# status.ps1 — Show the current state of the SapServer IIS app pool/site and recent logs.
+Import-Module WebAdministration
 
-$taskName = 'SapServer'
+$appPoolName = 'SapServer'
+$siteName    = 'SapServer'
 
-$task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
-if (-not $task) {
-    Write-Host "Task '$taskName' is NOT registered." -ForegroundColor Red
+if (-not (Test-Path "IIS:\AppPools\$appPoolName")) {
+    Write-Host "App pool '$appPoolName' is NOT registered." -ForegroundColor Red
     exit 0
 }
 
-$info  = Get-ScheduledTaskInfo -TaskName $taskName
-$state = $task.State
+$poolState = (Get-WebAppPoolState -Name $appPoolName).Value
+$site      = Get-Website -Name $siteName -ErrorAction SilentlyContinue
 
-$colour = switch ($state) {
-    'Running' { 'Green'  }
-    'Ready'   { 'Yellow' }
-    default   { 'Red'    }
+$colour = switch ($poolState) {
+    'Started' { 'Green'  }
+    'Stopped' { 'Red'    }
+    default   { 'Yellow' }
 }
 
-Write-Host "Task    : $($task.TaskName)"            -ForegroundColor Cyan
-Write-Host "State   : $state"                       -ForegroundColor $colour
-Write-Host "Last run: $($info.LastRunTime)"
-Write-Host "Last result: 0x$($info.LastTaskResult.ToString('X'))"
+Write-Host "App pool : $appPoolName"        -ForegroundColor Cyan
+Write-Host "State    : $poolState"          -ForegroundColor $colour
+if ($site) {
+    Write-Host "Site     : $($site.Name) (state: $($site.State))"
+    Write-Host "Bindings : $($site.Bindings.Collection -join ', ')"
+}
 
 # Show last 20 lines from the most recent log file
 $logDir  = "$PSScriptRoot\..\publish\logs"

@@ -51,7 +51,7 @@ public sealed class WhereClauseBuilder
         {
             if (start + maxLen >= text.Length)
             {
-                yield return text[start..];
+                yield return text.Substring(start); // net48 lacks string range indexers
                 break;
             }
 
@@ -61,7 +61,7 @@ public sealed class WhereClauseBuilder
             if (splitAt <= start)
                 splitAt = start + maxLen; // hard cut — no space found
 
-            yield return text[start..splitAt].TrimEnd();
+            yield return text.Substring(start, splitAt - start).TrimEnd();
             start = splitAt + 1;
         }
     }

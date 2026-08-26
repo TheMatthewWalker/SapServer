@@ -1,4 +1,5 @@
-using Microsoft.AspNetCore.Mvc;
+using System.Net;
+using System.Web.Http;
 using Microsoft.Extensions.Options;
 using SapServer.Configuration;
 using SapServer.Helpers;
@@ -18,15 +19,15 @@ namespace SapServer.Controllers;
 ///     material (plant-default or per-customer), including quantities and the
 ///     trace-charge-id flag.
 /// </summary>
-[Route("api/packaging")]
+[RoutePrefix("api/packaging")]
 public sealed class PackagingController : SapControllerBase
 {
-    private readonly SapPoolOptions _poolOptions;
+    private readonly SapNcoOptions _poolOptions;
 
     public PackagingController(
         ISapConnectionPool pool,
         IPermissionService permissions,
-        IOptions<SapPoolOptions> poolOptions,
+        IOptions<SapNcoOptions> poolOptions,
         ILogger<PackagingController> logger)
         : base(pool, permissions, logger)
     {
@@ -35,10 +36,10 @@ public sealed class PackagingController : SapControllerBase
 
 // ── GET /api/packaging/{material}/exists ──────────────────────────────────
 
-    [HttpGet("{material}/exists")]
-    [ProducesResponseType(typeof(ApiResponse<bool>), 200)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
-    public async Task<IActionResult> MaterialExists(string material, CancellationToken ct)
+    [HttpGet]
+
+    [Route("{material}/exists")]
+    public async Task<IHttpActionResult> MaterialExists(string material, CancellationToken ct)
     {
         await CheckPermissionAsync(GetUserId(), PackagingHelpers.FnCreate, ct);
 
@@ -48,10 +49,10 @@ public sealed class PackagingController : SapControllerBase
 
 // ── GET /api/packaging/{material}/description ─────────────────────────────
 
-    [HttpGet("{material}/description")]
-    [ProducesResponseType(typeof(ApiResponse<string>), 200)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
-    public async Task<IActionResult> MaterialDescription(string material, CancellationToken ct)
+    [HttpGet]
+
+    [Route("{material}/description")]
+    public async Task<IHttpActionResult> MaterialDescription(string material, CancellationToken ct)
     {
         await CheckPermissionAsync(GetUserId(), PackagingHelpers.FnCreate, ct);
 
@@ -61,10 +62,10 @@ public sealed class PackagingController : SapControllerBase
 
 // ── GET /api/packaging/{material}/mara ─────────────────────────────────────
 
-    [HttpGet("{material}/mara")]
-    [ProducesResponseType(typeof(ApiResponse<PackagingMaraRow>), 200)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
-    public async Task<IActionResult> MaterialDetails(string material, CancellationToken ct)
+    [HttpGet]
+
+    [Route("{material}/mara")]
+    public async Task<IHttpActionResult> MaterialDetails(string material, CancellationToken ct)
     {
         await CheckPermissionAsync(GetUserId(), PackagingHelpers.FnCreate, ct);
 
@@ -72,17 +73,17 @@ public sealed class PackagingController : SapControllerBase
         var row = PackagingHelpers.ParseMara(response);
 
         if (row == null)
-            return BadRequest(ApiResponse<PackagingMaraRow>.Fail("400", $"Material '{material}' not found (MARA).", null!));
+            return Content(HttpStatusCode.BadRequest, ApiResponse<PackagingMaraRow>.Fail("400", $"Material '{material}' not found (MARA).", null!));
 
         return Ok(ApiResponse<PackagingMaraRow>.Ok(row));
     }
 
 // ── GET /api/packaging/{material}/bom ──────────────────────────────────────
 
-    [HttpGet("{material}/bom")]
-    [ProducesResponseType(typeof(ApiResponse<PackagingBomRow[]>), 200)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
-    public async Task<IActionResult> MaterialBom(string material, CancellationToken ct)
+    [HttpGet]
+
+    [Route("{material}/bom")]
+    public async Task<IHttpActionResult> MaterialBom(string material, CancellationToken ct)
     {
         await CheckPermissionAsync(GetUserId(), PackagingHelpers.FnCreate, ct);
 
@@ -92,10 +93,10 @@ public sealed class PackagingController : SapControllerBase
 
 // ── GET /api/packaging/{material}/customers ────────────────────────────────
 
-    [HttpGet("{material}/customers")]
-    [ProducesResponseType(typeof(ApiResponse<PackagingCustomerRow[]>), 200)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
-    public async Task<IActionResult> MaterialCustomers(string material, CancellationToken ct)
+    [HttpGet]
+
+    [Route("{material}/customers")]
+    public async Task<IHttpActionResult> MaterialCustomers(string material, CancellationToken ct)
     {
         await CheckPermissionAsync(GetUserId(), PackagingHelpers.FnCreate, ct);
 
@@ -106,11 +107,10 @@ public sealed class PackagingController : SapControllerBase
 // ── GET /api/packaging/{material}/instruction?customer= ───────────────────
 // Customer omitted/blank = the plant-default (KUNNR blank) row.
 
-    [HttpGet("{material}/instruction")]
-    [ProducesResponseType(typeof(ApiResponse<PackagingInstrRow>), 200)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 404)]
-    public async Task<IActionResult> GetInstruction(string material, [FromQuery] string? customer, CancellationToken ct)
+    [HttpGet]
+
+    [Route("{material}/instruction")]
+    public async Task<IHttpActionResult> GetInstruction(string material, [FromUri] string? customer, CancellationToken ct)
     {
         await CheckPermissionAsync(GetUserId(), PackagingHelpers.FnCreate, ct);
 
@@ -118,7 +118,7 @@ public sealed class PackagingController : SapControllerBase
         var row = PackagingHelpers.ParseZpackInstr(response);
 
         if (row == null)
-            return NotFound(ApiResponse<PackagingInstrRow>.Fail("404",
+            return Content(HttpStatusCode.NotFound, ApiResponse<PackagingInstrRow>.Fail("404",
                 string.IsNullOrWhiteSpace(customer)
                     ? $"No plant-default packaging instruction found for '{material}'."
                     : $"No packaging instruction found for '{material}' / customer '{customer}'.", null!));
@@ -132,11 +132,10 @@ public sealed class PackagingController : SapControllerBase
 // apply at plant-default level; PackagingHelpers silently drops them for a
 // customer-specific row rather than writing them somewhere they don't apply.
 
-    [HttpPut("instruction")]
-    [ProducesResponseType(typeof(ApiResponse<string>), 200)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 422)]
-    public async Task<IActionResult> SaveInstruction([FromBody] PackagingInstrSaveRequest body, CancellationToken ct)
+    [HttpPut]
+
+    [Route("instruction")]
+    public async Task<IHttpActionResult> SaveInstruction([FromBody] PackagingInstrSaveRequest body, CancellationToken ct)
     {
         await CheckPermissionAsync(GetUserId(), PackagingHelpers.FnCreate, ct);
 
@@ -146,18 +145,17 @@ public sealed class PackagingController : SapControllerBase
         _logger.LogInformation($"Packaging instruction {body.SqlAction} for {body.Material}/{body.Customer ?? "(plant)"} || {message}");
 
         if (!success)
-            return UnprocessableEntity(ApiResponse<string>.Fail("422", message, null!));
+            return Content((HttpStatusCode)422, ApiResponse<string>.Fail("422", message, null!));
 
         return Ok(ApiResponse<string>.Ok(message));
     }
 
 // ── DELETE /api/packaging/instruction ──────────────────────────────────────
 
-    [HttpDelete("instruction")]
-    [ProducesResponseType(typeof(ApiResponse<string>), 200)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 422)]
-    public async Task<IActionResult> DeleteInstruction([FromBody] PackagingInstrSaveRequest body, CancellationToken ct)
+    [HttpDelete]
+
+    [Route("instruction")]
+    public async Task<IHttpActionResult> DeleteInstruction([FromBody] PackagingInstrSaveRequest body, CancellationToken ct)
     {
         await CheckPermissionAsync(GetUserId(), PackagingHelpers.FnCreate, ct);
 
@@ -174,7 +172,7 @@ public sealed class PackagingController : SapControllerBase
         _logger.LogInformation($"Packaging instruction DELETE for {body.Material}/{body.Customer ?? "(plant)"} || {message}");
 
         if (!success)
-            return UnprocessableEntity(ApiResponse<string>.Fail("422", message, null!));
+            return Content((HttpStatusCode)422, ApiResponse<string>.Fail("422", message, null!));
 
         return Ok(ApiResponse<string>.Ok(message));
     }
@@ -185,10 +183,10 @@ public sealed class PackagingController : SapControllerBase
 // existing plant-default row first and only changes PALL_MATNR, so quantities
 // and flags already set (batch spread, trace charge id, etc.) are preserved.
 
-    [HttpPost("mass-update")]
-    [ProducesResponseType(typeof(ApiResponse<List<MassPackagingUpdateResult>>), 200)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
-    public async Task<IActionResult> MassUpdate([FromBody] MassPackagingUpdateRequest body, CancellationToken ct)
+    [HttpPost]
+
+    [Route("mass-update")]
+    public async Task<IHttpActionResult> MassUpdate([FromBody] MassPackagingUpdateRequest body, CancellationToken ct)
     {
         await CheckPermissionAsync(GetUserId(), PackagingHelpers.FnCreate, ct);
 
@@ -244,11 +242,10 @@ public sealed class PackagingController : SapControllerBase
 // doesn't have (and isn't being given) MM01/CS01 create authorization, same
 // reasoning as PurchasingController's plain create-po vs create-po-elevated.
 
-    [HttpPost("create")]
-    [ProducesResponseType(typeof(ApiResponse<List<CreatePackagingResult>>), 200)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 400)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
-    public async Task<IActionResult> Create([FromBody] CreatePackagingRequest body, CancellationToken ct)
+    [HttpPost]
+
+    [Route("create")]
+    public async Task<IHttpActionResult> Create([FromBody] CreatePackagingRequest body, CancellationToken ct)
     {
         await CheckPermissionAsync(GetUserId(), PackagingHelpers.FnCreate, ct);
 
@@ -280,24 +277,24 @@ public sealed class PackagingController : SapControllerBase
 // BAPI commit/rollback step here — MM01/CS01 batch-input transactions
 // commit per-screen as they run, not as a separate BAPI_TRANSACTION_COMMIT.
 
-    [HttpPost("create-elevated")]
-    [ProducesResponseType(typeof(ApiResponse<List<CreatePackagingResult>>), 200)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 400)]
-    public async Task<IActionResult> CreateElevated([FromBody] CreatePackagingElevatedRequest body, CancellationToken ct)
+    [HttpPost]
+
+    [Route("create-elevated")]
+    public async Task<IHttpActionResult> CreateElevated([FromBody] CreatePackagingElevatedRequest body, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(body.SapUsername) || string.IsNullOrWhiteSpace(body.SapPassword))
-            return BadRequest(ApiResponse<List<CreatePackagingResult>>.Fail(
+            return Content(HttpStatusCode.BadRequest, ApiResponse<List<CreatePackagingResult>>.Fail(
                 "MISSING_CREDENTIALS", "SAP username and password are required for this elevated action.", null!));
 
         if (string.IsNullOrWhiteSpace(body.CustomerPart))
-            return BadRequest(ApiResponse<List<CreatePackagingResult>>.Fail(
+            return Content(HttpStatusCode.BadRequest, ApiResponse<List<CreatePackagingResult>>.Fail(
                 "NO_CUSTOMER_PART", "customerPart is required.", null!));
 
         var elevatedCreds = new SapConnectionOptions
         {
-            System   = _poolOptions.ServiceAccount.System,
+            AppServerHost = _poolOptions.ServiceAccount.AppServerHost,
             Client   = _poolOptions.ServiceAccount.Client,
-            SystemId = _poolOptions.ServiceAccount.SystemId,
+            SystemNumber  = _poolOptions.ServiceAccount.SystemNumber,
             User     = body.SapUsername,
             Password = body.SapPassword,
             Language = _poolOptions.ServiceAccount.Language,

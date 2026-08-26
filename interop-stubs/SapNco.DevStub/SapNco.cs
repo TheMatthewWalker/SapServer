@@ -78,6 +78,25 @@ public class RfcDestination
         "SapNco.DevStub — no real SAP NCo connection is available in this environment.");
 }
 
+/// <summary>
+/// Pins the calling thread to one physical pooled connection for a
+/// destination between BeginContext/EndContext — required for a stateful
+/// multi-call sequence (e.g. a create-BAPI followed by
+/// BAPI_TRANSACTION_COMMIT/ROLLBACK) to land on the same SAP session's LUW.
+/// Without this, each Invoke() may be served by any pooled connection, and a
+/// commit could silently apply to the wrong session. See NcoWorker, which
+/// calls BeginContext once for its whole lifetime (mirroring how SapStaWorker
+/// held one persistent COM session for its lifetime) rather than per-call.
+/// </summary>
+public static class RfcSessionManager
+{
+    public static void BeginContext(RfcDestination destination) => throw new NotSupportedException(
+        "SapNco.DevStub — no real SAP NCo connection is available in this environment.");
+
+    public static void EndContext(RfcDestination destination) => throw new NotSupportedException(
+        "SapNco.DevStub — no real SAP NCo connection is available in this environment.");
+}
+
 public class RfcRepository
 {
     public IRfcFunction CreateFunction(string name) => throw new NotSupportedException(

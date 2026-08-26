@@ -12,9 +12,9 @@ public class SalesHelpersTests
         Materials = ["31446702"],
         IncludeForecast = true,
         IncludeJit = false,
-        IdocCreatedAfter = new DateOnly(2020, 1, 1),
-        ScheduleDateFrom = new DateOnly(2020, 1, 1),
-        ScheduleDateTo = new DateOnly(2020, 12, 31),
+        IdocCreatedAfter = new DateTime(2020, 1, 1),
+        ScheduleDateFrom = new DateTime(2020, 1, 1),
+        ScheduleDateTo = new DateTime(2020, 12, 31),
     };
 
     [Fact]
@@ -121,8 +121,8 @@ public class SalesHelpersTests
         Assert.Equal("31446702", row.Material);
         Assert.Equal("25753188", row.IdocNumber);
         Assert.Equal(150m, row.CumQty);
-        Assert.Equal(new DateOnly(2020, 1, 2), row.IdocCreationDate);
-        Assert.Equal(new DateOnly(2020, 1, 6), row.ScheduleLineDate);
+        Assert.Equal(new DateTime(2020, 1, 2), row.IdocCreationDate);
+        Assert.Equal(new DateTime(2020, 1, 6), row.ScheduleLineDate);
         Assert.Equal(540m, row.OrderQty);
         Assert.Equal("1", row.ReleaseType);
         Assert.False(row.IsCurrent);
@@ -149,13 +149,13 @@ public class SalesHelpersTests
     {
         var rows = new[]
         {
-            new ScheduleWaterfallRow { ShipToParty = "A", Material = "M1", IdocNumber = "IDOC1", ScheduleLineDate = new DateOnly(2020, 1, 6), OrderQty = 100m },
-            new ScheduleWaterfallRow { ShipToParty = "A", Material = "M1", IdocNumber = "IDOC1", ScheduleLineDate = new DateOnly(2020, 1, 13), OrderQty = 50m },
+            new ScheduleWaterfallRow { ShipToParty = "A", Material = "M1", IdocNumber = "IDOC1", ScheduleLineDate = new DateTime(2020, 1, 6), OrderQty = 100m },
+            new ScheduleWaterfallRow { ShipToParty = "A", Material = "M1", IdocNumber = "IDOC1", ScheduleLineDate = new DateTime(2020, 1, 13), OrderQty = 50m },
             // Different idoc (different release/pull) — separate running total, not summed with IDOC1's.
-            new ScheduleWaterfallRow { ShipToParty = "A", Material = "M1", IdocNumber = "IDOC2", ScheduleLineDate = new DateOnly(2020, 1, 6), OrderQty = 200m },
+            new ScheduleWaterfallRow { ShipToParty = "A", Material = "M1", IdocNumber = "IDOC2", ScheduleLineDate = new DateTime(2020, 1, 6), OrderQty = 200m },
             // Current (live) schedule rows share the "current" bucket regardless of IdocNumber.
-            new ScheduleWaterfallRow { ShipToParty = "A", Material = "M1", IsCurrent = true, ScheduleLineDate = new DateOnly(2020, 1, 6), OrderQty = 10m },
-            new ScheduleWaterfallRow { ShipToParty = "A", Material = "M1", IsCurrent = true, ScheduleLineDate = new DateOnly(2020, 1, 20), OrderQty = 5m },
+            new ScheduleWaterfallRow { ShipToParty = "A", Material = "M1", IsCurrent = true, ScheduleLineDate = new DateTime(2020, 1, 6), OrderQty = 10m },
+            new ScheduleWaterfallRow { ShipToParty = "A", Material = "M1", IsCurrent = true, ScheduleLineDate = new DateTime(2020, 1, 20), OrderQty = 5m },
         };
 
         var result = SalesHelpers.ComputeCumulativeRelease(rows).ToArray();
