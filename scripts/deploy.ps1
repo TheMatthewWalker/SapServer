@@ -27,7 +27,7 @@ if ($poolExists -and (Get-WebAppPoolState -Name $appPoolName).Value -eq 'Started
 }
 
 # ---- Publish ---------------------------------------------------------------
-# net48 is framework-dependent, not self-contained — win-x64/--self-contained
+# net48 is framework-dependent, not self-contained - win-x64/--self-contained
 # don't apply the way they did for the old ASP.NET Core publish. Any modern
 # Windows Server already ships .NET Framework 4.8; PlatformTarget=x64 in
 # SapServer.csproj still governs bitness (matches the app pool's

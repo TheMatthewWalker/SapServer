@@ -1,4 +1,4 @@
-# start.ps1 — Start the SapServer IIS application pool + site.
+# start.ps1 - Start the SapServer IIS application pool + site.
 $ErrorActionPreference = 'Stop'
 
 # See install.ps1's comment: WebAdministration's IIS:\ PSDrive isn't created

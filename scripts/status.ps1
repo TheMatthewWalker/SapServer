@@ -1,4 +1,4 @@
-# status.ps1 — Show the current state of the SapServer IIS app pool/site and recent logs.
+# status.ps1 - Show the current state of the SapServer IIS app pool/site and recent logs.
 
 # See install.ps1's comment: WebAdministration's IIS:\ PSDrive isn't created
 # when loaded through PowerShell 7+'s Windows PowerShell Compatibility layer.

@@ -1,4 +1,4 @@
-# uninstall.ps1 — Remove the SapServer IIS site and application pool.
+# uninstall.ps1 - Remove the SapServer IIS site and application pool.
 # Run as Administrator.
 #Requires -RunAsAdministrator
 
