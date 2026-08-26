@@ -50,9 +50,16 @@ internal static class NcoRfcExecutor
         catch (RfcAbapBaseException ex)
         {
             // A real business-level ABAP exception raised by the function
-            // module itself — not a connection problem.
+            // module itself — not a connection problem. RfcAbapBaseException
+            // has no "Key" property (confirmed via reflection against the
+            // real assembly — the base class only exposes PlainText, plus
+            // the inherited numeric ErrorCode); the exception's own runtime
+            // type (RfcAbapApplicationException/RfcAbapClassException/
+            // RfcAbapMessageException/RfcAbapRuntimeException) is what
+            // actually identifies which kind of ABAP failure this was.
             throw new SapExecutionException(request.FunctionName,
-                $"RFC call to '{request.FunctionName}' raised {ex.Key}.", ex.Message);
+                $"RFC call to '{request.FunctionName}' raised {ex.GetType().Name}.",
+                string.IsNullOrEmpty(ex.PlainText) ? ex.Message : ex.PlainText);
         }
 
         return BuildResponse(func, request);
@@ -87,7 +94,13 @@ internal static class NcoRfcExecutor
         table.Clear();
         foreach (var row in rows)
         {
-            var line = table.Append();
+            // IRfcTable.Append() is void (confirmed via reflection against the
+            // real assembly, unlike the DevStub's original guess that it
+            // returned the new row directly) — it appends a blank row and
+            // moves CurrentIndex/CurrentRow to it, which is the real API's
+            // own accessor for the row just appended.
+            table.Append();
+            var line = table.CurrentRow;
             foreach (var (col, val) in row)
                 if (val is not null)
                     line.SetValue(col, Unwrap(val));

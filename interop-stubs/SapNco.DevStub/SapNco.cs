@@ -27,7 +27,11 @@
 
 namespace SAP.Middleware.Connector;
 
-public sealed class RfcConfigParameters : System.Collections.Specialized.NameValueCollection
+// Confirmed via reflection against the real assembly: RfcConfigParameters
+// really is a Dictionary<string,string> subclass (not NameValueCollection),
+// and there is no "MaxPoolSize" constant at all — PeakConnectionsLimit is
+// the real equivalent (the ceiling NCo will grow a destination's pool to).
+public sealed class RfcConfigParameters : System.Collections.Generic.Dictionary<string, string>
 {
     public const string Name = "NAME";
     public const string AppServerHost = "ASHOST";
@@ -37,7 +41,7 @@ public sealed class RfcConfigParameters : System.Collections.Specialized.NameVal
     public const string Client = "CLIENT";
     public const string Language = "LANG";
     public const string PoolSize = "POOL_SIZE";
-    public const string MaxPoolSize = "MAX_POOL_SIZE";
+    public const string PeakConnectionsLimit = "MAX_POOL_SIZE";
     public const string IdleTimeout = "IDLE_TIMEOUT";
     public const string SystemID = "SYSID";
     public const string MessageServerHost = "MSHOST";
@@ -113,12 +117,16 @@ public interface IRfcFunction
     void Invoke(RfcDestination destination);
 }
 
+// Confirmed via reflection against the real assembly: Append() is void, and
+// the row you just appended is read back via CurrentRow — not via a return
+// value the way this stub originally guessed.
 public interface IRfcTable
 {
     int RowCount { get; }
+    IRfcStructure CurrentRow { get; }
     IRfcStructure this[int index] { get; }
     void Clear();
-    IRfcStructure Append();
+    void Append();
 }
 
 public interface IRfcStructure
@@ -130,6 +138,7 @@ public interface IRfcStructure
 
 public class RfcBaseException : Exception
 {
+    public int ErrorCode { get; init; }
     public RfcBaseException() { }
     public RfcBaseException(string message) : base(message) { }
     public RfcBaseException(string message, Exception inner) : base(message, inner) { }
@@ -147,11 +156,15 @@ public class RfcAbapRuntimeException : RfcBaseException
     public RfcAbapRuntimeException(string message) : base(message) { }
 }
 
-/// <summary>A business-level ABAP exception explicitly raised by the function module.</summary>
+/// <summary>
+/// A business-level ABAP exception explicitly raised by the function module.
+/// Confirmed via reflection against the real assembly: the real base class
+/// has no "Key" property — only PlainText (plus the inherited ErrorCode).
+/// </summary>
 public class RfcAbapBaseException : RfcBaseException
 {
-    public string Key { get; init; } = string.Empty;
-    public RfcAbapBaseException(string key, string message) : base(message) => Key = key;
+    public string PlainText { get; init; } = string.Empty;
+    public RfcAbapBaseException(string plainText) : base(plainText) => PlainText = plainText;
 }
 
 /// <summary>The destination/connection is not in a state that allows this operation.</summary>

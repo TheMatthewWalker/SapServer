@@ -35,7 +35,12 @@ internal sealed class NcoDestinationRegistry : IDestinationConfiguration
             { RfcConfigParameters.Password, creds.Password },
             { RfcConfigParameters.Language, creds.Language },
             { RfcConfigParameters.PoolSize, _options.PoolSize.ToString() },
-            { RfcConfigParameters.MaxPoolSize, _options.MaxPoolSize.ToString() },
+            // NCo has no literal "MaxPoolSize" config key — PeakConnectionsLimit
+            // is the real equivalent (the ceiling NCo will grow this
+            // destination's own connection pool to under load), confirmed
+            // against the real RfcConfigParameters via reflection (there is no
+            // MaxPoolSize constant on the real type at all).
+            { RfcConfigParameters.PeakConnectionsLimit, _options.MaxPoolSize.ToString() },
         };
         _entries[destinationName] = parms;
     }
