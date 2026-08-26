@@ -44,11 +44,16 @@
     </None>
   </ItemGroup>
 
-  <!-- .NET Framework GAC assemblies needed by System.Web.Http / OWIN-hosted-in-IIS. -->
+  <!-- .NET Framework GAC assemblies needed by System.Web.Http / OWIN-hosted-in-IIS.
+       System.ComponentModel.DataAnnotations isn't implicitly referenced on a
+       plain net48 Microsoft.NET.Sdk target the way it is under Microsoft.NET.Sdk.Web
+       or netcoreapp — Models/RfcModels.cs and Models/Bapi/*.cs use
+       [Required]/[StringLength]/[Range]/etc., so it must be listed explicitly. -->
   <ItemGroup>
     <Reference Include="System.Web" />
     <Reference Include="System.Net.Http" />
     <Reference Include="System.Configuration" />
+    <Reference Include="System.ComponentModel.DataAnnotations" />
   </ItemGroup>
 
   <ItemGroup>
@@ -94,13 +99,26 @@
     own bin/obj output as its own content to copy on every build (it's
     nested inside this directory), recursively nesting it deeper each time.
   -->
+  <!--
+    publish/ is where scripts/deploy.ps1 (and a plain `dotnet publish`) write
+    output — including a refs/ subfolder of reference assemblies for a
+    framework-dependent publish. It's gitignored, not deleted, so a
+    previously-built publish/ directory (in particular one left over from
+    this app's earlier ASP.NET Core/net10.0 lifetime) sits on disk across
+    the SDK/TargetFramework switch. Microsoft.NET.Sdk's default item globs
+    auto-exclude bin/ and obj/ but NOT publish/, so without this exclusion a
+    stale publish/ tree gets swept into this project's own item groups.
+  -->
   <ItemGroup>
     <Compile Remove="interop-stubs\**\*.cs" />
     <Compile Remove="SapServer.Tests\**\*.cs" />
+    <Compile Remove="publish\**\*.cs" />
     <Content Remove="interop-stubs\**" />
     <Content Remove="SapServer.Tests\**" />
+    <Content Remove="publish\**" />
     <None Remove="interop-stubs\**" />
     <None Remove="SapServer.Tests\**" />
+    <None Remove="publish\**" />
   </ItemGroup>
 
   <!-- Lets SapServer.Tests unit-test the internal Helpers/* request builders
