@@ -21,6 +21,19 @@
 #Requires -RunAsAdministrator
 
 $ErrorActionPreference = 'Stop'
+
+# WebAdministration's IIS:\ PSDrive isn't created when the module loads
+# through PowerShell 7+'s Windows PowerShell Compatibility layer
+# (WinPSCompatSession, per the warning Import-Module prints under pwsh) —
+# only cmdlets/functions are proxied there, not PSProvider drives — so every
+# "IIS:\..." path below would fail with "Cannot find drive" even though
+# Import-Module itself appears to succeed. Re-launch under real Windows
+# PowerShell 5.1, where WebAdministration's provider loads natively.
+if ($PSVersionTable.PSEdition -eq 'Core') {
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $PSCommandPath @args
+    exit $LASTEXITCODE
+}
+
 try {
     Import-Module WebAdministration -ErrorAction Stop
 } catch {

@@ -1,5 +1,13 @@
 # start.ps1 — Start the SapServer IIS application pool + site.
 $ErrorActionPreference = 'Stop'
+
+# See install.ps1's comment: WebAdministration's IIS:\ PSDrive isn't created
+# when loaded through PowerShell 7+'s Windows PowerShell Compatibility layer.
+if ($PSVersionTable.PSEdition -eq 'Core') {
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $PSCommandPath @args
+    exit $LASTEXITCODE
+}
+
 Import-Module WebAdministration
 
 $appPoolName = 'SapServer'
