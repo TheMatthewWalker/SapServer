@@ -64,6 +64,53 @@
     </None>
   </ItemGroup>
 
+  <!--
+    Same gap as web.config above, for appsettings.json/appsettings.{Env}.json:
+    plain Microsoft.NET.Sdk doesn't copy None items to the publish output by
+    default, and appsettings*.json (gitignored — see appsettings.example.json)
+    matches the default None glob, not Content. Confirmed by a real local
+    `dotnet publish` with dummy appsettings.json/appsettings.Production.json
+    dropped in: neither showed up in the output. Startup.BuildConfiguration()
+    reads appsettings.json with optional:false, so without this pin the app
+    would throw a FileNotFoundException for it at startup — a site root
+    (HostingEnvironment.MapPath("~/")) file, same as web.config, not a bin\
+    one, so it's pinned here rather than swept up by the bin\ relocation
+    target below.
+  -->
+  <ItemGroup>
+    <None Update="appsettings.json;appsettings.*.json">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
+    </None>
+  </ItemGroup>
+
+  <!--
+    System.Web/IIS hosting only probes .\bin\ (plus the GAC) for private
+    assemblies — baked into HostingEnvironment's AppDomain setup, not
+    configurable via web.config. Microsoft.NET.Sdk (unlike
+    Microsoft.NET.Sdk.Web) has no notion of that convention: `dotnet publish`
+    lays out a flat, console-app-style folder with web.config and every DLL
+    side by side in the publish root. Confirmed for real against a live IIS
+    site: it threw FileNotFoundException loading Microsoft.Owin.Host.SystemWeb.dll
+    even though the file was sitting right next to web.config, because
+    ASP.NET's assembly probing never looks at the site root itself — only
+    bin\. This target runs after Publish and relocates every managed/native
+    binary (including the SAP NCo native DLLs copied in from libs\sapnco-native\
+    above, which need to sit next to sapnco.dll/sapnco_utils.dll for NCo's own
+    native-library loading to find them) into publish\bin\, leaving
+    web.config/appsettings*.json at the site root where IIS and
+    Startup.cs's HostingEnvironment.MapPath("~/") both expect them.
+  -->
+  <Target Name="RelocatePublishedBinariesToBin" AfterTargets="Publish">
+    <ItemGroup>
+      <_PublishedBinariesToRelocate Include="$(PublishDir)*.dll" />
+      <_PublishedBinariesToRelocate Include="$(PublishDir)*.pdb" />
+      <_PublishedBinariesToRelocate Include="$(PublishDir)*.dll.config" />
+    </ItemGroup>
+    <MakeDir Directories="$(PublishDir)bin" Condition="'@(_PublishedBinariesToRelocate)' != ''" />
+    <Move SourceFiles="@(_PublishedBinariesToRelocate)" DestinationFolder="$(PublishDir)bin" Condition="'@(_PublishedBinariesToRelocate)' != ''" />
+  </Target>
+
   <!-- .NET Framework GAC assemblies needed by System.Web.Http / OWIN-hosted-in-IIS.
        System.ComponentModel.DataAnnotations isn't implicitly referenced on a
        plain net48 Microsoft.NET.Sdk target the way it is under Microsoft.NET.Sdk.Web
