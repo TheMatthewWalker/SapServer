@@ -138,17 +138,63 @@ public class ZdelflagHelpersTests
         Assert.Equal("000000000012345678", request.InputTables["T_DELPACK"][0]["PALL_MATNR"]);
     }
 
+    // ET_MESSAGE is ZERRORTEXT (LINE/TEXT — no TYPE/MESSAGE, no per-line
+    // severity) confirmed against a live SE37 signature dump; RC only ever
+    // surfaces through this COM layer as a flat scalar ("0" = success) even
+    // though it's typed SYST in ABAP — see ParseMaintainResponse's header
+    // comment for the full story.
     [Fact]
-    public void ParseMaintainResponse_reads_RC_and_messages()
+    public void ParseMaintainResponse_reads_RC_and_ET_MESSAGE_TEXT_as_type_S_on_success()
     {
         var response = new RfcResponse
         {
             Parameters = new() { ["RC"] = "0" },
-            Tables = new() { ["ET_MESSAGE"] = [new() { ["TYPE"] = "S", ["MESSAGE"] = "Posted OK" }] },
+            Tables = new() { ["ET_MESSAGE"] = [new() { ["LINE"] = "000000", ["TEXT"] = "SUCCESS: ALL PALLETs was finished!" }] },
         };
         var result = ZdelflagHelpers.ParseMaintainResponse(response);
         Assert.Equal("0", result.Rc);
         Assert.Single(result.Messages);
-        Assert.Equal("Posted OK", result.Messages[0].Message);
+        Assert.Equal("S", result.Messages[0].Type);
+        Assert.Equal("SUCCESS: ALL PALLETs was finished!", result.Messages[0].Message);
+    }
+
+    [Fact]
+    public void ParseMaintainResponse_treats_nonzero_RC_as_type_E()
+    {
+        var response = new RfcResponse
+        {
+            Parameters = new() { ["RC"] = "4" },
+            Tables = new() { ["ET_MESSAGE"] = [new() { ["LINE"] = "000000", ["TEXT"] = "Something went wrong" }] },
+        };
+        var result = ZdelflagHelpers.ParseMaintainResponse(response);
+        Assert.Single(result.Messages);
+        Assert.Equal("E", result.Messages[0].Type);
+        Assert.Equal("Something went wrong", result.Messages[0].Message);
+    }
+
+    [Fact]
+    public void ParseMaintainResponse_gives_a_fallback_message_when_RC_fails_with_no_ET_MESSAGE_text()
+    {
+        var response = new RfcResponse
+        {
+            Parameters = new() { ["RC"] = "4" },
+            Tables = new() { ["ET_MESSAGE"] = [] },
+        };
+        var result = ZdelflagHelpers.ParseMaintainResponse(response);
+        Assert.Single(result.Messages);
+        Assert.Equal("E", result.Messages[0].Type);
+        Assert.Contains("RC=4", result.Messages[0].Message);
+    }
+
+    [Fact]
+    public void ParseMaintainResponse_returns_no_messages_when_RC_is_success_and_ET_MESSAGE_is_empty()
+    {
+        var response = new RfcResponse
+        {
+            Parameters = new() { ["RC"] = "0" },
+            Tables = new() { ["ET_MESSAGE"] = [] },
+        };
+        var result = ZdelflagHelpers.ParseMaintainResponse(response);
+        Assert.Empty(result.Messages);
     }
 }

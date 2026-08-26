@@ -168,11 +168,14 @@ public class PurchasingHelperTests
     }
 
     [Fact]
-    public void BuildPoGetPriceRequest_pads_the_PO_number_and_requests_ITEM_CONDITIONS()
+    public void BuildPoGetPriceRequest_pads_the_PO_number_and_reads_POCOND()
     {
         var request = PurchasingHelper.BuildPoGetPriceRequest("4500012345");
         Assert.Equal("4500012345", request.ImportParameters["PURCHASEORDER"]); // already 10 chars, pad is a no-op
-        Assert.Equal("X", request.ImportParameters["ITEM_CONDITIONS"]);
+        // No ITEM_CONDITIONS import — confirmed via a real RFC_GET_FUNCTION_INTERFACE
+        // dump that this SAP system's BAPI_PO_GETDETAIL1 has no such parameter (it
+        // crashed the call outright); POCOND is read unconditionally instead.
+        Assert.False(request.ImportParameters.ContainsKey("ITEM_CONDITIONS"));
         Assert.True(request.OutputTables.ContainsKey("POCOND"));
     }
 
@@ -191,7 +194,8 @@ public class PurchasingHelperTests
             },
         };
         var prices = PurchasingHelper.ParsePoPrices(response);
-        Assert.Equal(89.25m, prices["00010"]);
+        // Keyed by bare integer, not the raw padded string — see the test below.
+        Assert.Equal(89.25m, prices["10"]);
     }
 
     [Fact]
@@ -205,7 +209,58 @@ public class PurchasingHelperTests
             },
         };
         var prices = PurchasingHelper.ParsePoPrices(response);
-        Assert.Equal(12.50m, prices["00020"]);
+        Assert.Equal(12.50m, prices["20"]);
+    }
+
+    [Fact]
+    public void ParsePoPrices_normalizes_a_6_digit_ITM_NUMBER_to_match_a_5_digit_PO_item_key()
+    {
+        // Reproduces the real bug: POCOND's ITM_NUMBER is a 6-digit NUMC field on
+        // this SAP system ("000010"), while BuildPoCreateRequest's x10 numbering
+        // (and routes/performance.js's buildPoPdfItems, which normalizes its own
+        // 5-digit key the same way before looking a price up) only ever produces
+        // 5 digits ("00010") — an exact-string dictionary key would never match
+        // either way, silently losing every price despite the RFC call succeeding.
+        var response = new RfcResponse
+        {
+            Tables = new()
+            {
+                ["POCOND"] = [new() { ["ITM_NUMBER"] = "000010", ["COND_TYPE"] = "PB00", ["COND_VALUE"] = "42,00" }],
+            },
+        };
+        var prices = PurchasingHelper.ParsePoPrices(response);
+        Assert.Equal(42.00m, prices["10"]);
+    }
+
+    [Fact]
+    public void ParsePoPrices_divides_COND_VALUE_by_COND_P_UNT_when_the_condition_is_priced_per_1000()
+    {
+        // Confirmed for real on a live PO: a condition of 500 with COND_P_UNT 1000
+        // means "500 per 1000 units", i.e. a real per-unit price of 0.5 — reading
+        // COND_VALUE raw showed a price 1000x too high on the PDF.
+        var response = new RfcResponse
+        {
+            Tables = new()
+            {
+                ["POCOND"] = [new() { ["ITM_NUMBER"] = "00010", ["COND_TYPE"] = "PB00", ["COND_VALUE"] = "500,00", ["COND_P_UNT"] = "1000" }],
+            },
+        };
+        var prices = PurchasingHelper.ParsePoPrices(response);
+        Assert.Equal(0.5m, prices["10"]);
+    }
+
+    [Fact]
+    public void ParsePoPrices_treats_a_blank_COND_P_UNT_as_priced_per_1_not_a_divide_by_zero()
+    {
+        var response = new RfcResponse
+        {
+            Tables = new()
+            {
+                ["POCOND"] = [new() { ["ITM_NUMBER"] = "00010", ["COND_TYPE"] = "PB00", ["COND_VALUE"] = "12,50" }], // no COND_P_UNT
+            },
+        };
+        var prices = PurchasingHelper.ParsePoPrices(response);
+        Assert.Equal(12.50m, prices["10"]);
     }
 
     [Fact]

@@ -746,4 +746,63 @@ public sealed class WarehouseController : SapControllerBase
         return Ok(ApiResponse<MaintainZdelflagResponse>.Ok(ZdelflagHelpers.ParseMaintainResponse(response)));
     }
 
+    // ── Goods Issue posting (BAPI_DELIVERYPROCESSING_EXEC) ────────────────────
+    //
+    // Fired automatically by Normanton-Nexus right after ZDELFLAG/ZDELPACK
+    // maintenance succeeds for a delivery — no manual approval step. See
+    // GoodsIssueModels.cs for the full caveat on REQUEST's minimal field set
+    // being a starting point pending live confirmation.
+    //
+    // Unlike CreateStockAdjustment below, this has NO CheckPermissionAsync
+    // gate — same rationale as the zdelflag/* endpoints above: called from
+    // Node via the shared service token as part of an automatic pipeline,
+    // not directly by a logged-in user, so there's no "which user approved
+    // this" to authorize.
+    //
+    // A real BAPI (unlike ZDELFLAG's self-committing custom Z-BAPI), so it
+    // needs the same pinned-session commit/rollback pattern as
+    // CreateStockAdjustment — that pattern is confirmed working in
+    // production for BAPI_GOODSMVT_CREATE; whether it's actually required
+    // here too (vs. GI committing through some other mechanism) is one of
+    // the things to confirm during live testing.
+
+    [HttpPost]
+    [Route("goods-issue")]
+    public async Task<IHttpActionResult> PostGoodsIssue(
+        [FromBody] GoodsIssueRequest body,
+        [FromUri] bool dryRun,
+        CancellationToken ct)
+    {
+        var request = GoodsIssueHelper.BuildGoodsIssueRequest(body);
+
+        if (dryRun)
+            return Ok(ApiResponse<RfcRequest>.Ok(request));
+
+        var worker = await _pool.AcquireWorkerAsync(ct);
+        try
+        {
+            var data     = await _pool.ExecuteOnWorkerAsync(worker, request, ct);
+            var response = GoodsIssueHelper.ParseGoodsIssueResponse(data, body.DeliveryNumber);
+
+            if (body.TestRun || body.CheckMode)
+            {
+                await _pool.ExecuteOnWorkerAsync(worker, CommitHelper.BuildBapiRollback(), ct);
+                return Ok(ApiResponse<GoodsIssueResponse>.Ok(response));
+            }
+
+            if (!response.Success)
+            {
+                await _pool.ExecuteOnWorkerAsync(worker, CommitHelper.BuildBapiRollback(), ct);
+                return Content((HttpStatusCode)422, ApiResponse<GoodsIssueResponse>.Fail(
+                    "422", "SAP rejected the goods issue. Transaction rolled back.", response));
+            }
+
+            await _pool.ExecuteOnWorkerAsync(worker, CommitHelper.BuildBapiCommit(), ct);
+            return Ok(ApiResponse<GoodsIssueResponse>.Ok(response));
+        }
+        finally
+        {
+            await _pool.ReleaseWorkerAsync(worker);
+        }
+    }
 }

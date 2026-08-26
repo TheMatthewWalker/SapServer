@@ -197,19 +197,24 @@ internal static class PurchasingHelper
     }
 
     /// <summary>
-    /// UNVERIFIED — unlike every other request builder in this file (all
-    /// ported field-for-field from the user's working VBA macro), there is
-    /// no proven reference for reading a PO's price back from SAP. This is
-    /// a best-effort implementation using BAPI_PO_GETDETAIL1's standard,
-    /// widely-documented shape: PURCHASEORDER in, ITEM_CONDITIONS = 'X' to
-    /// populate the POCOND pricing-conditions table. Needs a real smoke
-    /// test against a live PO before being trusted. Designed to fail soft
-    /// either way — PurchasingController.GetPoPrice/ParsePoPrices return an
-    /// empty result rather than throwing if the guessed table/field names
-    /// don't match this SAP system, and the Normanton-Nexus caller treats a
-    /// missing price the same as "SAP hasn't priced this line" (falls back
-    /// to showing "Per SAP condition" on the PO PDF) rather than a hard
-    /// failure — see routes/performance.js's create-po route.
+    /// Reads a PO's price back via BAPI_PO_GETDETAIL1. Originally guessed at
+    /// an ITEM_CONDITIONS = 'X' import flag to request the POCOND pricing-
+    /// conditions table (the widely-documented shape elsewhere), but that
+    /// parameter doesn't exist on this SAP system at all — confirmed via the
+    /// Normanton-Nexus BAPI Inspector's real RFC_GET_FUNCTION_INTERFACE dump
+    /// of this function's actual interface here (no CONDITIONS-anything
+    /// import parameter exists), and it crashed the call outright (fixed
+    /// separately in SapStaWorker.ExecuteRfc's null-guards, but the
+    /// parameter itself was still just wrong). That same dump confirms
+    /// POCOND is a plain TABLE-class parameter with exactly the fields read
+    /// below, populated unconditionally alongside POITEM/POSCHEDULE/etc.
+    /// whenever PURCHASEORDER is supplied — no flag needed. Still
+    /// unconfirmed: whether POCOND is actually non-empty/priced for a real
+    /// PO (needs a live PO to check) — PurchasingController.GetPoPrice/
+    /// ParsePoPrices return an empty result rather than throwing either way,
+    /// and Normanton-Nexus treats a missing price as "SAP hasn't priced this
+    /// line" (falls back to "Per SAP condition" on the PO PDF) rather than a
+    /// hard failure — see routes/performance.js's create-po route.
     /// </summary>
     internal const string FnPoGetDetail = "BAPI_PO_GETDETAIL1";
 
@@ -217,18 +222,36 @@ internal static class PurchasingHelper
     {
         return new RfcRequestBuilder(FnPoGetDetail)
             .Import("PURCHASEORDER",  SapPad.Pad(poNumber, 10))
-            .Import("ITEM_CONDITIONS", "X")
-            .ReadTable("POCOND", "ITM_NUMBER", "COND_TYPE", "COND_VALUE", "CURRENCY", "COND_UNIT")
+            .ReadTable("POCOND", "ITM_NUMBER", "COND_TYPE", "COND_VALUE", "CURRENCY", "COND_UNIT", "COND_P_UNT")
             .Build();
     }
 
     /// <summary>
-    /// Keyed by PO item number (e.g. "00010", matching the same 5-digit
-    /// x10 numbering BuildPoCreateRequest assigns). PB00 (SAP's standard
+    /// Keyed by PO item number as a plain integer string with no leading
+    /// zeros (e.g. "10", not "00010") — a real RFC_GET_FUNCTION_INTERFACE
+    /// dump of this function (via Normanton-Nexus's BAPI Inspector) shows
+    /// POCOND's ITM_NUMBER is a 6-digit NUMC field, so it comes back as
+    /// "000010", not the 5-digit "00010" BuildPoCreateRequest's x10
+    /// numbering assigns. Comparing those as exact strings would never
+    /// match — the RFC call itself was succeeding fine (see the SapStaWorker
+    /// fix + BuildPoGetPriceRequest's ITEM_CONDITIONS removal), but every
+    /// price lookup was silently failing regardless, because the join key
+    /// never lined up. Normalizing to a bare integer string here, and
+    /// routes/performance.js's buildPoPdfItems doing the same to its own
+    /// 5-digit poItemNumber before looking a price up, makes both sides
+    /// agree regardless of either one's padding width. PB00 (SAP's standard
     /// gross/net price condition type) is preferred when present; any other
     /// priced condition on the item is used as a fallback so a differently-
     /// configured pricing procedure still surfaces something rather than
     /// nothing. A condition with no positive value is ignored.
+    ///
+    /// COND_VALUE is scaled by COND_P_UNT (the condition's own "price unit" —
+    /// e.g. a condition of 500 with COND_P_UNT 1000 means "500 per 1000
+    /// COND_UNIT", i.e. a real per-unit price of 0.5), standard SAP pricing
+    /// behaviour that was missed reading COND_VALUE raw — confirmed for real
+    /// on a live PO where the PDF showed a price 1000x too high. COND_P_UNT
+    /// of 0/blank means "per 1" (no scaling), same convention SAP itself uses
+    /// (a blank price unit is never meant as "divide by zero").
     /// </summary>
     internal static Dictionary<string, decimal> ParsePoPrices(RfcResponse response)
     {
@@ -240,12 +263,18 @@ internal static class PurchasingHelper
         {
             var itemNumber = row.GetString("ITM_NUMBER");
             var condType   = row.GetString("COND_TYPE");
-            var value      = row.GetDecimal("COND_VALUE");
-            if (string.IsNullOrWhiteSpace(itemNumber) || value <= 0)
+            var rawValue   = row.GetDecimal("COND_VALUE");
+            if (string.IsNullOrWhiteSpace(itemNumber) || rawValue <= 0)
+                continue;
+            if (!int.TryParse(itemNumber, out var itemNum))
                 continue;
 
-            if (!result.ContainsKey(itemNumber) || condType == "PB00")
-                result[itemNumber] = value;
+            var priceUnit = row.GetDecimal("COND_P_UNT");
+            var value = rawValue / (priceUnit > 0 ? priceUnit : 1m);
+
+            var key = itemNum.ToString();
+            if (!result.ContainsKey(key) || condType == "PB00")
+                result[key] = value;
         }
         return result;
     }

@@ -303,16 +303,42 @@ internal static class ZdelflagHelpers
 
         return builder
             .ReadParam("RC")
-            .ReadTable("ET_MESSAGE", "TYPE", "MESSAGE")
+            .ReadTable("ET_MESSAGE", "LINE", "TEXT")
             .Build();
     }
 
+    // RC and ET_MESSAGE were originally read with the wrong shape entirely —
+    // ReadTable("ET_MESSAGE", "TYPE", "MESSAGE") assumed a BAPIRET2-style
+    // RETURN table, but a live SE37 lookup showed ET_MESSAGE is actually typed
+    // ZERRORTEXT (fields LINE/TEXT — no TYPE/MESSAGE, and no per-line severity
+    // at all). RC is typed SYST in ABAP, but a live diagnostic run (temporary
+    // logging in SapStaWorker.DumpZdelflagDiagnostics, since removed) showed
+    // it never actually behaves like a real SYST structure through this COM
+    // layer — every attempt to read an individual SYST field off it (by name
+    // or positionally) failed uniformly even though the parameter itself
+    // wasn't null, while its plain scalar .Value read back "0" cleanly on a
+    // real successful run. So RC only ever surfaces here as a flat return
+    // code ("0" = success, in and out treated as a real business error
+    // otherwise) — the ReadParam("RC") scalar read above was correct from the
+    // start; only ET_MESSAGE's field names were ever wrong.
     internal static MaintainZdelflagResponse ParseMaintainResponse(RfcResponse response)
     {
-        var rc       = ReturnTableHelper.GetParam(response, "RC") ?? "";
-        var messages = ReturnTableHelper.ExtractMessages(response, "ET_MESSAGE")
-            .Select(m => new SapReturnMessage { Type = m.Type, Message = m.Message })
+        var rc        = (ReturnTableHelper.GetParam(response, "RC") ?? "").Trim();
+        var isFailure = rc.Length > 0 && rc != "0";
+        var type      = isFailure ? "E" : "S";
+
+        var lines = (response.Tables.TryGetValue("ET_MESSAGE", out var rows) ? rows : [])
+            .Select(row => row.TryGetValue("TEXT", out var t) ? t?.ToString()?.Trim() : null)
+            .Where(t => !string.IsNullOrEmpty(t))
             .ToList();
+
+        // A real failure with no message text at all would otherwise record
+        // with nothing to show — give it a fallback so 'Failed' never means
+        // "silently blank" the way this whole investigation started.
+        if (isFailure && lines.Count == 0)
+            lines.Add($"ZDELFLAG/ZDELPACK maintenance failed (RC={rc}).");
+
+        var messages = lines.Select(text => new SapReturnMessage { Type = type, Message = text! }).ToList();
 
         return new MaintainZdelflagResponse(rc, messages);
     }
