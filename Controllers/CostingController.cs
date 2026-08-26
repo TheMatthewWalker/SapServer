@@ -23,8 +23,8 @@ public sealed class CostingController : SapControllerBase
     [Route("cost-sheet")]
     public async Task<IHttpActionResult> GetCostSheet(
         [FromBody] CostSheetRequest body,
-        [FromUri] bool dryRun,
-        CancellationToken ct)
+        [FromUri] bool dryRun = false,
+        CancellationToken ct = default)
     {
         await CheckPermissionAsync(GetUserId(), CostingHelper.FnReadTables, ct);
 

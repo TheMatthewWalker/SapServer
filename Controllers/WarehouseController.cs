@@ -174,8 +174,8 @@ public sealed class WarehouseController : SapControllerBase
     [Route("stock-adjustment")]
     public async Task<IHttpActionResult> CreateStockAdjustment(
         [FromBody] StockAdjustmentRequest body,
-        [FromUri] bool dryRun,
-        CancellationToken ct)
+        [FromUri] bool dryRun = false,
+        CancellationToken ct = default)
     {
         await CheckPermissionAsync(GetUserId(), StockAdjustmentHelper.FnGoodsMvtCreate, ct);
 
@@ -582,8 +582,8 @@ public sealed class WarehouseController : SapControllerBase
     [Route("consignment-mb1b")]
     public async Task<IHttpActionResult> ConsignmentMb1b(
         [FromBody] ConsignmentMb1bRequest body,
-        [FromUri] bool dryRun,
-        CancellationToken ct)
+        [FromUri] bool dryRun = false,
+        CancellationToken ct = default)
     {
         await CheckPermissionAsync(GetUserId(), WarehouseHelpers.FnConsignment, ct);
 
@@ -770,8 +770,8 @@ public sealed class WarehouseController : SapControllerBase
     [Route("goods-issue")]
     public async Task<IHttpActionResult> PostGoodsIssue(
         [FromBody] GoodsIssueRequest body,
-        [FromUri] bool dryRun,
-        CancellationToken ct)
+        [FromUri] bool dryRun = false,
+        CancellationToken ct = default)
     {
         var request = GoodsIssueHelper.BuildGoodsIssueRequest(body);
 

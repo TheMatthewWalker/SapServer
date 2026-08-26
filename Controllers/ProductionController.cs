@@ -375,8 +375,8 @@ public sealed class ProductionController : SapControllerBase
     public async Task<IHttpActionResult> PostMixingScrap(
 
         [FromBody] MixingScrapRequest body,
-        [FromUri] bool dryRun,
-        CancellationToken ct)
+        [FromUri] bool dryRun = false,
+        CancellationToken ct = default)
     {
         await CheckPermissionAsync(GetUserId(), ProductionHelpers.FnCreate, ct);
 
@@ -450,8 +450,8 @@ public sealed class ProductionController : SapControllerBase
     public async Task<IHttpActionResult> PostGoodsMovementBackflush(
 
         [FromBody] GoodsMovementRequest body,
-        [FromUri] bool dryRun,
-        CancellationToken ct)
+        [FromUri] bool dryRun = false,
+        CancellationToken ct = default)
     {
         await CheckPermissionAsync(GetUserId(), ProductionHelpers.FnCreate, ct);
 

@@ -1,6 +1,7 @@
 using System.Text;
 using System.Web.Hosting;
 using System.Web.Http;
+using System.Web.Http.Controllers;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -91,6 +92,25 @@ public class Startup
         else
             services.AddScoped<IPermissionService, PermissionService>();
 
+        // Web API 2's DefaultHttpControllerActivator calls
+        // IDependencyResolver.GetService(controllerType) and only falls back
+        // to Activator.CreateInstance(controllerType) — a PARAMETERLESS
+        // constructor — when that returns null. None of our controllers have
+        // one (they all take ISapConnectionPool/IPermissionService/ILogger<T>
+        // via constructor injection), so without an explicit registration
+        // here every single controller construction failed with
+        // "Type '...' does not have a default constructor", surfaced as a
+        // generic Web-API-internal 500 for every request regardless of route
+        // or auth outcome. Registering every IHttpController-implementing
+        // type found in this assembly (rather than hand-listing each of the
+        // ~15 domain controllers) means a newly added controller is covered
+        // automatically.
+        foreach (var controllerType in typeof(Startup).Assembly.GetTypes()
+                     .Where(t => typeof(IHttpController).IsAssignableFrom(t) && !t.IsAbstract))
+        {
+            services.AddTransient(controllerType);
+        }
+
         overrideServices?.Invoke(services);
 
         var provider = services.BuildServiceProvider();
@@ -127,6 +147,18 @@ public class Startup
             DependencyResolver = new ServiceProviderDependencyResolver(provider)
         };
         httpConfig.MapHttpAttributeRoutes();
+
+        // Web API 2's HttpServer catches any exception raised during
+        // controller construction/filters/action execution ITSELF and
+        // converts it to a response before it can ever reach
+        // ExceptionHandlingMiddleware above — see WebApiExceptionHandler's
+        // doc comment. Without this, every SapPermissionException/
+        // SapConnectionException/etc. thrown from inside a controller (i.e.
+        // almost all of them) was silently replaced by Web API's own generic
+        // '{"Message":"An error has occurred."}' 500.
+        httpConfig.Services.Replace(
+            typeof(System.Web.Http.ExceptionHandling.IExceptionHandler),
+            new WebApiExceptionHandler(provider.GetRequiredService<ILogger<WebApiExceptionHandler>>()));
 
         var monitor = provider.GetRequiredService<SapSessionMonitor>();
         if (startSessionMonitor)

@@ -40,8 +40,8 @@ public sealed class PurchasingController : SapControllerBase
     [Route("create-po")]
     public async Task<IHttpActionResult> CreatePurchaseOrder(
         [FromBody] PoCreateRequest body,
-        [FromUri] bool dryRun,
-        CancellationToken ct)
+        [FromUri] bool dryRun = false,
+        CancellationToken ct = default)
     {
         await CheckPermissionAsync(GetUserId(), PurchasingHelper.FnPoCreate, ct);
 
@@ -116,8 +116,8 @@ public sealed class PurchasingController : SapControllerBase
     [Route("post-goods-receipt")]
     public async Task<IHttpActionResult> PostGoodsReceipt(
         [FromBody] GoodsReceiptRequest body,
-        [FromUri] bool dryRun,
-        CancellationToken ct)
+        [FromUri] bool dryRun = false,
+        CancellationToken ct = default)
     {
         await CheckPermissionAsync(GetUserId(), GoodsReceiptHelper.TransactionCode, ct);
 
@@ -149,8 +149,8 @@ public sealed class PurchasingController : SapControllerBase
     [Route("reverse-goods-receipt")]
     public async Task<IHttpActionResult> ReverseGoodsReceipt(
         [FromBody] Mf41Request body,
-        [FromUri] bool dryRun,
-        CancellationToken ct)
+        [FromUri] bool dryRun = false,
+        CancellationToken ct = default)
     {
         await CheckPermissionAsync(GetUserId(), ProductionHelpers.FnCreate, ct);
 

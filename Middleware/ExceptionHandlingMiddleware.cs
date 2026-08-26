@@ -1,32 +1,18 @@
 using System.Text.Json;
 using Microsoft.Owin;
 using SapServer.Exceptions;
-using SapServer.Models;
 
 namespace SapServer.Middleware;
 
 /// <summary>
-/// Catches exceptions thrown anywhere in the OWIN pipeline and maps them to
-/// consistent JSON error responses using the ApiResponse envelope. Ported
-/// from the ASP.NET Core RequestDelegate/HttpContext middleware shape to
-/// OWIN's OwinMiddleware/IOwinContext — the exception→status/code mapping
-/// itself is unchanged.
+/// Catches exceptions thrown anywhere in the OWIN pipeline OUTSIDE Web API's
+/// own request handling (e.g. from CORS or JWT bearer middleware itself) and
+/// maps them to the same JSON error envelope WebApiExceptionHandler produces
+/// for exceptions thrown inside a controller action — see
+/// SapExceptionMapper's doc comment for why there are two of these.
 /// </summary>
 public sealed class ExceptionHandlingMiddleware : OwinMiddleware
 {
-    // System.Text.Json.JsonSerializer.Serialize defaults to PascalCase
-    // (matching the C# property names exactly) unless told otherwise — under
-    // ASP.NET Core, MVC's JSON output defaulted to camelCase automatically,
-    // a default this OWIN-hosted middleware doesn't inherit since it calls
-    // JsonSerializer directly rather than going through any ASP.NET Core
-    // formatter pipeline. Explicit here so the wire shape actually matches
-    // the lowercase envelope documented in CLAUDE.md/README.md (and what
-    // SapServer.Tests/Middleware's real-JSON-parsing assertions expect).
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-    };
-
     private readonly ILogger _logger;
 
     public ExceptionHandlingMiddleware(OwinMiddleware next, ILogger logger) : base(next)
@@ -48,16 +34,7 @@ public sealed class ExceptionHandlingMiddleware : OwinMiddleware
 
     private async Task HandleAsync(IOwinContext context, Exception ex)
     {
-        var (statusCode, errorCode, message) = ex switch
-        {
-            SapPermissionException      => (403, "FORBIDDEN",        ex.Message),
-            SapConnectionException      => (503, "SAP_UNAVAILABLE",  "The SAP system is currently unavailable. Please try again shortly."),
-            SapExecutionException e     => (422, "RFC_ERROR",        string.IsNullOrEmpty(e.SapMessage) ? e.Message : e.SapMessage),
-            PoolExhaustedException      => (503, "POOL_EXHAUSTED",   "All SAP workers are busy. Please retry your request."),
-            OperationCanceledException  => (499, "REQUEST_CANCELLED","The request was cancelled."),
-            UnauthorizedAccessException => (401, "UNAUTHORIZED",     "Authentication is required."),
-            _                           => (500, "INTERNAL_ERROR",   "An unexpected error occurred.")
-        };
+        var (statusCode, errorCode, message) = SapExceptionMapper.Map(ex);
 
         if (statusCode >= 500)
             _logger.LogError(ex, "Unhandled exception (HTTP {Status}).", statusCode);
@@ -67,13 +44,7 @@ public sealed class ExceptionHandlingMiddleware : OwinMiddleware
         context.Response.StatusCode  = statusCode;
         context.Response.ContentType = "application/json";
 
-        var safeError = new
-        {
-            ExceptionType = ex.GetType().Name,
-            Message = ex.Message
-        };
-
-        var body = ApiResponse<object>.Fail(errorCode, message, safeError);
-        await context.Response.WriteAsync(JsonSerializer.Serialize(body, JsonOptions), context.Request.CallCancelled);
+        var body = SapExceptionMapper.BuildBody(ex, errorCode, message);
+        await context.Response.WriteAsync(JsonSerializer.Serialize(body, SapExceptionMapper.JsonOptions), context.Request.CallCancelled);
     }
 }

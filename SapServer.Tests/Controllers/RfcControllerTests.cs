@@ -67,7 +67,12 @@ public class RfcControllerTests : IClassFixture<SapServerTestFactory>
     {
         var client = _factory.CreateAuthenticatedClient(userId: 1); // no role claim at all
         var response = await client.GetAsync("/api/rfc/status");
-        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        // Unlike ASP.NET Core's [Authorize(Roles = ...)] (403 when authenticated
+        // but missing the role), System.Web.Http's AuthorizeAttribute.IsAuthorized
+        // returns false for BOTH "not authenticated" and "wrong role", and
+        // HandleUnauthorizedRequest always maps that to 401 — Web API 2 has no
+        // built-in distinction between the two failure modes.
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
     [Fact]
