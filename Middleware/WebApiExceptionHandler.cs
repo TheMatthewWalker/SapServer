@@ -34,9 +34,11 @@ public sealed class WebApiExceptionHandler : ExceptionHandler
         var (statusCode, errorCode, message) = SapExceptionMapper.Map(ex);
 
         if (statusCode >= 500)
-            _logger.LogError(ex, "Unhandled exception (HTTP {Status}).", statusCode);
+            _logger.LogError(ex, "Unhandled exception (HTTP {Status}) on {Method} {Path}.",
+                statusCode, context.Request.Method, context.Request.RequestUri?.AbsolutePath);
         else
-            _logger.LogWarning("Handled exception [{Code}]: {Message}", errorCode, ex.Message);
+            _logger.LogWarning("Handled exception [{Code}] on {Method} {Path}: {Message}",
+                errorCode, context.Request.Method, context.Request.RequestUri?.AbsolutePath, ex.Message);
 
         var body = SapExceptionMapper.BuildBody(ex, errorCode, message);
         context.Result = new JsonExceptionResult(context.Request, (HttpStatusCode)statusCode, body);

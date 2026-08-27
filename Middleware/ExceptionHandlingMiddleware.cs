@@ -37,9 +37,11 @@ public sealed class ExceptionHandlingMiddleware : OwinMiddleware
         var (statusCode, errorCode, message) = SapExceptionMapper.Map(ex);
 
         if (statusCode >= 500)
-            _logger.LogError(ex, "Unhandled exception (HTTP {Status}).", statusCode);
+            _logger.LogError(ex, "Unhandled exception (HTTP {Status}) on {Method} {Path}.",
+                statusCode, context.Request.Method, context.Request.Path);
         else
-            _logger.LogWarning("Handled exception [{Code}]: {Message}", errorCode, ex.Message);
+            _logger.LogWarning("Handled exception [{Code}] on {Method} {Path}: {Message}",
+                errorCode, context.Request.Method, context.Request.Path, ex.Message);
 
         context.Response.StatusCode  = statusCode;
         context.Response.ContentType = "application/json";

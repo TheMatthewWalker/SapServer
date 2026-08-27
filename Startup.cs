@@ -10,6 +10,7 @@ using Microsoft.Extensions.Options;
 using System.Web.Cors;
 using Microsoft.Owin;
 using Microsoft.Owin.Cors;
+using Microsoft.Owin.Extensions;
 using Microsoft.Owin.Security.Jwt;
 using Owin;
 using Serilog;
@@ -171,6 +172,25 @@ public class Startup
                 }
             });
         }
+
+        // Katana's own guidance for Microsoft.Owin.Host.SystemWeb: mark the
+        // end of authentication middleware with the IIS-native pipeline
+        // stage it corresponds to, so IntegratedPipelineContext knows where
+        // this segment of the OWIN chain maps onto IIS's own pipeline
+        // instead of treating the whole app as one undifferentiated block.
+        // Missing this is a documented cause of IntegratedPipelineContext
+        // completion-bookkeeping bugs - confirmed for real against a live
+        // Production deploy under real JWT auth: intermittent
+        // System.InvalidOperationException ("Operation is not valid due to
+        // the current state of the object") from
+        // IntegratedPipelineContext.PushLastObjects, with
+        // AuthenticationMiddleware`1 directly in the stack, on requests that
+        // otherwise completed normally through Web API. The earlier
+        // <httpErrors existingResponse="PassThrough"/> fix (web.config) was
+        // necessary but not sufficient - that stops IIS from overwriting an
+        // already-written error response; this stops the underlying
+        // exception from being thrown in the first place.
+        app.UseStageMarker(PipelineStage.Authenticate);
 
         var httpConfig = new HttpConfiguration
         {
