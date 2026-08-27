@@ -1006,12 +1006,41 @@ re-verified after the corrected code was deployed: `GET .../CP104/instruction` n
 directly with no round-trip needed, and a write-then-read round-trip of 300 through the real endpoint reports
 SAP's own `"Nothing is changed!"` message (independent confirmation the true stored value already matched).
 
-**Not yet re-examined**: `ParseMara`'s `WeightKg` and `ParsePackagingBom`'s `Quantity` both have the same `/1000`
-pattern, reading different tables/fields (`MARA-BRGEW`, a genuine weight field; `ZBOM_INFO-MENGE`, a BOM
-component quantity) — these were *not* touched, since nothing here confirms they share this bug rather than
-genuinely needing a gram->kg conversion. Worth the same live raw-bypass verification before trusting either,
-rather than assuming either way.
-
 All 476 unit tests re-verified passing after this correction; `PackagingHelpersTests.cs`'s two regression tests
 for fix #1 were rewritten to assert the corrected (no-scaling) behavior instead of the wrong symmetric-scaling
 behavior they originally asserted.
+
+---
+
+## FOLLOW-UP: ParseMara/ParsePackagingBom had the same bug (2026-08-27, same day)
+
+Checked, at the user's request, whether `ParseMara`'s `WeightKg` and `ParsePackagingBom`'s `Quantity` shared the
+same spurious-`/1000` bug as `ParseZpackInstr` did. **They did**, confirmed the same way: raw `ZRFC_READ_TABLES`
+bypass reads against real data, compared against the app's own (still-buggy, pre-fix) output.
+
+- `MARA-BRGEW` for CP104: raw `"0,021"` (SAP's native comma-decimal, no thousands grouping) = 0.021 kg — a
+  plausible real component weight. The app was displaying `0.000021` kg (implausibly tiny, effectively unusable)
+  before this fix.
+- `ZBOM_INFO-MENGE` for CP104's own BOM (component `TSAL4-8B01C62`): raw `"0,203"` = 0.203 M — plausible. App was
+  displaying `0.000203`.
+- `ZBOM_INFO-MENGE` for `IB_CARTON2_NMT`'s BOM (component `P_CARTON2_NMT`, the packaging carton itself): raw
+  `"1,000"` = exactly 1 EA — a completely standard "one carton per unit" BOM quantity, about as clear a smoking
+  gun as this class of bug gets. App was displaying `0.001`.
+
+**Fixed**: removed the `/1000` from both `ParseMara.WeightKg` and `ParsePackagingBom.Quantity` in
+`Helpers/PackagingHelpers.cs` — `ParseSapDecimal` alone is correct, same as the ZPACK_INSTR fix above. Neither of
+these two fields has a *write* counterpart in this app (both are read-only lookups — no endpoint ever saves MARA
+weight or ZBOM_INFO quantity back to SAP), so there was no write-side symmetry to worry about, and no risk of a
+repeat of this same day's earlier write-side mistake.
+
+**Live-verified after redeploy**: `GET /api/packaging/CP104/mara` now shows `weightKg: 0.021`;
+`GET /api/packaging/CP104/bom` shows `quantity: 0.203`; `GET /api/packaging/IB_CARTON2_NMT/bom` shows
+`quantity: 1.000` — all three now match their real raw SAP values directly, with no scaling.
+
+Added a new regression test for `ParsePackagingBom` (previously had no test coverage at all) and corrected
+`ParseMara`'s existing test plus `PackagingControllerTests.MaterialDetails`'s weight-parsing test to use
+realistic comma-decimal raw fixtures instead of the old bare-integer ones. 477 unit tests passing (up from 476 —
+the new `ParsePackagingBom` coverage).
+
+**No SAP data was touched by this follow-up** — both fixes are read-only parsing corrections; nothing was written
+to SAP as part of finding or fixing them.

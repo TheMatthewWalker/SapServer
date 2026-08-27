@@ -36,8 +36,16 @@ public class PackagingHelpersTests
     }
 
     [Fact]
-    public void ParseMara_converts_the_weight_from_grams_to_kilograms()
+    public void ParseMara_parses_the_native_comma_decimal_weight_with_no_extra_scaling()
     {
+        // Regression test for the same bug class as ParseZpackInstr's fix
+        // (see its comment): this used to divide the parsed weight by 1000
+        // on a mistaken "grams to kg" assumption. Confirmed live via a raw
+        // ZRFC_READ_TABLES bypass read: CP104's real MARA-BRGEW is "0,021"
+        // (SAP's native comma-decimal, no thousands grouping) = 0.021 kg, a
+        // plausible real component weight -- ParseSapDecimal alone parses
+        // this correctly; the extra /1000 made it display as an implausible
+        // 0.000021 kg. endpoint-test-log-2026-08-27.md's correction section.
         var response = new RfcResponse
         {
             Tables = new()
@@ -45,13 +53,13 @@ public class PackagingHelpersTests
                 ["data_display"] = new()
                 {
                     new() { ["WA"] = "header" },
-                    new() { ["WA"] = "5000|VERP|INSB|KG" },
+                    new() { ["WA"] = "0,021|VERP|INSB|KG" },
                 }
             }
         };
         var row = PackagingHelpers.ParseMara(response);
         Assert.NotNull(row);
-        Assert.Equal(5.0m, row!.WeightKg);
+        Assert.Equal(0.021m, row!.WeightKg);
         Assert.Equal("VERP", row.MaterialType);
     }
 
@@ -59,6 +67,33 @@ public class PackagingHelpersTests
     public void ParseMara_returns_null_when_nothing_matches()
     {
         Assert.Null(PackagingHelpers.ParseMara(new RfcResponse()));
+    }
+
+    [Fact]
+    public void ParsePackagingBom_parses_the_native_comma_decimal_quantity_with_no_extra_scaling()
+    {
+        // Same bug class as ParseZpackInstr/ParseMara. Confirmed live via a
+        // raw ZRFC_READ_TABLES bypass read: IB_CARTON2_NMT's real
+        // ZBOM_INFO-MENGE is "1,000" (SAP's native comma-decimal, no
+        // thousands grouping) = exactly 1 EA, a completely standard BOM
+        // component quantity -- the extra /1000 made it display as an
+        // implausible 0.001. endpoint-test-log-2026-08-27.md's correction
+        // section.
+        var response = new RfcResponse
+        {
+            Tables = new()
+            {
+                ["data_display"] = new()
+                {
+                    new() { ["WA"] = "header" },
+                    new() { ["WA"] = "P_CARTON2_NMT|EA|1,000" },
+                }
+            }
+        };
+        var rows = PackagingHelpers.ParsePackagingBom(response);
+        Assert.Single(rows);
+        Assert.Equal("P_CARTON2_NMT", rows[0].Component);
+        Assert.Equal(1.0m, rows[0].Quantity);
     }
 
     [Fact]

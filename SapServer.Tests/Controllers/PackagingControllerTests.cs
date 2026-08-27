@@ -57,9 +57,12 @@ public class PackagingControllerTests
     }
 
     [Fact]
-    public async Task MaterialDetails_returns_the_parsed_row_converting_grams_to_kg()
+    public async Task MaterialDetails_returns_the_parsed_row_with_no_extra_scaling_on_the_weight()
     {
-        _pool.Setup(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>())).ReturnsAsync(SingleRow("5000|ROH|X|KG"));
+        // "5,000" is SAP's native comma-decimal format (no thousands
+        // grouping) for the plain value 5 -- see PackagingHelpersTests'
+        // ParseMara regression test for why this isn't divided by 1000.
+        _pool.Setup(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>())).ReturnsAsync(SingleRow("5,000|ROH|X|KG"));
         var result = await _controller.MaterialDetails("30005R", CancellationToken.None);
         var ok = ControllerTestHelpers.AssertOk(result);
         var body = Assert.IsType<ApiResponse<PackagingMaraRow>>(ok);

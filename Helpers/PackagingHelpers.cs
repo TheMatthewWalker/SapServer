@@ -138,7 +138,13 @@ internal static class PackagingHelpers
         if (cols is not { Length: >= 4 }) return null;
         return new PackagingMaraRow
         {
-            WeightKg     = (RfcRowExtensions.ParseSapDecimal(cols[0]) ?? 0m) / 1000m,
+            // No /1000 here -- same bug class as ParseZpackInstr's (see its
+            // comment). Confirmed live via a raw ZRFC_READ_TABLES bypass:
+            // CP104's real MARA-BRGEW is "0,021" (SAP's native comma-decimal
+            // format, no thousands grouping) = 0.021 kg, a plausible real
+            // component weight -- the extra /1000 made this display as an
+            // implausible 0.000021 kg. ParseSapDecimal alone is correct.
+            WeightKg     = RfcRowExtensions.ParseSapDecimal(cols[0]) ?? 0m,
             MaterialType = cols[1],
             HandlingType = cols[2],
             WeightUnit   = cols[3],
@@ -231,7 +237,14 @@ internal static class PackagingHelpers
             {
                 Component = c[0].Trim(),
                 Unit      = c[1].Trim(),
-                Quantity  = (RfcRowExtensions.ParseSapDecimal(c[2]) ?? 0m) / 1000m,
+                // No /1000 here -- same bug class as ParseZpackInstr/ParseMara
+                // (see their comments). Confirmed live via a raw
+                // ZRFC_READ_TABLES bypass: IB_CARTON2_NMT's real ZBOM_INFO-
+                // MENGE is "1,000" (SAP's native comma-decimal, no thousands
+                // grouping) = exactly 1 EA, a completely standard BOM
+                // component quantity -- the extra /1000 made this display as
+                // an implausible 0.001. ParseSapDecimal alone is correct.
+                Quantity  = RfcRowExtensions.ParseSapDecimal(c[2]) ?? 0m,
             })
             .ToArray();
     }
