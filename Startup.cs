@@ -83,6 +83,18 @@ public class Startup
         }
         Log.Logger = loggerConfig.CreateLogger();
 
+        // First line in every log file/session on purpose - the whole point
+        // is to make it obvious at a glance (not just from appsettings.json,
+        // which can be easy to lose track of on a dev machine juggling a
+        // local test instance alongside production) which environment this
+        // process actually launched under, and where its site root resolved
+        // to under IIS hosting.
+        Log.Information(
+            "SapServer starting - ASPNETCORE_ENVIRONMENT={Environment}, IIS-hosted={IsHosted}, BasePath={BasePath}",
+            Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ?? "Production",
+            HostingEnvironment.IsHosted,
+            ResolveBasePath());
+
         var services = new ServiceCollection();
 
         services.AddLogging(builder => builder.AddSerilog(dispose: true));

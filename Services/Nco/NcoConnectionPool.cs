@@ -89,6 +89,19 @@ public sealed class NcoConnectionPool : ISapConnectionPool, IDisposable
             "up to {Pinned} concurrent pinned session(s) and {Elevated} concurrent elevated session(s), both connecting on demand per request.",
             _statelessPool.DestinationNames.Count, _options.PoolSize, _options.MaxPoolSize,
             _options.MaxConcurrentPinnedSessions, _options.ElevatedWorkerCount);
+
+        // Logged separately from the line above (and deliberately omits
+        // User/Password) specifically so it's easy to visually confirm from
+        // the log alone which real SAP system a given running instance is
+        // pointed at — e.g. distinguishing a local test SapServer from
+        // production when both exist side by side on the same machine.
+        var accounts = _options.ServiceAccounts.Count > 0 ? _options.ServiceAccounts : new[] { _options.ServiceAccount };
+        for (int i = 0; i < accounts.Count; i++)
+        {
+            logger.LogInformation(
+                "SAP destination POOL_{Index}: AppServerHost={AppServerHost}, SystemNumber={SystemNumber}, Client={Client}",
+                i, accounts[i].AppServerHost, accounts[i].SystemNumber, accounts[i].Client);
+        }
     }
 
     /// <inheritdoc/>
