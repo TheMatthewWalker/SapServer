@@ -116,6 +116,7 @@ ASP.NET (via `System.Text.Json`) deserializes `object?` parameters as `JsonEleme
 | `MrpAnalysisController` | `api/mrp-analysis` | Year-on-year consumption-by-year, goods-receipt-by-vendor history, recursive BOM explosion — see "MRP Analysis" below |
 | `FunctionController` | `api/function` | Generic RFC function parameter introspection |
 | `RfcController` | `api/rfc` | Generic execute/status (original, still used directly by some callers) |
+| `HealthController` | `health` (no `api/` prefix, deliberately unauthenticated) | Liveness check for external monitoring — added after confirming a request to a route with no match at all crashes the OWIN pipeline under real IIS (see "Critical Platform Constraints"'s `IntegratedPipelineContext`/stage-marker entry) rather than cleanly 404ing; a real prober needs a real route to hit, not to rely on that default behavior. Does not inherit `SapControllerBase` (whose class-level `[Authorize]` would otherwise reject an unauthenticated prober). |
 
 Domain controllers call typed `Helpers/` builders to construct an `RfcRequest`, run it via `_pool.ExecuteAsync(...)`, then parse the typed response — controllers themselves contain no raw NCo dispatch code.
 
