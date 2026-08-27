@@ -102,7 +102,7 @@ internal static class WarehouseHelpers
                 StorageType     = cols[1],
                 Bin             = cols[2],
                 Material        = cols[3],
-                AvailableQty    = decimal.TryParse(cols[4], out var qty) ? qty : 0m,
+                AvailableQty    = RfcRowExtensions.ParseSapDecimal(cols[4]) ?? 0m,
                 Batch           = cols[5],
                 StockCategory   = cols[6],
                 SpecialStockInd = cols[7],
@@ -181,7 +181,7 @@ internal static class WarehouseHelpers
                 Plant           = cols[0],
                 StorageLocation = cols[1],
                 Material        = cols[2],
-                AvailableQty    = decimal.TryParse(cols[3], out var qty) ? qty : 0m,
+                AvailableQty    = RfcRowExtensions.ParseSapDecimal(cols[3]) ?? 0m,
             })
             .ToArray();
     }
@@ -482,10 +482,10 @@ internal static class WarehouseHelpers
                 TrNumber         = cols[1],
                 Material         = cols[2],
                 StorageLocation  = cols[3],
-                Quantity         = decimal.TryParse(cols[4], out var qty) ? qty : 0m,
+                Quantity         = RfcRowExtensions.ParseSapDecimal(cols[4]) ?? 0m,
                 Uom              = cols[5],
                 Batch            = cols[6],
-                UnrestrictedQty  = decimal.TryParse(cols[7], out var clabs) ? clabs : (decimal?)null,
+                UnrestrictedQty  = RfcRowExtensions.ParseSapDecimal(cols[7]),
             })
             .ToArray();
     }
@@ -530,7 +530,7 @@ internal static class WarehouseHelpers
         return SapDelimitedParser
             .ParseRows(sapRows, '|', skipHeader: true)
             .Where(cols => cols.Length >= 4)
-            .Where(cols => cols[1] != "901" && decimal.TryParse(cols[3], out var q) && q > 0)
+            .Where(cols => cols[1] != "901" && (RfcRowExtensions.ParseSapDecimal(cols[3]) ?? 0m) > 0)
             .Select(cols => cols[0].TrimStart('0'))
             .ToHashSet();
     }
@@ -673,7 +673,7 @@ internal static class WarehouseHelpers
                 TrNumber         = cols[1],
                 Material         = cols[2],
                 StorageLocation  = cols[3],
-                Quantity         = decimal.TryParse(cols[4], out var qty) ? qty : 0m,
+                Quantity         = RfcRowExtensions.ParseSapDecimal(cols[4]) ?? 0m,
                 Uom              = cols[5],
                 DocumentText     = cols[6],
                 MaterialDocument = cols[7],

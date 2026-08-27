@@ -134,7 +134,7 @@ internal static class ConsignmentHelpers
                 // Column order follows registration order: MsegColumns
                 // (MATNR, MBLNR, ZEILE, MENGE, MEINS, LIFNR, XBLNR_MKPF,
                 // SHKZG) then MkpfColumns (BLDAT, BUDAT).
-                var rawQty = decimal.TryParse(cols[3].Trim(), out var qty) ? qty : 0m;
+                var rawQty = RfcRowExtensions.ParseSapDecimal(cols[3]) ?? 0m;
                 var shkzg  = cols[7].Trim();
                 // 'H' = credit / stock decrease — a 102 reversal. 'S' (or
                 // anything else, defensively) = debit / stock increase, the

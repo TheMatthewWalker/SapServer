@@ -287,7 +287,7 @@ internal static class SalesHelpers
             .ToArray();
     }
 
-    private static decimal ParseDecimal(string value) => decimal.TryParse(value, NumberStyles.Any, CultureInfo.InvariantCulture, out var d) ? d : 0m;
+    private static decimal ParseDecimal(string value) => RfcRowExtensions.ParseSapDecimal(value) ?? 0m;
 
     // SAP dates come back from ZRFC_READ_TABLES as "YYYYMMDD" (internal ABAP
     // date format) — "00000000" (or blank) means null/no value, matching

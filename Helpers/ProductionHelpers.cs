@@ -97,7 +97,7 @@ internal static class ProductionHelpers
                 Plant =             cols[1],
                 Component =         cols[2],
                 Item =              cols[3],
-                ComponentQty =      decimal.TryParse(cols[4], out var qty) ? qty : 0m,
+                ComponentQty =      RfcRowExtensions.ParseSapDecimal(cols[4]) ?? 0m,
                 ComponentUnit =     cols[5],
                 StorageLocation =   cols[6],
                 SupplyArea =        cols[7]
@@ -135,7 +135,7 @@ internal static class ProductionHelpers
             .Select(cols => new KgToUnitRow
             {
                 Material =         cols[0],
-                KgConversion =     decimal.TryParse(cols[1], out var kg) ? kg : 0m,
+                KgConversion =     RfcRowExtensions.ParseSapDecimal(cols[1]) ?? 0m,
             })
             .ToArray();
     }
@@ -156,7 +156,7 @@ internal static class ProductionHelpers
             {
                 StorageLocation =  cols[0],
                 Material =         cols[1],
-                Quantity =         decimal.TryParse(cols[2], out var qty) ? qty : 0m,
+                Quantity =         RfcRowExtensions.ParseSapDecimal(cols[2]) ?? 0m,
             })
             .ToArray();
     }
@@ -330,7 +330,7 @@ internal static class ProductionHelpers
             {
                 MaterialDocument = cols[0],
                 Material         = cols[1],
-                Quantity         = decimal.TryParse(cols[2], out var qty) ? qty : 0m,
+                Quantity         = RfcRowExtensions.ParseSapDecimal(cols[2]) ?? 0m,
                 StorageLocation  = cols[3],
             })
             .ToArray();
@@ -379,7 +379,7 @@ internal static class ProductionHelpers
             {
                 Charge   = cols[0],
                 Material = cols[1],
-                Quantity = decimal.TryParse(cols[2], out var qty) ? qty : 0m,
+                Quantity = RfcRowExtensions.ParseSapDecimal(cols[2]) ?? 0m,
             })
             .ToArray();
     }

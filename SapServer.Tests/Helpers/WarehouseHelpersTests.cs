@@ -423,6 +423,27 @@ public class WarehouseHelpersTests
         Assert.Equal("0000123456", rows[0].Batch);
     }
 
+    [Fact]
+    public void ParseOpenTransferRequirementRows_parses_a_European_comma_decimal_quantity_correctly()
+    {
+        // Confirmed for real against a live SAP system: this parser used a
+        // bare decimal.TryParse(cols[4], out var qty), which uses the current
+        // culture's NumberStyles.Number (AllowThousands) - under en-US/en-GB
+        // that treats ',' as a thousands separator, so a genuine SAP value of
+        // "300,000" (European convention: comma is the decimal point, meaning
+        // 300.000 = 300) parsed as three hundred THOUSAND instead of three
+        // hundred - exactly the reported symptom ("300,000 EA should be
+        // parsed to 300 EA"). Fixed by routing through the shared,
+        // culture-independent RfcRowExtensions.ParseSapDecimal.
+        var response = StockResponse(
+            "101|4500001234|30005R|1710|300,000|EA|Doc text|5000001111|JSMITH|01.01.26|08:00:00|SA|BIN-01|999|0000123456");
+
+        var rows = WarehouseHelpers.ParseOpenTransferRequirementRows(response);
+
+        Assert.Single(rows);
+        Assert.Equal(300m, rows[0].Quantity);
+    }
+
     // ── Delete TR (LB02) ─────────────────────────────────────────────────────
 
     [Fact]

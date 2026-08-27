@@ -138,7 +138,7 @@ internal static class PackagingHelpers
         if (cols is not { Length: >= 4 }) return null;
         return new PackagingMaraRow
         {
-            WeightKg     = decimal.TryParse(cols[0], out var w) ? w / 1000m : 0m,
+            WeightKg     = (RfcRowExtensions.ParseSapDecimal(cols[0]) ?? 0m) / 1000m,
             MaterialType = cols[1],
             HandlingType = cols[2],
             WeightUnit   = cols[3],
@@ -175,8 +175,8 @@ internal static class PackagingHelpers
         return new PackagingInstrRow
         {
             PackMaterial = c[0].Trim(),
-            PalletQty    = decimal.TryParse(c[1], out var pq) ? pq / 1000m : 0m,
-            SmallBoxQty  = decimal.TryParse(c[2], out var sq) ? sq / 1000m : 0m,
+            PalletQty    = (RfcRowExtensions.ParseSapDecimal(c[1]) ?? 0m) / 1000m,
+            SmallBoxQty  = (RfcRowExtensions.ParseSapDecimal(c[2]) ?? 0m) / 1000m,
             PackProd     = !string.IsNullOrWhiteSpace(c[3]),
             BoxGen       = !string.IsNullOrWhiteSpace(c[4]),
             BatchSpread  = !string.IsNullOrWhiteSpace(c[5]),
@@ -215,7 +215,7 @@ internal static class PackagingHelpers
             {
                 Component = c[0].Trim(),
                 Unit      = c[1].Trim(),
-                Quantity  = decimal.TryParse(c[2], out var m) ? m / 1000m : 0m,
+                Quantity  = (RfcRowExtensions.ParseSapDecimal(c[2]) ?? 0m) / 1000m,
             })
             .ToArray();
     }

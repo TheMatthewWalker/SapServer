@@ -58,8 +58,8 @@ internal static class PerformanceHelpers
                 Batch           = cols[1],
                 StorageBin      = cols[2],
                 StorageType     = cols[3],
-                TotalQty        = decimal.TryParse(cols[4], out var gesme) ? gesme : 0m,
-                AvailableQty    = decimal.TryParse(cols[5], out var verme) ? verme : 0m,
+                TotalQty        = RfcRowExtensions.ParseSapDecimal(cols[4]) ?? 0m,
+                AvailableQty    = RfcRowExtensions.ParseSapDecimal(cols[5]) ?? 0m,
                 StorageLocation = cols[6],
                 PackagingMaterial = cols[7],
                 ProfitCentre = pcList.GetValueOrDefault(
@@ -844,7 +844,7 @@ internal static class PerformanceHelpers
                 var offset = (year - today.Year) * 12 + (m - today.Month);
                 if (offset < -(HistoryMonths - 1) || offset > 0) continue;
 
-                arr[offset + HistoryMonths - 1] += decimal.TryParse(cols[2 + m].Trim(), out var qty) ? qty : 0m;
+                arr[offset + HistoryMonths - 1] += RfcRowExtensions.ParseSapDecimal(cols[2 + m]) ?? 0m;
             }
         }
 
@@ -891,7 +891,7 @@ internal static class PerformanceHelpers
 
             decimal yearTotal = 0m;
             for (var m = 1; m <= 12; m++)
-                yearTotal += decimal.TryParse(cols[2 + m].Trim(), out var qty) ? qty : 0m;
+                yearTotal += RfcRowExtensions.ParseSapDecimal(cols[2 + m]) ?? 0m;
 
             var key = (material, year);
             totals[key] = totals.GetValueOrDefault(key) + yearTotal;
@@ -1022,7 +1022,7 @@ internal static class PerformanceHelpers
             if (cols.Length < MkolColumns.Length) continue;
 
             var material = NormaliseMaterial(cols[0]);
-            var qty      = decimal.TryParse(cols[2].Trim(), out var v) ? v : 0m;
+            var qty      = RfcRowExtensions.ParseSapDecimal(cols[2]) ?? 0m;
 
             result[material] = result.GetValueOrDefault(material) + qty;
         }
@@ -1283,7 +1283,7 @@ internal static class PerformanceHelpers
         if (!response.Tables.TryGetValue("data_display", out var sapRows))
             return [];
 
-        static decimal N(string s) => decimal.TryParse(s.Trim(), out var v) ? v : 0m;
+        static decimal N(string s) => RfcRowExtensions.ParseSapDecimal(s) ?? 0m;
 
         return SapDelimitedParser
             .ParseRows(sapRows, '|', skipHeader: true)
@@ -1413,7 +1413,7 @@ internal static class PerformanceHelpers
             .Where(c => c.Length >= 5)
             .Select(c => new StockMovementLine(
                 NormaliseMaterial(c[0]), c[1].Trim(), c[2].Trim(),
-                decimal.TryParse(c[3].Trim(), out var qty) ? qty : 0m, c[4].Trim(), null))
+                RfcRowExtensions.ParseSapDecimal(c[3]) ?? 0m, c[4].Trim(), null))
             .Where(l => l.Quantity != 0)
             .ToList();
     }
@@ -1428,7 +1428,7 @@ internal static class PerformanceHelpers
             .Where(c => c.Length >= 6)
             .Select(c => new StockMovementLine(
                 NormaliseMaterial(c[0]), c[1].Trim(), c[2].Trim(),
-                decimal.TryParse(c[3].Trim(), out var qty) ? qty : 0m, c[4].Trim(), c[5].Trim()))
+                RfcRowExtensions.ParseSapDecimal(c[3]) ?? 0m, c[4].Trim(), c[5].Trim()))
             .Where(l => l.Quantity != 0)
             .ToList();
     }
