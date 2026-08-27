@@ -198,6 +198,21 @@ public class Startup
         };
         httpConfig.MapHttpAttributeRoutes();
 
+        // Catch-all conventional route, checked only after every attribute
+        // route above has already failed to match — guarantees literally
+        // every request Web API's routing sees matches SOMETHING. Without
+        // this, a request that matches zero attribute routes at all crashes
+        // the OWIN pipeline under real IIS hosting instead of cleanly
+        // 404ing (System.InvalidOperationException from
+        // IntegratedPipelineContext.PushLastObjects) — confirmed for real,
+        // more than once, for different unmatched URLs (GET /health before
+        // that route existed, then POST /api/production/label, a route this
+        // app has never implemented). See NotFoundController's doc comment.
+        httpConfig.Routes.MapHttpRoute(
+            name: "Catchall",
+            routeTemplate: "{*url}",
+            defaults: new { controller = "NotFound" });
+
         // Web API 2's built-in JsonMediaTypeFormatter (System.Net.Http.Formatting,
         // wrapping Newtonsoft.Json) defaults to PascalCase property names -
         // confirmed for real against a live deploy: GET /api/rfc/status
