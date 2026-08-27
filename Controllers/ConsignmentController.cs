@@ -40,8 +40,23 @@ public sealed class ConsignmentController : SapControllerBase
     [Route("gr")]
     public async Task<IHttpActionResult> GetVendorGr(
         [FromUri] string sapVendorNumber,
-        [FromUri] string? sinceDate,
-        CancellationToken ct)
+        // Confirmed for real against this live IIS deploy (2026-08-27): Web
+        // API 2's [FromUri] binder 404s the ENTIRE request — not just this
+        // parameter — when sinceDate is omitted from the query string
+        // entirely, even though it's already string? (nullable reference
+        // type). That contradicts this file's own "nullable reference types
+        // don't need an explicit default" assumption documented elsewhere in
+        // CLAUDE.md for the dryRun-style gotcha — apparently that only holds
+        // for a complex [FromUri] object, not a bare nullable string. Every
+        // normal caller (Normanton-Nexus's daily cron and its manual "Sync
+        // GR from SAP" button) omits sinceDate on every call except a
+        // deliberately date-floored re-sync, so this broke ALL consignment
+        // GR syncing for every vendor the moment this endpoint's [FromQuery]
+        // -> [FromUri] rebuild reached production. The explicit default
+        // fixes it the same way the CLAUDE.md-documented value-type cases
+        // were fixed.
+        [FromUri] string? sinceDate = null,
+        CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(sapVendorNumber))
             return Content(HttpStatusCode.BadRequest, ApiResponse<ConsignmentGrRow[]>.Fail("400", "sapVendorNumber is required.", []));
