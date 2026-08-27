@@ -810,4 +810,63 @@ public sealed class WarehouseController : SapControllerBase
             await _pool.ReleaseWorkerAsync(worker);
         }
     }
+
+    // ── Delivery item-quantity correction (BAPI_OUTB_DELIVERY_CHANGE) ─────────
+    //
+    // Called by Normanton-Nexus's POST /:deliveryId/sync-delivery-quantities
+    // when picked quantities are within 10% of SAP's delivery quantities but
+    // not exact — brings SAP's own LIPS-LFIMG in line with what was actually
+    // picked (VL02N-equivalent), so the subsequent ZDELFLAG/Goods Issue
+    // sequence's exact-match requirement is satisfied. See
+    // DeliveryChangeModels.cs for the full caveat on the header structures
+    // being left essentially empty (item-only change).
+    //
+    // No CheckPermissionAsync gate — same rationale as PostGoodsIssue: called
+    // from Node via the shared service token as part of a WAREHOUSE_OP-gated
+    // Node action, not directly by a logged-in user.
+    //
+    // A real BAPI, so it needs the same pinned-worker commit/rollback pattern
+    // as PostGoodsIssue/CreateStockAdjustment. HEADER_CONTROL-SIMULATE's real
+    // semantics are unconfirmed, so TestRun is handled via rollback here
+    // rather than trusting SIMULATE to give a safe dry run.
+
+    [HttpPost]
+    [Route("delivery-change")]
+    public async Task<IHttpActionResult> PostDeliveryChange(
+        [FromBody] DeliveryChangeRequest body,
+        [FromUri] bool dryRun = false,
+        CancellationToken ct = default)
+    {
+        var request = DeliveryChangeHelper.BuildDeliveryChangeRequest(body);
+
+        if (dryRun)
+            return Ok(ApiResponse<RfcRequest>.Ok(request));
+
+        var worker = await _pool.AcquireWorkerAsync(ct);
+        try
+        {
+            var data     = await _pool.ExecuteOnWorkerAsync(worker, request, ct);
+            var response = DeliveryChangeHelper.ParseDeliveryChangeResponse(data, body.DeliveryNumber);
+
+            if (body.TestRun)
+            {
+                await _pool.ExecuteOnWorkerAsync(worker, CommitHelper.BuildBapiRollback(), ct);
+                return Ok(ApiResponse<DeliveryChangeResponse>.Ok(response));
+            }
+
+            if (!response.Success)
+            {
+                await _pool.ExecuteOnWorkerAsync(worker, CommitHelper.BuildBapiRollback(), ct);
+                return Content((HttpStatusCode)422, ApiResponse<DeliveryChangeResponse>.Fail(
+                    "422", "SAP rejected the delivery quantity change. Transaction rolled back.", response));
+            }
+
+            await _pool.ExecuteOnWorkerAsync(worker, CommitHelper.BuildBapiCommit(), ct);
+            return Ok(ApiResponse<DeliveryChangeResponse>.Ok(response));
+        }
+        finally
+        {
+            await _pool.ReleaseWorkerAsync(worker);
+        }
+    }
 }

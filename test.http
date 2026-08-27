@@ -439,3 +439,61 @@ Authorization: Bearer {{token}}
     "DeliveryNumber": "80001234"
 }
 ###
+
+
+### POST /api/warehouse/delivery-change?dryRun=true  (returns the built
+### BAPI_OUTB_DELIVERY_CHANGE RfcRequest without touching the pool — sanity-
+### check field names/values before ever hitting SAP. Swap DeliveryNumber
+### and the item number for a real test delivery/item before the TestRun/
+### real calls below.)
+POST {{baseUrl}}/api/warehouse/delivery-change?dryRun=true
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+    "DeliveryNumber": "80001234",
+    "Items": [
+        { "ItemNumber": "10", "Material": "30005R", "Quantity": 5.5, "BaseUom": "KG" }
+    ]
+}
+###
+
+
+### POST /api/warehouse/delivery-change  (TestRun — rolls back regardless
+### of outcome. HEADER_CONTROL-SIMULATE's real semantics are unconfirmed, so
+### this deliberately uses the commit/rollback bracket instead of SIMULATE
+### for the dry run — see DeliveryChangeModels.cs's caveat. Run this first
+### against a real test delivery/item; if RETURN comes back with a sensible
+### message rather than a generic RFC failure, iterate the minimal field set
+### — HEADER_CONTROL-DELIV_NUMB-only, ITEM_DATA/ITEM_CONTROL — off whatever
+### it actually complains about, same as the other two BAPIs this session.
+### Only then try a real correction below.)
+POST {{baseUrl}}/api/warehouse/delivery-change
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+    "DeliveryNumber": "80001234",
+    "Items": [
+        { "ItemNumber": "10", "Material": "30005R", "Quantity": 5.5, "BaseUom": "KG" }
+    ],
+    "TestRun": true
+}
+###
+
+
+### POST /api/warehouse/delivery-change  (real call — only run once TestRun
+### above comes back clean, against a real throwaway/test delivery. Changes
+### DLV_QTY for real — verify in VA02/VL02N afterward that the item's
+### quantity actually changed.)
+POST {{baseUrl}}/api/warehouse/delivery-change
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+    "DeliveryNumber": "80001234",
+    "Items": [
+        { "ItemNumber": "10", "Material": "30005R", "Quantity": 5.5, "BaseUom": "KG" }
+    ]
+}
+###

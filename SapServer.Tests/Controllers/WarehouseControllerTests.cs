@@ -361,6 +361,71 @@ public class WarehouseControllerTests
             It.Is<RfcRequest>(r => r.FunctionName == "BAPI_TRANSACTION_COMMIT"), It.IsAny<CancellationToken>()), Times.Never);
     }
 
+    // PostDeliveryChange has no CheckPermissionAsync gate — same rationale as
+    // PostGoodsIssue: called from Node via the shared service token as part
+    // of a WAREHOUSE_OP-gated Node action, not by a logged-in user.
+
+    [Fact]
+    public async Task PostDeliveryChange_dryRun_returns_the_built_request_without_acquiring_a_worker()
+    {
+        var result = await _controller.PostDeliveryChange(
+            new DeliveryChangeRequest { DeliveryNumber = "80001234" }, dryRun: true, CancellationToken.None);
+
+        var ok = ControllerTestHelpers.AssertOk(result);
+        var body = Assert.IsType<ApiResponse<RfcRequest>>(ok);
+        Assert.Equal(DeliveryChangeHelper.FnOutbDeliveryChange, body.Data!.FunctionName);
+        _pool.Verify(p => p.AcquireWorkerAsync(It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task PostDeliveryChange_commits_on_success()
+    {
+        _pool.Setup(p => p.ExecuteOnWorkerAsync(It.IsAny<SapWorkerHandle>(), It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new RfcResponse());
+
+        var result = await _controller.PostDeliveryChange(
+            new DeliveryChangeRequest { DeliveryNumber = "80001234" }, dryRun: false, CancellationToken.None);
+
+        ControllerTestHelpers.AssertOk(result);
+        _pool.Verify(p => p.ExecuteOnWorkerAsync(It.IsAny<SapWorkerHandle>(),
+            It.Is<RfcRequest>(r => r.FunctionName == "BAPI_TRANSACTION_COMMIT"), It.IsAny<CancellationToken>()), Times.Once);
+        _pool.Verify(p => p.ExecuteOnWorkerAsync(It.IsAny<SapWorkerHandle>(),
+            It.Is<RfcRequest>(r => r.FunctionName == "BAPI_TRANSACTION_ROLLBACK"), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task PostDeliveryChange_rolls_back_when_SAP_reports_a_blocking_RETURN_message()
+    {
+        _pool.Setup(p => p.ExecuteOnWorkerAsync(It.IsAny<SapWorkerHandle>(), It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new RfcResponse
+            {
+                Tables = new() { ["RETURN"] = [new() { ["TYPE"] = "E", ["MESSAGE"] = "Item not found" }] },
+            });
+
+        var result = await _controller.PostDeliveryChange(
+            new DeliveryChangeRequest { DeliveryNumber = "80001234" }, dryRun: false, CancellationToken.None);
+
+        ControllerTestHelpers.AssertUnprocessableEntity(result);
+        _pool.Verify(p => p.ExecuteOnWorkerAsync(It.IsAny<SapWorkerHandle>(),
+            It.Is<RfcRequest>(r => r.FunctionName == "BAPI_TRANSACTION_ROLLBACK"), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task PostDeliveryChange_always_rolls_back_a_test_run_even_when_SAP_reports_success()
+    {
+        _pool.Setup(p => p.ExecuteOnWorkerAsync(It.IsAny<SapWorkerHandle>(), It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new RfcResponse());
+
+        var result = await _controller.PostDeliveryChange(
+            new DeliveryChangeRequest { DeliveryNumber = "80001234", TestRun = true }, dryRun: false, CancellationToken.None);
+
+        ControllerTestHelpers.AssertOk(result);
+        _pool.Verify(p => p.ExecuteOnWorkerAsync(It.IsAny<SapWorkerHandle>(),
+            It.Is<RfcRequest>(r => r.FunctionName == "BAPI_TRANSACTION_ROLLBACK"), It.IsAny<CancellationToken>()), Times.Once);
+        _pool.Verify(p => p.ExecuteOnWorkerAsync(It.IsAny<SapWorkerHandle>(),
+            It.Is<RfcRequest>(r => r.FunctionName == "BAPI_TRANSACTION_COMMIT"), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
     [Fact]
     public async Task PicksheetStock_short_circuits_on_an_empty_materials_list_without_calling_the_pool()
     {
