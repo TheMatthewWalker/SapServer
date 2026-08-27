@@ -258,6 +258,15 @@ public class Startup
             typeof(System.Web.Http.ExceptionHandling.IExceptionHandler),
             new WebApiExceptionHandler(provider.GetRequiredService<ILogger<WebApiExceptionHandler>>()));
 
+        // Web API 2 never checks ModelState itself (unlike ASP.NET Core's
+        // [ApiController]) — without this, DataAnnotations violations
+        // ([Required], [StringLength], etc.) on any [FromBody] model are
+        // silently ignored and the invalid value reaches SAP, which was
+        // confirmed live for ScrapReason (see ValidateModelAttribute's doc
+        // comment). Registered globally rather than per-controller since the
+        // gap is systemic, not specific to one action.
+        httpConfig.Filters.Add(new SapServer.Filters.ValidateModelAttribute());
+
         var monitor = provider.GetRequiredService<SapSessionMonitor>();
         if (startSessionMonitor)
             monitor.Start();

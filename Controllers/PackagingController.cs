@@ -357,11 +357,31 @@ public sealed class PackagingController : SapControllerBase
                 continue;
             }
 
+            // MM01 rejects with "Enter an industry sector" if RMMG1-MBRSH isn't
+            // set explicitly on the BDC, even when copying from a reference
+            // material -- confirmed live (endpoint-test-log-2026-08-27.md,
+            // ROUND 2 #6/15). Read the reference material's own industry
+            // sector rather than guessing a fixed code, since this creates a
+            // real, permanent material master.
+            var referenceMaterial = PackagingHelpers.ReferenceMaterial(code);
+            var industrySectorResponse = await execute(PackagingHelpers.BuildIndustrySectorRequest(referenceMaterial));
+            var industrySector = PackagingHelpers.ParseSingleValue(industrySectorResponse);
+
+            if (string.IsNullOrWhiteSpace(industrySector))
+            {
+                results.Add(new CreatePackagingResult
+                {
+                    Code = code, Material = material, MaterialCreated = false,
+                    Message = $"Could not read industry sector from reference material '{referenceMaterial}' — cannot create MM01.",
+                });
+                continue;
+            }
+
             var mm01Response = await execute(
-                PackagingHelpers.BuildCreateMaterialRequest(material, PackagingHelpers.ReferenceMaterial(code)));
+                PackagingHelpers.BuildCreateMaterialRequest(material, referenceMaterial, industrySector));
             var mm01Result = ProductionHelpers.ParseBdcResponse(mm01Response);
 
-            _logger.LogInformation($"New Packaging: create material {material} (ref {PackagingHelpers.ReferenceMaterial(code)}) || {mm01Result.RawMessage}");
+            _logger.LogInformation($"New Packaging: create material {material} (ref {referenceMaterial}, industry sector {industrySector}) || {mm01Result.RawMessage}");
 
             if (mm01Result.Type == "E" || mm01Result.Type == "A")
             {

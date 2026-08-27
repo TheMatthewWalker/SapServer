@@ -134,6 +134,16 @@ public sealed class CostingController : SapControllerBase
         //_logger.LogInformation(
         //"User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "freight-posting");
 
+        // CostingHelper.BuildFreightPostingRequest passes DocDate straight
+        // through to NCo's DATE setter with no parsing — confirmed live that
+        // dd.MM.yyyy crashes with an unhandled RfcTypeConversionException
+        // instead of failing cleanly; only yyyyMMdd actually works. Validate
+        // up front, same pattern as GetCostSheet/GetProfitCenter above.
+        if (!DateTime.TryParseExact(body.DocDate, "yyyyMMdd", System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None, out _))
+            return Content(HttpStatusCode.BadRequest, ApiResponse<FreightPostingRow>.Fail(
+                "INVALID_DATA", $"DocDate must be in yyyyMMdd format (got '{body.DocDate}').", null!));
+
         var worker = await _pool.AcquireWorkerAsync(ct);
         try
         {
@@ -184,6 +194,24 @@ public sealed class CostingController : SapControllerBase
             await semaphore.WaitAsync(ct);
             try
             {
+                // Same DocDate validation as PostFreight — without it, a bad
+                // format crashes NCo's DATE setter with an unhandled
+                // RfcTypeConversionException instead of failing just this
+                // one item cleanly.
+                if (!DateTime.TryParseExact(request.DocDate, "yyyyMMdd", System.Globalization.CultureInfo.InvariantCulture,
+                        System.Globalization.DateTimeStyles.None, out _))
+                {
+                    lock (results)
+                    {
+                        results.Add(new FreightPostingRow
+                        {
+                            Success = false,
+                            Messages = [new SapReturnMessage { Type = "E", Message = $"DocDate must be in yyyyMMdd format (got '{request.DocDate}')." }],
+                        });
+                    }
+                    return;
+                }
+
                 var rfcRequest = CostingHelper.BuildFreightPostingRequest(request, "");
                 var data = await _pool.ExecuteAsync(rfcRequest, ct);
                 var parsed = CostingHelper.ParseFreightPostingRows(data);

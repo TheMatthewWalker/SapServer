@@ -124,6 +124,24 @@ public class PackagingHelpersTests
     }
 
     [Fact]
+    public void BuildPackInstrMaintRequest_multiplies_quantities_back_up_by_1000_to_match_ParseZpackInstr()
+    {
+        // Regression test for a real, confirmed-live data-corruption bug: a
+        // round-trip read (ParseZpackInstr divides by 1000) then write (this
+        // method) with no matching multiplication silently shrank real SAP
+        // packaging quantities 1000x on every save -- see
+        // endpoint-test-log-2026-08-27.md, ROUND 2 #16 for the live incident
+        // (CP104's SmallBoxQty corrupted from 0.300 to 0.0003, since repaired).
+        var request = PackagingHelpers.BuildPackInstrMaintRequest(new PackagingInstrSaveRequest
+        {
+            Material = "30005R", PalletQty = 1000m, SmallBoxQty = 0.300m,
+        });
+        var row = request.InputTables["IT_ZPACK_INSTR"][0];
+        Assert.Equal(1000000m, row["PALL_QTY"]);
+        Assert.Equal(300m, row["SMBX_QTY"]);
+    }
+
+    [Fact]
     public void ParsePackInstrMaintResult_reports_success_when_RC_is_zero()
     {
         var response = new RfcResponse { Parameters = new() { ["RC"] = "0" }, Tables = new() };

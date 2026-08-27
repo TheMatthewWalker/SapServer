@@ -257,14 +257,42 @@ internal static class PackagingHelpers
     }
 
 
+    // MARA-MBRSH (industry sector) for a single material -- used to read the
+    // reference material's own industry sector before MM01 creation, since
+    // BDC/call-transaction needs it supplied explicitly (see
+    // BuildCreateMaterialRequest's header comment).
+    internal static RfcRequest BuildIndustrySectorRequest(string material)
+    {
+        var builder = new RfcRequestBuilder(FnReadTables)
+            .Import("DELIMITER", "|")
+            .Import("NO_DATA",   " ")
+            .TableRow("QUERY_TABLES", new { TABNAME = "MARA" })
+            .TableItemRow("query_FIELDS", new { TABNAME = "MARA", FIELDNAME = "MBRSH" });
+
+        builder.WhereCondition($"MARA~MATNR EQ '{SapPad.Pad(material, 18)}'");
+
+        return builder.ReadTable("data_display").Build();
+    }
+
 // ── Writes: MM01 create material / CS01 create BOM ─────────────────────────
 // Direct port of new_packaging_code.bas's Create_mm01 screen sequence.
 
-    internal static RfcRequest BuildCreateMaterialRequest(string material, string referenceMaterial) =>
+    // industrySector -> RMMG1-MBRSH. Confirmed live: MM01 rejects with "Enter
+    // an industry sector" without this field set, even when a reference
+    // material is supplied on the same screen -- unlike the real SAP GUI
+    // dialog (which auto-populates MBRSH from the reference material once
+    // it's typed in), BDC/call-transaction requires every screen field to be
+    // supplied explicitly. Callers should read the reference material's own
+    // MARA-MBRSH (BuildMaraRequest/ParseMara) and pass that value through
+    // rather than guessing a fixed industry-sector code -- this endpoint
+    // creates real, permanent material masters, so silently baking in a
+    // wrong guess is worse than requiring the caller supply a confirmed one.
+    internal static RfcRequest BuildCreateMaterialRequest(string material, string referenceMaterial, string industrySector) =>
         BdcBuilder.For("MM01")
             .Screen("SAPLMGMM", "0060")
                 .Field("BDC_OKCODE", "=AUSW")
                 .Field("RMMG1-MATNR", material)
+                .Field("RMMG1-MBRSH", industrySector)
                 .Field("RMMG1-MTART", "VERP")
                 .Field("RMMG1_REF-MATNR", referenceMaterial)
             .Screen("SAPLMGMM", "0070")
@@ -358,8 +386,14 @@ internal static class PackagingHelpers
             ["WERKS"]  = Plant,
             ["KUNNR"]  = string.IsNullOrWhiteSpace(req.Customer) ? "" : SapPad.Pad(req.Customer, 10),
             ["PALL_MATNR"]  = req.PackMaterial ?? "",
-            ["PALL_QTY"]    = req.PalletQty,
-            ["SMBX_QTY"]    = req.SmallBoxQty,
+            // ParseZpackInstr divides PALL_QTY/SMBX_QTY by 1000 on the way in
+            // (gram->kg-style conversion) -- multiply back on the way out, or
+            // every read-then-write round-trip (MassUpdate, this endpoint)
+            // silently shrinks the real SAP value 1000x. Confirmed live: this
+            // corrupted CP104's real SmallBoxQty from 0.300 to 0.0003 before
+            // this fix (endpoint-test-log-2026-08-27.md, ROUND 2 #16).
+            ["PALL_QTY"]    = req.PalletQty   * 1000m,
+            ["SMBX_QTY"]    = req.SmallBoxQty * 1000m,
             ["PACK_PROD"]   = req.PackProd    ? "X" : "",
             ["BOX_GEN"]     = req.BoxGen      ? "X" : "",
             ["BATCH_SPREAD"]= req.BatchSpread ? "X" : "",

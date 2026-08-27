@@ -20,7 +20,13 @@ public sealed class ProfitCenterRequest
 
 public sealed class FreightPostingRequest
 {
-    /// <summary>Cost date in SAP format (e.g. "01.01.2026" or "20260101").</summary>
+    /// <summary>Document date, must be "yyyyMMdd" (e.g. "20260101"). CostingHelper.
+    /// BuildFreightPostingRequest passes this straight through to BAPI_ACC_DOCUMENT_POST's
+    /// DOCUMENTHEADER-DOC_DATE with no parsing/reformatting -- confirmed live that
+    /// "dd.MM.yyyy" (e.g. "01.01.2026", which some other date fields in this app DO
+    /// accept -- see CostSheetRequest/ProfitCenterRequest) crashes NCo's DATE setter
+    /// with RfcTypeConversionException instead of failing cleanly
+    /// (endpoint-test-log-2026-08-27.md, ROUND 2 #22/23). Only yyyyMMdd works.</summary>
     public string   DocDate    { get; init; } = string.Empty;
     public string   Vendor     { get; init; } = string.Empty;
     public decimal  Amount     { get; init; }

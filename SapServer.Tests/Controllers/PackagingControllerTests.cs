@@ -160,6 +160,7 @@ public class PackagingControllerTests
     {
         _pool.SetupSequence(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(EmptyDisplay())                          // exists check: does not exist
+            .ReturnsAsync(SingleRow("M"))                          // reference material's industry sector
             .ReturnsAsync(Bdc("E", "Material type invalid"));       // MM01: fails
 
         var result = await _controller.Create(new CreatePackagingRequest { CustomerPart = "CUST123", Codes = ["SD"] }, CancellationToken.None);
@@ -167,7 +168,23 @@ public class PackagingControllerTests
         var ok = ControllerTestHelpers.AssertOk(result);
         var body = Assert.IsType<ApiResponse<List<CreatePackagingResult>>>(ok);
         Assert.False(body.Data![0].MaterialCreated);
-        _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Exactly(2)); // never reaches CS01
+        _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Exactly(3)); // never reaches CS01
+    }
+
+    [Fact]
+    public async Task Create_fails_cleanly_when_the_reference_materials_industry_sector_cannot_be_read()
+    {
+        _pool.SetupSequence(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(EmptyDisplay())   // exists check: does not exist
+            .ReturnsAsync(EmptyDisplay());  // industry sector read: nothing found
+
+        var result = await _controller.Create(new CreatePackagingRequest { CustomerPart = "CUST123", Codes = ["SD"] }, CancellationToken.None);
+
+        var ok = ControllerTestHelpers.AssertOk(result);
+        var body = Assert.IsType<ApiResponse<List<CreatePackagingResult>>>(ok);
+        Assert.False(body.Data![0].MaterialCreated);
+        Assert.Contains("industry sector", body.Data[0].Message);
+        _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Exactly(2)); // never reaches MM01
     }
 
     [Fact]
@@ -175,6 +192,7 @@ public class PackagingControllerTests
     {
         _pool.SetupSequence(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(EmptyDisplay())                     // exists check: does not exist
+            .ReturnsAsync(SingleRow("M"))                     // reference material's industry sector
             .ReturnsAsync(Bdc("S", "Material created"))       // MM01: success
             .ReturnsAsync(Bdc("S", "BOM created"));           // CS01: success
 
@@ -184,7 +202,7 @@ public class PackagingControllerTests
         var body = Assert.IsType<ApiResponse<List<CreatePackagingResult>>>(ok);
         Assert.True(body.Data![0].MaterialCreated);
         Assert.True(body.Data[0].BomCreated);
-        _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Exactly(3));
+        _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Exactly(4));
     }
 
     [Fact]
