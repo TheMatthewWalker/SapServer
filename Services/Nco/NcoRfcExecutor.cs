@@ -118,11 +118,39 @@ internal static class NcoRfcExecutor
             catch { parameters[paramName] = null; }
         }
 
-        // Structure export parameters aren't wired up — SapStaWorker's
-        // positional x(1)/x(2)/... convention doesn't map onto NCo's
-        // named-field IRfcStructure. No caller currently needs one.
-        foreach (var (paramName, _) in request.StructExportParameters)
-            parameters[paramName] = null;
+        // Confirmed for real against a live IIS deploy: this was a genuine
+        // bug, not a "no caller needs it" stub — BdcBuilder.Build() registers
+        // MESSG via ReadStructParam for every BDC-based write in the app
+        // (backflush, drumming, scrap, GR/TO reversal, MM01/CS01 creation,
+        // etc.), and every one of them silently got back a blank MESSG,
+        // making ParseBdcResponse's Type/Message/DocumentNumber all come back
+        // empty regardless of whether the underlying SAP transaction actually
+        // succeeded or failed. IRfcStructure.Metadata gives positional field
+        // access (FieldCount + an indexer exposing .Name per field) exactly
+        // like the old COM/VB x(1)/x(2)/.../x(N) convention ReadStructParam's
+        // field-count-based signature was designed to mirror — this reads
+        // each of the requested fieldCount fields by position (not by name,
+        // since the real Z-structure's field names were never confirmed) and
+        // joins them with a literal " ", unTrimmed, matching the old
+        // behaviour exactly (SAP's fixed-width CHAR fields already contain
+        // their own trailing padding, which is exactly why ParseBdcResponse's
+        // regex uses \s+ between tokens and existing test fixtures already
+        // have multiple spaces between MESSG's type/class/number tokens).
+        foreach (var (paramName, fieldCount) in request.StructExportParameters)
+        {
+            try
+            {
+                var structure = func.GetStructure(paramName);
+                var count     = Math.Min(fieldCount, structure.Metadata.FieldCount);
+                var values    = new List<string>(count);
+
+                for (var i = 0; i < count; i++)
+                    values.Add(structure.GetString(structure.Metadata[i].Name));
+
+                parameters[paramName] = string.Join(" ", values);
+            }
+            catch { parameters[paramName] = null; }
+        }
 
         foreach (var (tableName, fields) in request.OutputTables)
         {

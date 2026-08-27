@@ -134,6 +134,29 @@ public interface IRfcStructure
     void SetValue(string name, object value);
     object GetValue(string name);
     string GetString(string name);
+    RfcStructureMetadata Metadata { get; }
+}
+
+// Written from memory of the public NCo 3.0/3.1 API (see this file's header
+// comment) — cross-checked against real, working open-source NCo wrapper
+// code (goenning/SharpSapRfc's Plain backend) rather than SAP's own docs,
+// since no real SAP NCo install exists in this environment to reflect
+// against directly. FieldCount + a by-position indexer exposing .Name is
+// what lets NcoRfcExecutor read a structure export parameter positionally
+// (mirroring the old COM/VB x(1)/x(2)/.../x(N) convention) without needing
+// to know the real Z-structure's actual field names.
+public class RfcStructureMetadata
+{
+    public int FieldCount => throw new NotSupportedException(
+        "SapNco.DevStub — no real SAP NCo connection is available in this environment.");
+
+    public RfcFieldMetadata this[int index] => throw new NotSupportedException(
+        "SapNco.DevStub — no real SAP NCo connection is available in this environment.");
+}
+
+public class RfcFieldMetadata
+{
+    public string Name { get; init; } = string.Empty;
 }
 
 public class RfcBaseException : Exception
