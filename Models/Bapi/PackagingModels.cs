@@ -84,7 +84,12 @@ public sealed class MassPackagingUpdateRow
 
 public sealed class MassPackagingUpdateRequest
 {
-    [Required, MinLength(1)] public List<MassPackagingUpdateRow> Rows { get; init; } = [];
+    // NOT [MinLength(1)] -- net48's DataAnnotations MinLengthAttribute.IsValid
+    // casts straight to Array, which List<T> isn't, and crashes with
+    // InvalidCastException before the controller action even runs (confirmed
+    // live on the identical pattern in ProductionModels.GoodsMovementRequest).
+    // Emptiness is checked explicitly in PackagingController.MassUpdate instead.
+    [Required] public List<MassPackagingUpdateRow> Rows { get; init; } = [];
 }
 
 public sealed class MassPackagingUpdateResult

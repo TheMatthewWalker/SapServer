@@ -45,7 +45,7 @@ public sealed class PerformanceController : SapControllerBase
     [HttpGet]
 
     [Route("agreements")]
-    public async Task<IHttpActionResult> GetAgreements([FromUri] int? horizonDays, CancellationToken ct)
+    public async Task<IHttpActionResult> GetAgreements([FromUri] int? horizonDays = null, CancellationToken ct = default)
     {
         await CheckPermissionAsync(GetUserId(), PerformanceHelpers.FnStockReqList, ct);
 
@@ -130,7 +130,7 @@ public sealed class PerformanceController : SapControllerBase
     [HttpGet]
 
     [Route("invoicing")]
-    public async Task<IHttpActionResult> GetInvoicing([FromUri] DateTime? from, [FromUri] DateTime? to, CancellationToken ct)
+    public async Task<IHttpActionResult> GetInvoicing([FromUri] DateTime? from = null, [FromUri] DateTime? to = null, CancellationToken ct = default)
     {
         await CheckPermissionAsync(GetUserId(), PerformanceHelpers.FnSaleAnalHist, ct);
 
@@ -151,7 +151,7 @@ public sealed class PerformanceController : SapControllerBase
     [HttpGet]
 
     [Route("otif")]
-    public async Task<IHttpActionResult> GetOtif([FromUri] DateTime? from, [FromUri] DateTime? to, CancellationToken ct)
+    public async Task<IHttpActionResult> GetOtif([FromUri] DateTime? from = null, [FromUri] DateTime? to = null, CancellationToken ct = default)
     {
         await CheckPermissionAsync(GetUserId(), PerformanceHelpers.FnCustIndexAnal, ct);
 

@@ -231,7 +231,12 @@ public sealed class GoodsMovementRequest
     /// <summary>Batch ref, shown against the resulting material document. Maps to GOODSMVT_HEADER-REF_DOC_NO (max 16 chars).</summary>
     [Required, MinLength(1)] public string Header    { get; init; } = string.Empty;
 
-    [Required, MinLength(1)] public List<GoodsMovementComponent> Components { get; init; } = [];
+    // NOT [MinLength(1)] -- net48's DataAnnotations MinLengthAttribute.IsValid
+    // casts straight to Array, which List<T> isn't, and crashes with
+    // InvalidCastException before the controller action even runs (confirmed
+    // live). Emptiness is checked explicitly in
+    // ProductionController.PostGoodsMovementBackflush instead.
+    [Required] public List<GoodsMovementComponent> Components { get; init; } = [];
 
     /// <summary>
     /// Movement type applied to every component line — GOODSMVT_ITEM-MOVE_TYPE.

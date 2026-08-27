@@ -31,6 +31,14 @@ public sealed class CostingController : SapControllerBase
         //_logger.LogInformation(
         //"User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "cost-sheet");
 
+        // CostingHelper.BuildCostSheetRequest parses Date with DateTime.ParseExact
+        // ("dd.MM.yyyy") and throws FormatException on anything else, which used
+        // to leak straight through as a raw 500 — validate up front instead.
+        if (!DateTime.TryParseExact(body.Date, "dd.MM.yyyy", System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None, out _))
+            return Content(HttpStatusCode.BadRequest, ApiResponse<CostSheetRow[]>.Fail(
+                "INVALID_DATA", $"Date must be in dd.MM.yyyy format (got '{body.Date}').", []));
+
         var request = CostingHelper.BuildCostSheetRequest(body);
 
         if (dryRun)
@@ -53,6 +61,13 @@ public sealed class CostingController : SapControllerBase
 
         //_logger.LogInformation(
         //"User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "period-balance");
+
+        // CostingHelper.ParsePeriodBalances does a bare int.Parse(periodFrom/To)
+        // and throws FormatException on anything non-numeric, which used to leak
+        // straight through as a raw 500 — validate up front instead.
+        if (!int.TryParse(body.PeriodFrom, out _) || !int.TryParse(body.PeriodTo, out _))
+            return Content(HttpStatusCode.BadRequest, ApiResponse<List<PeriodBalanceRow>>.Fail(
+                "INVALID_DATA", $"PeriodFrom/PeriodTo must be numeric (got '{body.PeriodFrom}'/'{body.PeriodTo}').", []));
 
         var tasks = body.GlAccounts.Select(async acct =>
         {
@@ -87,6 +102,16 @@ public sealed class CostingController : SapControllerBase
 
         //_logger.LogInformation(
         //"User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "profit-center");
+
+        // CostingHelper.BuildProfitCenterRequest parses DateFrom/DateTo with
+        // DateTime.ParseExact ("dd.MM.yyyy") and throws FormatException on
+        // anything else, which used to leak straight through as a raw 500 —
+        // validate up front instead.
+        bool ValidDate(string s) => DateTime.TryParseExact(s, "dd.MM.yyyy", System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.None, out _);
+        if (!ValidDate(body.DateFrom) || !ValidDate(body.DateTo))
+            return Content(HttpStatusCode.BadRequest, ApiResponse<ProfitCenterRow[]>.Fail(
+                "INVALID_DATA", $"DateFrom/DateTo must be in dd.MM.yyyy format (got '{body.DateFrom}'/'{body.DateTo}').", []));
 
         var request = CostingHelper.BuildProfitCenterRequest(body);
         var data = await _pool.ExecuteAsync(request, ct);

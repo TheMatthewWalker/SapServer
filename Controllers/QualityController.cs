@@ -41,12 +41,25 @@ public sealed class QualityController : SapControllerBase
     [Route("block")]
     public async Task<IHttpActionResult> BlockStock(
         [FromBody] QualityMb1bRequest body,
-        CancellationToken ct)
+        [FromUri] bool dryRun = false,
+        CancellationToken ct = default)
     {
         await CheckPermissionAsync(GetUserId(), QualityHelpers.FnBlockStock, ct);
 
         //_logger.LogInformation(
         //"User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "block");
+
+        // Confirmed live: this endpoint had no dry-run capability at all, and
+        // an unrecognized ?dryRun=true query string is silently ignored by Web
+        // API 2 model binding rather than rejected — a real MB1B block/unblock
+        // posting happened by accident during testing as a direct result. No
+        // TestRun/SIMULATE-style SAP-side dry run exists for this BDC-based
+        // call (same as every other BDC endpoint in this codebase), so this is
+        // a client-side short-circuit before any SAP call at all, same
+        // pattern as PostGoodsIssue/CreateStockAdjustment/PostDeliveryChange's
+        // own dryRun.
+        if (dryRun)
+            return Ok(ApiResponse<RfcRequest>.Ok(QualityHelpers.BuildMb1bBlockedRequest(body, "BLOCK")));
 
         var mb1b   = await _pool.ExecuteAsync(QualityHelpers.BuildMb1bBlockedRequest(body, "BLOCK"),          ct);
 
@@ -77,12 +90,17 @@ public sealed class QualityController : SapControllerBase
     [Route("unblock")]
     public async Task<IHttpActionResult> UnblockStock(
         [FromBody] QualityMb1bRequest body,
-        CancellationToken ct)
+        [FromUri] bool dryRun = false,
+        CancellationToken ct = default)
     {
         await CheckPermissionAsync(GetUserId(), QualityHelpers.FnBlockStock, ct);
 
         //_logger.LogInformation(
         //"User {UserId} executing ENDPOINT '{endpoint}'.", GetUserId(), "unblock");
+
+        // See BlockStock's dryRun comment above — same reasoning.
+        if (dryRun)
+            return Ok(ApiResponse<RfcRequest>.Ok(QualityHelpers.BuildMb1bBlockedRequest(body, "UNBLOCK")));
 
         var mb1b   = await _pool.ExecuteAsync(QualityHelpers.BuildMb1bBlockedRequest(body, "UNBLOCK"),          ct);
 

@@ -51,7 +51,7 @@ public sealed class MrpAnalysisController : SapControllerBase
     [HttpGet]
 
     [Route("goods-receipt-history")]
-    public async Task<IHttpActionResult> GetGoodsReceiptHistory([FromUri] string? sinceDate, CancellationToken ct)
+    public async Task<IHttpActionResult> GetGoodsReceiptHistory([FromUri] string? sinceDate = null, CancellationToken ct = default)
     {
         await CheckPermissionAsync(GetUserId(), MrpAnalysisHelper.FnMrpAnalysis, ct);
 

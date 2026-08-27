@@ -110,7 +110,7 @@ public sealed class PackagingController : SapControllerBase
     [HttpGet]
 
     [Route("{material}/instruction")]
-    public async Task<IHttpActionResult> GetInstruction(string material, [FromUri] string? customer, CancellationToken ct)
+    public async Task<IHttpActionResult> GetInstruction(string material, [FromUri] string? customer = null, CancellationToken ct = default)
     {
         await CheckPermissionAsync(GetUserId(), PackagingHelpers.FnCreate, ct);
 
@@ -189,6 +189,17 @@ public sealed class PackagingController : SapControllerBase
     public async Task<IHttpActionResult> MassUpdate([FromBody] MassPackagingUpdateRequest body, CancellationToken ct)
     {
         await CheckPermissionAsync(GetUserId(), PackagingHelpers.FnCreate, ct);
+
+        // Rows used to carry [MinLength(1)] on the model, but net48's
+        // DataAnnotations MinLengthAttribute.IsValid casts straight to Array —
+        // List<T> isn't one, so this would crash with InvalidCastException
+        // before this action was ever entered (confirmed live via the identical
+        // pattern on ProductionController.PostGoodsMovementBackflush). Checked
+        // explicitly here instead, same pattern as PicksheetMaterials/
+        // PicksheetStock's own Count == 0 guards.
+        if (body.Rows.Count == 0)
+            return Content(HttpStatusCode.BadRequest, ApiResponse<List<MassPackagingUpdateResult>>.Fail(
+                "INVALID_DATA", "Rows must not be empty.", []));
 
         var results = new List<MassPackagingUpdateResult>();
 

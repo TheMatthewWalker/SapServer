@@ -455,6 +455,17 @@ public sealed class ProductionController : SapControllerBase
     {
         await CheckPermissionAsync(GetUserId(), ProductionHelpers.FnCreate, ct);
 
+        // Components used to carry [MinLength(1)] on the model, but net48's
+        // System.ComponentModel.DataAnnotations.MinLengthAttribute.IsValid casts
+        // straight to Array — List<T> isn't one, so every real call (any non-
+        // empty Components list) crashed with InvalidCastException before this
+        // action was ever entered, confirmed live. Checked explicitly here
+        // instead, same pattern as PicksheetMaterials/PicksheetStock's own
+        // Count == 0 guards.
+        if (body.Components.Count == 0)
+            return Content(HttpStatusCode.BadRequest, ApiResponse<GoodsMovementResponse>.Fail(
+                "INVALID_DATA", "Components must not be empty.", new GoodsMovementResponse { Success = false }));
+
         // Resolve a storage location (MARC-LGPRO) for any component that
         // didn't already carry one from the BOM snapshot Node sent —
         // mirrors PostMixingScrap's single-material fallback, just once per
@@ -565,8 +576,8 @@ public sealed class ProductionController : SapControllerBase
     public async Task<IHttpActionResult> GetOrderText(
         string salesDocument,
         string item,
-        [FromUri] string? textId,
-        CancellationToken ct)
+        [FromUri] string? textId = null,
+        CancellationToken ct = default)
     {
         await CheckPermissionAsync(GetUserId(), ProductionHelpers.FnCreate, ct);
 
