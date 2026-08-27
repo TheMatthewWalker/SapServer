@@ -23,6 +23,7 @@ public sealed class WarehouseController : SapControllerBase
     [Route("stock")]
     public async Task<IHttpActionResult> GetStock([FromUri] StockQuery query, CancellationToken ct)
     {
+        query ??= new StockQuery();
         await CheckPermissionAsync(GetUserId(), WarehouseHelpers.FnReadTables, ct);
 
         //_logger.LogInformation(
@@ -65,6 +66,7 @@ public sealed class WarehouseController : SapControllerBase
     [Route("im-stock")]
     public async Task<IHttpActionResult> GetImStock([FromUri] ImStockQuery query, CancellationToken ct)
     {
+        query ??= new ImStockQuery();
         await CheckPermissionAsync(GetUserId(), WarehouseHelpers.FnReadTables, ct);
 
         var response = await _pool.ExecuteAsync(WarehouseHelpers.BuildImStockRequest(query), ct);
@@ -78,6 +80,7 @@ public sealed class WarehouseController : SapControllerBase
     [Route("stock/totals")]
     public async Task<IHttpActionResult> GetStockTotals([FromUri] StockQuery query, CancellationToken ct)
     {
+        query ??= new StockQuery();
         await CheckPermissionAsync(GetUserId(), WarehouseHelpers.FnReadTables, ct);
 
         //_logger.LogInformation(
@@ -95,6 +98,7 @@ public sealed class WarehouseController : SapControllerBase
     [Route("stock/bins")]
     public async Task<IHttpActionResult> GetStockBins([FromUri] StockQuery query, CancellationToken ct)
     {
+        query ??= new StockQuery();
         await CheckPermissionAsync(GetUserId(), WarehouseHelpers.FnReadTables, ct);
 
         //_logger.LogInformation(
@@ -426,6 +430,7 @@ public sealed class WarehouseController : SapControllerBase
         [FromUri] OpenTransferRequirementsQuery query,
         CancellationToken ct)
     {
+        query ??= new OpenTransferRequirementsQuery();
         await CheckPermissionAsync(GetUserId(), WarehouseHelpers.FnReadTables, ct);
 
         var response = await _pool.ExecuteAsync(

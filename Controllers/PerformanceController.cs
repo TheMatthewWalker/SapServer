@@ -175,6 +175,7 @@ public sealed class PerformanceController : SapControllerBase
     [Route("turns-valclass")]
     public async Task<IHttpActionResult> GetTurnsValClass([FromUri] TurnsValClassQuery query, CancellationToken ct)
     {
+        query ??= new TurnsValClassQuery();
         await CheckPermissionAsync(GetUserId(), PerformanceHelpers.FnReadTables, ct);
         await CheckPermissionAsync(GetUserId(), PerformanceHelpers.FnStockReqList, ct);
 

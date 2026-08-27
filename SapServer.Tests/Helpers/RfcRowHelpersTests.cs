@@ -42,19 +42,49 @@ public class RfcRowHelpersTests
     }
 
     [Fact]
-    public void GetDecimal_MISPARSES_a_plain_invariant_decimal_string_by_100x_BUG()
+    public void GetDecimal_parses_a_plain_invariant_decimal_string_correctly()
     {
-        // GetDecimal unconditionally strips every '.' before converting ',' to
-        // '.', assuming SAP always sends European-grouped numbers
-        // ("1.234,56"). A value that's already plain invariant-culture
-        // decimal text with no thousands separator — "1234.56" — has its
-        // decimal point stripped as if it were a grouping separator, so it
-        // parses as 123456, not 1234.56. This is a genuine pre-existing bug
-        // (same "document actual behavior, don't silently fix" approach as
-        // SapPadTests), not asserted-as-intended: any caller feeding this a
-        // plain-format number silently gets a value 100x too large.
+        // GetDecimal used to unconditionally strip every '.' before converting
+        // ',' to '.', assuming SAP always sends European-grouped numbers
+        // ("1.234,56"). Confirmed for real against a live SAP system that this
+        // assumption is wrong: some fields come back as plain invariant text
+        // with no thousands grouping at all, and stripping the '.' as if it
+        // were a grouping separator inflated the value by a power of ten
+        // (three decimal places -> 1000x too large). Fixed via ParseSapDecimal
+        // detecting the real separator per-value instead of assuming a fixed
+        // format — see its doc comment in RfcRowHelpers.cs.
         var row = new Dictionary<string, object?> { ["K"] = "1234.56" };
-        Assert.Equal(123456m, row.GetDecimal("K"));
+        Assert.Equal(1234.56m, row.GetDecimal("K"));
+    }
+
+    [Fact]
+    public void GetDecimal_parses_a_lone_period_as_the_decimal_point()
+    {
+        var row = new Dictionary<string, object?> { ["K"] = "1234.5" };
+        Assert.Equal(1234.5m, row.GetDecimal("K"));
+    }
+
+    [Fact]
+    public void GetDecimal_parses_a_lone_comma_as_the_decimal_point()
+    {
+        var row = new Dictionary<string, object?> { ["K"] = "1234,5" };
+        Assert.Equal(1234.5m, row.GetDecimal("K"));
+    }
+
+    [Fact]
+    public void GetDecimal_parses_period_grouped_comma_decimal_as_the_last_separator_wins()
+    {
+        // "1,234.56" — period is the LAST separator, so it's the real decimal
+        // point and the comma is thousands-grouping to be stripped.
+        var row = new Dictionary<string, object?> { ["K"] = "1,234.56" };
+        Assert.Equal(1234.56m, row.GetDecimal("K"));
+    }
+
+    [Fact]
+    public void GetDecimal_parses_a_plain_integer_with_no_separator_at_all()
+    {
+        var row = new Dictionary<string, object?> { ["K"] = "1234" };
+        Assert.Equal(1234m, row.GetDecimal("K"));
     }
 
     [Fact]

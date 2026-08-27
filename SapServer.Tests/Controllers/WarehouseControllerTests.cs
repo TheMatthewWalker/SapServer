@@ -58,6 +58,37 @@ public class WarehouseControllerTests
     }
 
     [Fact]
+    public async Task GetStock_does_not_throw_when_query_is_null()
+    {
+        // Web API 2's [FromUri] binding for an all-optional complex type
+        // leaves the parameter null (rather than a default-valued instance)
+        // when the request has no query string at all - confirmed for real
+        // against a live IIS deploy as the root cause of a NullReferenceException
+        // on GetOpenTransferRequirements, which has the exact same shape. Every
+        // action taking a [FromUri] query object now null-coalesces it before
+        // use; this asserts the same fix for GetStock directly.
+        _permissions.Setup(p => p.CanExecuteAsync(1, WarehouseHelpers.FnReadTables, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        _pool.Setup(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new RfcResponse { Tables = new() { ["data_display"] = new() } });
+
+        var result = ControllerTestHelpers.AssertOk(await _controller.GetStock(null!, CancellationToken.None));
+        var body = Assert.IsType<ApiResponse<StockRow[]>>(result);
+        Assert.Empty(body.Data!);
+    }
+
+    [Fact]
+    public async Task GetOpenTransferRequirements_does_not_throw_when_query_is_null()
+    {
+        _permissions.Setup(p => p.CanExecuteAsync(1, WarehouseHelpers.FnReadTables, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        _pool.Setup(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new RfcResponse { Tables = new() { ["data_display"] = new() } });
+
+        var result = ControllerTestHelpers.AssertOk(await _controller.GetOpenTransferRequirements(null!, CancellationToken.None));
+        var body = Assert.IsType<ApiResponse<OpenTransferRequirementRow[]>>(result);
+        Assert.Empty(body.Data!);
+    }
+
+    [Fact]
     public async Task GetStock_skips_the_MARC_ProfitCentre_lookup_entirely_when_not_filtering_by_it()
     {
         // The MARC pull is an expensive, unfiltered whole-plant read — only

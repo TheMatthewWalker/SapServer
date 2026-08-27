@@ -43,6 +43,19 @@ public class QualityControllerTests
     }
 
     [Fact]
+    public async Task GetBlockedStock_does_not_throw_when_query_is_null()
+    {
+        // Same [FromUri]-binds-null-for-an-all-optional-complex-type fix as
+        // WarehouseController.GetOpenTransferRequirements - see that test class.
+        _pool.Setup(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new RfcResponse { Tables = new() { ["data_display"] = new() } });
+
+        var result = ControllerTestHelpers.AssertOk(await _controller.GetBlockedStock(null!, CancellationToken.None));
+        var body = Assert.IsType<ApiResponse<StockRow[]>>(result);
+        Assert.Empty(body.Data!);
+    }
+
+    [Fact]
     public async Task BlockStock_at_a_non_WHM_location_skips_bin_checks_and_transfer_orders_entirely()
     {
         _pool.Setup(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()))

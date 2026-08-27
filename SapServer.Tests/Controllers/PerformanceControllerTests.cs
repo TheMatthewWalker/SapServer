@@ -76,6 +76,20 @@ public class PerformanceControllerTests
     }
 
     [Fact]
+    public async Task GetTurnsValClass_does_not_throw_when_query_is_null()
+    {
+        // Same [FromUri]-binds-null-for-an-all-optional-complex-type fix as
+        // WarehouseController.GetOpenTransferRequirements - see that test class.
+        _pool.SetupSequence(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new RfcResponse())
+            .ReturnsAsync(new RfcResponse());
+
+        var result = await _controller.GetTurnsValClass(null!, CancellationToken.None);
+
+        ControllerTestHelpers.AssertOk(result);
+    }
+
+    [Fact]
     public async Task ChangeValuationClass_rejects_a_request_with_no_order_before_touching_the_pool()
     {
         var result = await _controller.ChangeValuationClass(new ChangeValuationClassRequest { Order = "", Changes = [] }, CancellationToken.None);

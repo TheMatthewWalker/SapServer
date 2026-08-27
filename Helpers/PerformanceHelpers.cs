@@ -493,23 +493,18 @@ internal static class PerformanceHelpers
     private static string Str(Dictionary<string, object?> row, string key) =>
         row.GetValueOrDefault(key)?.ToString() ?? "";
 
-    // SAP decimals often arrive in European format ("1.234,56", or a rate like
-    // "1,00000") — strip thousands-separator dots and convert the decimal comma
-    // to a point before parsing, same normalization as RfcRowExtensions.GetDecimal.
-    // Without this, decimal.TryParse (culture-dependent, no NumberStyles override)
-    // silently treated the comma as a thousands separator instead of a decimal
-    // point, inflating values by ~100,000x — e.g. a currency rate of "1,00000"
-    // parsed as 100000 instead of 1.0. That corrupted every non-empty-currency
-    // row's LocalAmount via ApplyCurrencyConversion (rate = Dec(r, "UKURS")).
+    // Same shared parsing as RfcRowExtensions.ParseSapDecimal - see its doc
+    // comment for why this can't just unconditionally strip every '.' as a
+    // thousands separator (that was a genuine bug: it silently inflated any
+    // plain-invariant value, e.g. a currency rate of "1.00000", by a power
+    // of ten matching its decimal-place count, confirmed for real against a
+    // live SAP system).
     private static decimal Dec(Dictionary<string, object?> row, string key, decimal fallback = 0m)
     {
         var s = row.GetValueOrDefault(key)?.ToString();
         if (string.IsNullOrWhiteSpace(s)) return fallback;
 
-        s = s.Replace(".", "").Replace(',', '.');
-        //Console.WriteLine(s);
-
-        return decimal.TryParse(s, NumberStyles.Any, CultureInfo.InvariantCulture, out var v) ? v : fallback;
+        return RfcRowExtensions.ParseSapDecimal(s) ?? fallback;
     }
 
     private static DateTime? ParseSapDate(object? value) => value switch

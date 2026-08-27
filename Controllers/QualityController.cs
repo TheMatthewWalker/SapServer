@@ -23,6 +23,7 @@ public sealed class QualityController : SapControllerBase
     [Route("display")]
     public async Task<IHttpActionResult> GetBlockedStock([FromUri] StockQuery query, CancellationToken ct)
     {
+        query ??= new StockQuery();
         await CheckPermissionAsync(GetUserId(), QualityHelpers.FnReadTables, ct);
 
         //_logger.LogInformation(

@@ -266,14 +266,11 @@ internal static ProfitCenterRow[] ParseProfitCenterRows(RfcResponse response)
 
 
 
+    // Same shared parsing as RfcRowExtensions.ParseSapDecimal - see its doc
+    // comment for why this can't just unconditionally strip every '.' as a
+    // thousands separator.
     private static decimal Dec(string s) =>
-        decimal.TryParse(
-            s.Replace(".", "").Replace(',', '.'),
-            NumberStyles.Any,
-            CultureInfo.InvariantCulture,
-            out var d)
-            ? d
-            : 0m;
+        RfcRowExtensions.ParseSapDecimal(s) ?? 0m;
 
 
 
