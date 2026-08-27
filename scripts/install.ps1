@@ -101,6 +101,45 @@ if (Get-Website -Name $siteName -ErrorAction SilentlyContinue) {
     New-Website -Name $siteName -PhysicalPath $publishDir -ApplicationPool $appPoolName -Port $port | Out-Null
 }
 
+
+# ---- Eager startup (Application Initialization) -----------------------------
+# By default the app pool's Start Mode is OnDemand and the site's application
+# isn't preloaded - the worker process (and within it, Startup.Configuration's
+# DI/SAP-pool wiring) doesn't actually run until the first real HTTP request
+# arrives, not when the pool starts. Confirmed for real: after a deploy.ps1
+# restart, the log stayed completely empty until a request was sent manually.
+# AlwaysRunning + preloadEnabled here, paired with web.config's
+# <applicationInitialization> warming /health, make IIS send its own internal
+# warm-up request right after the pool starts, so the app (and deploy.ps1's
+# own warm-up below) don't have to be the ones paying the first-request cold
+# start.
+Write-Host ""
+Write-Host "Configuring eager startup (Application Initialization)..."
+Set-ItemProperty "IIS:\AppPools\$appPoolName" startMode 'AlwaysRunning'
+Set-WebConfigurationProperty -PSPath 'IIS:\' `
+    -Filter "/system.applicationHost/sites/site[@name='$siteName']/application[@path='/']" `
+    -Name preloadEnabled -Value $true
+
+# Get-WindowsFeature (Server) and Get-WindowsOptionalFeature (client) are
+# mutually exclusive depending on SKU - probe both defensively rather than
+# assuming which one exists on this machine.
+$appInitInstalled = $false
+try {
+    $appInitInstalled = (Get-WindowsFeature -Name Web-AppInit -ErrorAction Stop).InstallState -eq 'Installed'
+} catch {
+    try {
+        $appInitInstalled = (Get-WindowsOptionalFeature -Online -FeatureName IIS-ApplicationInit -ErrorAction Stop).State -eq 'Enabled'
+    } catch { }
+}
+if (-not $appInitInstalled) {
+    Write-Host ""
+    Write-Host "Application Initialization isn't installed - AlwaysRunning/preload are set," -ForegroundColor Yellow
+    Write-Host "but IIS won't actually send the warm-up request without it (deploy.ps1's own" -ForegroundColor Yellow
+    Write-Host "warm-up request still works either way). To install it:" -ForegroundColor Yellow
+    Write-Host "  Windows Server:  Install-WindowsFeature Web-AppInit" -ForegroundColor Yellow
+    Write-Host "  Windows 10/11:   Enable-WindowsOptionalFeature -Online -FeatureName IIS-ApplicationInit" -ForegroundColor Yellow
+}
+
 Write-Host ""
 Write-Host "Site registered on http://localhost:$port - for HTTPS, bind a" -ForegroundColor Yellow
 Write-Host "certificate via IIS Manager or New-WebBinding + netsh http add sslcert" -ForegroundColor Yellow
