@@ -976,3 +976,42 @@ No SQL writes were made. No other real/permanent artifacts were created — the 
 failed before reaching MM01, so no material was created; the mass-update/IIS-handler/DocDate-validation/model-
 validation re-tests were all either read-only, self-verifying no-ops, or clean rejections with zero SAP side
 effects.
+
+---
+
+## CORRECTION to fix #1 (2026-08-27, same day) — the diagnosis was backwards
+
+The fix-verification live-test above for bug #1 (writing `SmallBoxQty=300` through the newly "fixed" PUT endpoint,
+confirming it read back as `300.000`) **was itself evidence the fix was wrong, not right** — caught immediately
+after the user pointed out the true SAP value for CP104 should read as **300**, not 300.000 requiring any
+conversion at all.
+
+**Root cause, re-derived correctly via a raw RFC bypass read** (`POST /api/rfc/execute` against `ZRFC_READ_TABLES`
+directly, sidestepping `ParseZpackInstr`'s own conversion): SAP's native raw dump for a plain quantity like 300 is
+comma-decimal text with **no thousands grouping**, e.g. `"300,000"` — the same convention already documented and
+fixed elsewhere in this codebase for `RfcRowExtensions.ParseSapDecimal` ("a genuine European-decimal SAP value
+like `'300,000'` means 300.000 = 300"). **`ParseSapDecimal` already parses this correctly on its own.**
+`ParseZpackInstr`'s additional `/1000` on top of that was itself the actual, original bug — not a deliberate
+gram->kg-style conversion as an earlier session's comment had assumed. There was never anything wrong with
+`BuildPackInstrMaintRequest`'s write side; my fix #1 further up this log (adding `*1000m` to the write to "match"
+the read side) fixed the symmetry but matched it to the *wrong* value, and my own live re-verification of that fix
+(writing 300 -> raw became 300000, a real, confirmed second corruption of CP104's live data via
+`api/rfc/execute` raw read showing `"300.000,000"`) is what exposed it.
+
+**Corrected**: removed the `/1000` from `ParseZpackInstr` (`PalletQty`/`SmallBoxQty`) and reverted
+`BuildPackInstrMaintRequest`'s `*1000m` back to a straight pass-through — neither side of this round-trip needs
+any scaling. CP104 was immediately restored to raw **300** (confirmed via the same raw bypass read, now showing
+`"300,000"`, i.e. no thousands grouping needed for a value this small) before the code fix even landed, then
+re-verified after the corrected code was deployed: `GET .../CP104/instruction` now shows `smallBoxQty: 300.000`
+directly with no round-trip needed, and a write-then-read round-trip of 300 through the real endpoint reports
+SAP's own `"Nothing is changed!"` message (independent confirmation the true stored value already matched).
+
+**Not yet re-examined**: `ParseMara`'s `WeightKg` and `ParsePackagingBom`'s `Quantity` both have the same `/1000`
+pattern, reading different tables/fields (`MARA-BRGEW`, a genuine weight field; `ZBOM_INFO-MENGE`, a BOM
+component quantity) — these were *not* touched, since nothing here confirms they share this bug rather than
+genuinely needing a gram->kg conversion. Worth the same live raw-bypass verification before trusting either,
+rather than assuming either way.
+
+All 476 unit tests re-verified passing after this correction; `PackagingHelpersTests.cs`'s two regression tests
+for fix #1 were rewritten to assert the corrected (no-scaling) behavior instead of the wrong symmetric-scaling
+behavior they originally asserted.

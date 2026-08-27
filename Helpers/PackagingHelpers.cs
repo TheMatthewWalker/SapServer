@@ -175,8 +175,24 @@ internal static class PackagingHelpers
         return new PackagingInstrRow
         {
             PackMaterial = c[0].Trim(),
-            PalletQty    = (RfcRowExtensions.ParseSapDecimal(c[1]) ?? 0m) / 1000m,
-            SmallBoxQty  = (RfcRowExtensions.ParseSapDecimal(c[2]) ?? 0m) / 1000m,
+            // Confirmed live (2026-08-27): the extra /1000 here was itself the
+            // bug, not a real gram->kg-style conversion. ParseSapDecimal
+            // already correctly parses SAP's native comma-decimal quantity
+            // text ("300,000" means 300, per the same convention documented
+            // for RfcRowExtensions.ParseSapDecimal/GetDecimal) -- dividing
+            // that result by 1000 again silently shrank the true value
+            // 1000x. This is what actually caused CP104's real SmallBoxQty
+            // corruption during endpoint testing: the (pre-existing, long-
+            // standing) read-side bug made 300 display as 0.300, a mass-
+            // update round-trip then wrote 0.3 straight back with no
+            // conversion (the write side never had a bug), and the same
+            // read bug then displayed THAT as 0.0003. The correct fix is
+            // removing this division, not adding a matching multiplication
+            // to the write side (BuildPackInstrMaintRequest) -- see its
+            // comment. endpoint-test-log-2026-08-27.md, ROUND 2 #16 for the
+            // full incident and this correction.
+            PalletQty    = RfcRowExtensions.ParseSapDecimal(c[1]) ?? 0m,
+            SmallBoxQty  = RfcRowExtensions.ParseSapDecimal(c[2]) ?? 0m,
             PackProd     = !string.IsNullOrWhiteSpace(c[3]),
             BoxGen       = !string.IsNullOrWhiteSpace(c[4]),
             BatchSpread  = !string.IsNullOrWhiteSpace(c[5]),
@@ -386,14 +402,15 @@ internal static class PackagingHelpers
             ["WERKS"]  = Plant,
             ["KUNNR"]  = string.IsNullOrWhiteSpace(req.Customer) ? "" : SapPad.Pad(req.Customer, 10),
             ["PALL_MATNR"]  = req.PackMaterial ?? "",
-            // ParseZpackInstr divides PALL_QTY/SMBX_QTY by 1000 on the way in
-            // (gram->kg-style conversion) -- multiply back on the way out, or
-            // every read-then-write round-trip (MassUpdate, this endpoint)
-            // silently shrinks the real SAP value 1000x. Confirmed live: this
-            // corrupted CP104's real SmallBoxQty from 0.300 to 0.0003 before
-            // this fix (endpoint-test-log-2026-08-27.md, ROUND 2 #16).
-            ["PALL_QTY"]    = req.PalletQty   * 1000m,
-            ["SMBX_QTY"]    = req.SmallBoxQty * 1000m,
+            // No scaling here -- PalletQty/SmallBoxQty are plain quantities;
+            // NCo's typed SetValue stores the real numeric value directly,
+            // no gram/kg-style conversion involved. See ParseZpackInstr's
+            // comment for the corrected read-side counterpart -- ParseSapDecimal
+            // alone already parses SAP's comma-decimal quantity text (e.g.
+            // "300,000" meaning 300) correctly; no further division belongs
+            // here or there.
+            ["PALL_QTY"]    = req.PalletQty,
+            ["SMBX_QTY"]    = req.SmallBoxQty,
             ["PACK_PROD"]   = req.PackProd    ? "X" : "",
             ["BOX_GEN"]     = req.BoxGen      ? "X" : "",
             ["BATCH_SPREAD"]= req.BatchSpread ? "X" : "",

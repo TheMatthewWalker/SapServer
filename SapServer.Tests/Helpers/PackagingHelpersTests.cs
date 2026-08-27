@@ -78,8 +78,20 @@ public class PackagingHelpersTests
     }
 
     [Fact]
-    public void ParseZpackInstr_converts_quantities_from_thousandths_and_flags_from_non_blank()
+    public void ParseZpackInstr_parses_native_comma_decimal_quantities_with_no_extra_scaling()
     {
+        // Regression test for a real, confirmed-live bug: this used to divide
+        // PalletQty/SmallBoxQty by 1000 on top of ParseSapDecimal's own
+        // parsing, on a mistaken assumption that ZPACK_INSTR's raw dump
+        // needed an extra gram->kg-style conversion. It didn't -- SAP's own
+        // raw dump for these quantities is plain comma-decimal text (e.g.
+        // "300,000" meaning 300, same convention as RfcRowExtensions.
+        // ParseSapDecimal/GetDecimal elsewhere), and ParseSapDecimal already
+        // parses that correctly on its own. The extra /1000 silently shrank
+        // every real value 1000x -- confirmed live against CP104's actual
+        // SAP data (endpoint-test-log-2026-08-27.md, ROUND 2 #16, and its
+        // same-day correction after this test's own /1000 assumption turned
+        // out to be the bug, not BuildPackInstrMaintRequest's write side).
         var response = new RfcResponse
         {
             Tables = new()
@@ -87,15 +99,15 @@ public class PackagingHelpersTests
                 ["data_display"] = new()
                 {
                     new() { ["WA"] = "header" },
-                    new() { ["WA"] = "IB_363660_MB|1000000|500000|X| |X| |X| | " },
+                    new() { ["WA"] = "IB_363660_MB|1000,000|500,000|X| |X| |X| | " },
                 }
             }
         };
         var row = PackagingHelpers.ParseZpackInstr(response);
 
         Assert.NotNull(row);
-        Assert.Equal(1000m, row!.PalletQty);   // 1,000,000 / 1000
-        Assert.Equal(500m, row.SmallBoxQty);   // 500,000 / 1000
+        Assert.Equal(1000m, row!.PalletQty);
+        Assert.Equal(500m, row.SmallBoxQty);
         Assert.True(row.PackProd);
         Assert.False(row.BoxGen);
         Assert.True(row.BatchSpread);
@@ -124,20 +136,23 @@ public class PackagingHelpersTests
     }
 
     [Fact]
-    public void BuildPackInstrMaintRequest_multiplies_quantities_back_up_by_1000_to_match_ParseZpackInstr()
+    public void BuildPackInstrMaintRequest_passes_quantities_through_with_no_scaling()
     {
-        // Regression test for a real, confirmed-live data-corruption bug: a
-        // round-trip read (ParseZpackInstr divides by 1000) then write (this
-        // method) with no matching multiplication silently shrank real SAP
-        // packaging quantities 1000x on every save -- see
-        // endpoint-test-log-2026-08-27.md, ROUND 2 #16 for the live incident
-        // (CP104's SmallBoxQty corrupted from 0.300 to 0.0003, since repaired).
+        // Regression test: an earlier same-day fix multiplied PalletQty/
+        // SmallBoxQty by 1000 here to "match" ParseZpackInstr's /1000 --
+        // but that /1000 was itself the actual bug (see ParseZpackInstr's
+        // comment), and this write side never needed any scaling at all.
+        // Confirmed live: writing SmallBoxQty=300 through this method must
+        // store the real SAP value 300 (raw dump "300,000", i.e. 300 with
+        // no thousands grouping needed) -- not 300000, which is what the
+        // brief x1000 "fix" actually wrote before being caught and reverted.
+        // endpoint-test-log-2026-08-27.md, ROUND 2 #16 for the full incident.
         var request = PackagingHelpers.BuildPackInstrMaintRequest(new PackagingInstrSaveRequest
         {
-            Material = "30005R", PalletQty = 1000m, SmallBoxQty = 0.300m,
+            Material = "30005R", PalletQty = 1000m, SmallBoxQty = 300m,
         });
         var row = request.InputTables["IT_ZPACK_INSTR"][0];
-        Assert.Equal(1000000m, row["PALL_QTY"]);
+        Assert.Equal(1000m, row["PALL_QTY"]);
         Assert.Equal(300m, row["SMBX_QTY"]);
     }
 
