@@ -23,4 +23,12 @@ public sealed class ConsignmentGrRow
     public string  DocumentDate     { get; init; } = string.Empty; // MKPF-BLDAT, dd.mm.yyyy
     public string  PostingDate      { get; init; } = string.Empty; // MKPF-BUDAT, dd.mm.yyyy
     public string  InvoiceNumber    { get; init; } = string.Empty; // MSEG-XBLNR_MKPF (invoice reference)
+    // MSEG-SMBLN/SMBLP — "material document for reversal": populated ONLY on
+    // the line that cancels another document (SAP transaction MBST), pointing
+    // back at the document+item it reverses. Blank for an ordinary GR/reversal
+    // that nothing has (yet) cancelled. See ConsignmentHelpers.cs's header
+    // comment for why this needs to reach Normanton-Nexus at all — a cancelled
+    // GR's own RemainingQty never got zeroed out downstream without it.
+    public string  ReversalOfMaterialDocument { get; init; } = string.Empty; // MSEG-SMBLN
+    public string  ReversalOfMaterialDocItem  { get; init; } = string.Empty; // MSEG-SMBLP
 }
