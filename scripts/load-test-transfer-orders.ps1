@@ -99,20 +99,45 @@ $results = $rows | ForEach-Object -Parallel {
         $response = Invoke-RestMethod -Uri $url -Method Post -Headers $headers -Body $body -TimeoutSec $timeout -ContentType 'application/json'
         $requestSw.Stop()
         [PSCustomObject]@{
-            Success   = [bool]$response.success
-            ErrorCode = if (-not $response.success) { $response.error.code } else { $null }
-            LatencyMs = $requestSw.Elapsed.TotalMilliseconds
-            Material  = $row.Material
+            Success     = [bool]$response.success
+            ErrorCode   = if (-not $response.success) { $response.error.code } else { $null }
+            ErrorDetail = if (-not $response.success) { $response.error.message } else { $null }
+            LatencyMs   = $requestSw.Elapsed.TotalMilliseconds
+            Material    = $row.Material
         }
     } catch {
         $requestSw.Stop()
         $statusCode = $null
         if ($_.Exception.Response) { $statusCode = [int]$_.Exception.Response.StatusCode }
+
+        # PS7's web cmdlets populate ErrorDetails.Message with the raw response
+        # body for a non-2xx status (Invoke-RestMethod throws instead of
+        # returning it normally) - parse it the same way a success response's
+        # body would be read, so a 422/500's real message ("Destination bin
+        # X/Y does not exist...") is visible instead of just the bare status
+        # code, which alone can't distinguish a real bug from e.g. this
+        # SapServer being pointed at a different SAP system than the CSV's
+        # data belongs to.
+        $errorDetail = $_.Exception.Message
+        if ($_.ErrorDetails -and $_.ErrorDetails.Message) {
+            try {
+                $errBody = $_.ErrorDetails.Message | ConvertFrom-Json
+                if ($errBody.error) {
+                    $errorDetail = if ($errBody.error.message) { $errBody.error.message } else { $errBody.error }
+                } elseif ($errBody.Message) {
+                    $errorDetail = $errBody.Message
+                }
+            } catch {
+                $errorDetail = $_.ErrorDetails.Message
+            }
+        }
+
         [PSCustomObject]@{
-            Success   = $false
-            ErrorCode = if ($statusCode) { "HTTP_$statusCode" } else { "REQUEST_FAILED" }
-            LatencyMs = $requestSw.Elapsed.TotalMilliseconds
-            Material  = $row.Material
+            Success     = $false
+            ErrorCode   = if ($statusCode) { "HTTP_$statusCode" } else { "REQUEST_FAILED" }
+            ErrorDetail = $errorDetail
+            LatencyMs   = $requestSw.Elapsed.TotalMilliseconds
+            Material    = $row.Material
         }
     }
 } -ThrottleLimit $Concurrency
@@ -154,6 +179,14 @@ Write-Host "=== Results: $Label ===" -ForegroundColor Green
 # headless hosts (confirmed while building this script).
 foreach ($prop in $summary.PSObject.Properties) {
     Write-Host ("{0,-15}: {1}" -f $prop.Name, $prop.Value)
+}
+
+if ($failed.Count -gt 0) {
+    Write-Host ""
+    Write-Host "Sample failure messages (one per distinct message, up to 5):" -ForegroundColor Yellow
+    $failed | Group-Object ErrorDetail | Sort-Object Count -Descending | Select-Object -First 5 | ForEach-Object {
+        Write-Host ("  [{0}x] {1}" -f $_.Count, $_.Name)
+    }
 }
 
 $outFile = "load-test-results-$Label.json"
