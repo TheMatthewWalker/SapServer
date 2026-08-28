@@ -76,6 +76,39 @@ Write-Host "SapNco:ServiceAccount / ServiceAccounts directly in"                
 Write-Host "appsettings.Production.json before starting the site - neither is"       -ForegroundColor Yellow
 Write-Host "set via this script."                                                    -ForegroundColor Yellow
 
+# ---- Auth:BypassPermissions sanity check ------------------------------------
+# Unlike Auth:DevBypassAuth (hard-gated to the Development environment in
+# Startup.cs), Auth:BypassPermissions has NO environment gate at all -
+# `if (devBypass || authOpts.BypassPermissions)` in Startup.cs skips the real
+# SQL dbo.SapDepartmentPermissions check in ANY environment, including this
+# one, if it's ever left true. It's meant purely as a bootstrap convenience
+# for before SapDepartmentPermissions is provisioned - confirmed the local
+# dev appsettings.json on the machine this script was developed on has it set
+# true, which is fine for local dev but would be a real permission-bypass gap
+# if that same value ever reached this Production config unnoticed. Parse the
+# real file here (not appsettings.json - Production's own file is what
+# actually governs, since it layers on top and wins) and fail loudly if it's
+# still true, or warn if the file doesn't exist yet to fill in.
+$prodSettingsPath = "$PSScriptRoot\..\appsettings.Production.json"
+if (Test-Path $prodSettingsPath) {
+    $prodSettings = Get-Content $prodSettingsPath -Raw | ConvertFrom-Json
+    if ($prodSettings.Auth -and $prodSettings.Auth.BypassPermissions -eq $true) {
+        Write-Host ""
+        Write-Host "*** Auth:BypassPermissions is TRUE in appsettings.Production.json ***" -ForegroundColor Red
+        Write-Host "This disables the real dbo.SapDepartmentPermissions check for every"    -ForegroundColor Red
+        Write-Host "request in THIS environment - any authenticated user could execute"     -ForegroundColor Red
+        Write-Host "any SAP function. Set it to false (and confirm SapDepartmentPermissions"-ForegroundColor Red
+        Write-Host "is actually provisioned) before starting the site."                     -ForegroundColor Red
+        throw "Auth:BypassPermissions must be false in appsettings.Production.json before install."
+    }
+    Write-Host "Auth:BypassPermissions confirmed false in appsettings.Production.json." -ForegroundColor DarkGray
+} else {
+    Write-Host ""
+    Write-Host "Reminder: once you create appsettings.Production.json, confirm"       -ForegroundColor Yellow
+    Write-Host "Auth:BypassPermissions is false (or absent) before starting the site" -ForegroundColor Yellow
+    Write-Host "- it has no environment gate in code, unlike Auth:DevBypassAuth."     -ForegroundColor Yellow
+}
+
 # ---- Application pool -------------------------------------------------------
 Write-Host ""
 Write-Host "Creating application pool '$appPoolName'..."
