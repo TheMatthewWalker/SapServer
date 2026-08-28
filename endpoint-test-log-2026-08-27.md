@@ -1044,3 +1044,52 @@ the new `ParsePackagingBom` coverage).
 
 **No SAP data was touched by this follow-up** — both fixes are read-only parsing corrections; nothing was written
 to SAP as part of finding or fixing them.
+
+---
+
+## PRE-MERGE AUDIT: ScrapReason nullability fix (2026-08-28)
+
+Before merging this branch, audited whether the new global `ValidateModelAttribute` (see the "Model validation never
+enforced" fix earlier in this log) could newly reject a real request shape Normanton-Nexus actually sends —
+previously silently tolerated since Web API 2 never checked ModelState at all. A background research pass across
+both repos found one real, confirmed issue.
+
+**Found**: `Normanton-Nexus/routes/productionnexus.js` (two call sites, a retry path and the primary approval path)
+only includes `ScrapReason` in the outgoing SAP payload when the real `ReasonCode` value from `prod.ScrapReasons`
+is exactly 4 characters (`if (reasonCode?.length === 4) sapPayload.ScrapReason = reasonCode;`) — implying real
+`ReasonCode` values of other lengths genuinely exist. `BomScrapRequest.ScrapReason` (`Models/Bapi/ProductionModels.cs`)
+was `[StringLength(4, MinimumLength=4)] public string ScrapReason { get; init; } = string.Empty;` — deliberately
+not `[Required]`, but the non-nullable `string.Empty` default meant an omitted JSON property bound to `""`, which
+DOES fail `MinimumLength=4` (unlike `null`, which `StringLengthAttribute` correctly treats as valid). Once
+`ValidateModelAttribute` started enforcing this, every such omission would get a new client-side 400 that never
+existed before.
+
+**Fixed**: `ScrapReason` changed to nullable (`string?`), matching `MixingScrapRequest.ScrapReason`'s existing
+(already-correct) nullable pattern. `ProductionHelpers.BuildBomScrapRequest`'s two `.Field()` calls updated to
+`body.ScrapReason ?? ""` before sending to the BDC, matching the `?? ""` convention already used for `Header`
+elsewhere in the same method.
+
+**Live-verified, both directions**:
+- `POST /api/production/scrap/post` with `ScrapReason` omitted entirely: no longer gets a client-side 400 — reaches
+  real SAP, which itself returns `"E 00 055 Fill out all required entry fields"` for movement type 551 without a
+  reason code. **This reveals SAP itself genuinely requires this field for a 551 scrap movement** — the fix
+  restores the pre-existing (still-failing-at-SAP, but at least reaching SAP with a real business message) behavior
+  rather than the newly-introduced earlier client-side rejection; it does not make a previously-broken case work.
+  Whether Normanton-Nexus's own `reasonCode?.length === 4` guard is itself masking a `prod.ScrapReasons` data-quality
+  gap is a Normanton-Nexus-side question, out of scope here. No document was created (SAP rejected before posting).
+- `POST /api/production/scrap/post` with a valid `ScrapReason="0001"`: real success, doc **4960322664** —
+  reversed immediately via `scrap/reverse`, doc **4960322665**. Confirms nothing else in the scrap-post path
+  broke. Zero net artifacts.
+
+Added `ProductionControllerTests.cs`'s first-ever test coverage for `PostScrap`/`BomScrapRequest` (previously had
+none at all) — two new TestServer-based regression tests: one confirming an omitted `ScrapReason` passes model
+validation and reaches real business logic, one confirming a still-wrong-length `ScrapReason` (e.g. `"12"`) is
+correctly rejected before any SAP call. 479 unit tests passing (up from 477).
+
+Also checked, per the same audit: the Normanton-Nexus quality block/unblock frontend form
+(`private/js/quality.js`) has real HTML5 `required` attributes on Material/Quantity/Header/Storage Location, and
+Username comes from the authenticated session, not user input — ruled safe, no fix needed.
+
+Separately: `Auth:BypassPermissions` (checked as part of the same pre-merge pass) has no environment gate in code
+(`Startup.cs`'s `if (devBypass || authOpts.BypassPermissions)`), unlike `Auth:DevBypassAuth` — `scripts/install.ps1`
+now parses the real `appsettings.Production.json` and throws before creating the site if it's still `true`.

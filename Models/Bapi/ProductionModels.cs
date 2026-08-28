@@ -124,7 +124,16 @@ public sealed class BomScrapRequest
                              public decimal Quantity        { get; init; }
     [Required, MinLength(1)] public string  Header          { get; init; } = string.Empty;
     [Required, StringLength(3, MinimumLength = 3)] public string  MovementType    { get; init; } = string.Empty;
-    [StringLength(4, MinimumLength = 4)]           public string  ScrapReason     { get; init; } = string.Empty;
+    // Nullable, not string.Empty -- StringLengthAttribute treats null as
+    // valid (skipping the length check) but treats "" as a 0-length
+    // violation of MinimumLength=4. This field is genuinely optional (no
+    // [Required]); Normanton-Nexus already omits it whenever the real
+    // ReasonCode from prod.ScrapReasons isn't exactly 4 characters
+    // (routes/productionnexus.js) -- with the non-nullable string.Empty
+    // default, an omitted JSON property bound to "" and got rejected once
+    // ValidateModelAttribute started enforcing this globally, even though
+    // omitting it was always the intended, tolerated case.
+    [StringLength(4, MinimumLength = 4)]           public string? ScrapReason     { get; init; }
                              public string StorageLocation { get; init; } = string.Empty;
                              public string ProfitCentre { get; init; } = string.Empty;
 }
