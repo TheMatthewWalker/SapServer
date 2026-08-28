@@ -73,7 +73,15 @@ internal static class NcoRfcExecutor
 
         foreach (var (structName, fields) in request.StructImportParameters)
         {
-            var s = func.GetStructure(structName);
+            // GetStructure returns null (not a thrown exception) for a
+            // struct name the RFC's real signature doesn't have — confirmed
+            // live: a typo'd/guessed name ("DELIVERY" vs whatever
+            // BAPI_OUTB_DELIVERY_CHANGE's real structure is actually called)
+            // crashed with a bare NullReferenceException on s.SetValue below
+            // instead of a clear error naming the bad struct.
+            var s = func.GetStructure(structName)
+                ?? throw new SapExecutionException(request.FunctionName,
+                    $"'{request.FunctionName}' has no structure import parameter named '{structName}'.", null);
             foreach (var (field, value) in fields)
                 if (value is not null)
                     s.SetValue(field, Unwrap(value));
