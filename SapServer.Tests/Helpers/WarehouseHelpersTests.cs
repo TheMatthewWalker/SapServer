@@ -646,60 +646,82 @@ public class WarehouseHelpersTests
     }
 
     [Fact]
-    public void BuildSetPickedQuantityRequest_pads_VBELN_and_POSNR()
+    public void BuildSetPickedQuantityRequest_sends_VBELN_unpadded_matching_the_real_recording()
     {
+        // Confirmed via a real SHDB recording of delivery 0082291409:
+        // VL02N's own initial screen wants VBELN unpadded, unlike the padded
+        // convention BAPI/other BDC calls in this codebase use.
         var request = WarehouseHelpers.BuildSetPickedQuantityRequest(new SetPickedQuantityRequest
         {
-            DeliveryNumber = "82291409", ItemNumber = "900001",
-            NetWeight = 12m, GrossWeight = 12m, PickedQty = 400m,
+            DeliveryNumber = "0082291409", PickedQuantities = [400m],
         });
 
         var rows = request.InputTablesItems["BDCTABLE"];
-        Assert.Equal("0082291409", rows.Single(r => r.GetValueOrDefault("FNAM") as string == "LIKP-VBELN")["FVAL"]);
-        Assert.Equal("900001", rows.Single(r => r.GetValueOrDefault("FNAM") as string == "RV50A-POSNR")["FVAL"]);
+        var vbelnRows = rows.Where(r => r.GetValueOrDefault("FNAM") as string == "LIKP-VBELN").ToList();
+        Assert.All(vbelnRows, r => Assert.Equal("82291409", r["FVAL"]));
     }
 
     [Fact]
-    public void BuildSetPickedQuantityRequest_formats_weight_and_PIKMG_as_comma_decimal()
+    public void BuildSetPickedQuantityRequest_uses_the_real_okcodes_CHPL_T01_then_SICH_T()
     {
-        // Same comma-decimal convention as ZDEL -- see
-        // BuildZdelRequest_formats_weights_as_comma_decimal_not_a_plain_ToString.
         var request = WarehouseHelpers.BuildSetPickedQuantityRequest(new SetPickedQuantityRequest
         {
-            DeliveryNumber = "0082291409", ItemNumber = "10",
-            NetWeight = 11.5m, GrossWeight = 12m, PickedQty = 400m,
+            DeliveryNumber = "0082291409", PickedQuantities = [400m, 400m, 400m],
         });
 
-        var rows = request.InputTablesItems["BDCTABLE"];
-        Assert.Equal("11,500", rows.Single(r => r.GetValueOrDefault("FNAM") as string == "LIPS-NTGEW")["FVAL"]);
-        Assert.Equal("12,000", rows.Single(r => r.GetValueOrDefault("FNAM") as string == "LIPS-BRGEW")["FVAL"]);
-        Assert.Equal("400,000", rows.Single(r => r.GetValueOrDefault("FNAM") as string == "LIPS-PIKMG")["FVAL"]);
+        var okcodes = request.InputTablesItems["BDCTABLE"]
+            .Where(r => r.GetValueOrDefault("FNAM") as string == "BDC_OKCODE")
+            .Select(r => r["FVAL"] as string).ToList();
+        Assert.Equal(new[] { "/00", "=CHPL_T01", "=SICH_T" }, okcodes);
     }
 
     [Fact]
-    public void BuildSetPickedQuantityRequest_defaults_unit_to_EA_when_not_supplied()
+    public void BuildSetPickedQuantityRequest_sets_one_LIPSD_PIKMG_row_per_quantity_starting_at_index_02()
     {
+        // Real, confirmed-live table-control mechanics: row 1 is the parent
+        // item's own (already-zero) aggregate row; the batch-split rows
+        // start at index 2 -- fragile-by-construction, flagged directly by
+        // the user, since this addresses a screen ROW POSITION, not a
+        // batch/item number.
         var request = WarehouseHelpers.BuildSetPickedQuantityRequest(new SetPickedQuantityRequest
         {
-            DeliveryNumber = "0082291409", ItemNumber = "10", PickedQty = 400m,
+            DeliveryNumber = "0082291409", PickedQuantities = [400m, 400m, 400m],
         });
 
         var rows = request.InputTablesItems["BDCTABLE"];
-        Assert.Equal("EA", rows.Single(r => r.GetValueOrDefault("FNAM") as string == "LIPS-MEINS")["FVAL"]);
+        Assert.Equal("400,000", rows.Single(r => r.GetValueOrDefault("FNAM") as string == "LIPSD-PIKMG(02)")["FVAL"]);
+        Assert.Equal("400,000", rows.Single(r => r.GetValueOrDefault("FNAM") as string == "LIPSD-PIKMG(03)")["FVAL"]);
+        Assert.Equal("400,000", rows.Single(r => r.GetValueOrDefault("FNAM") as string == "LIPSD-PIKMG(04)")["FVAL"]);
     }
 
     [Fact]
-    public void BuildSetPickedQuantityRequest_marks_the_item_and_navigates_via_ILOA_T_then_CHSP_T()
+    public void BuildSetPickedQuantityRequest_omits_LIKP_BLDAT_when_not_supplied_and_never_sends_KODAT_or_KOUHR()
     {
+        // KODAT/KOUHR are never sent at all -- confirmed live that both are
+        // rejected as "Field ... does not exist in dynpro SAPMV50A 1000"
+        // despite SHDB recording them alongside BLDAT.
         var request = WarehouseHelpers.BuildSetPickedQuantityRequest(new SetPickedQuantityRequest
         {
-            DeliveryNumber = "0082291409", ItemNumber = "10", PickedQty = 400m,
+            DeliveryNumber = "0082291409", PickedQuantities = [400m],
         });
 
         var rows = request.InputTablesItems["BDCTABLE"];
-        Assert.Equal("X", rows.Single(r => r.GetValueOrDefault("FNAM") as string == "RV50A-LIPS_SELKZ(1)")["FVAL"]);
-        var okcodes = rows.Where(r => r.GetValueOrDefault("FNAM") as string == "BDC_OKCODE")
-                          .Select(r => r["FVAL"] as string).ToList();
-        Assert.Equal(new[] { "/00", "POPO_T", "=WEIT", "ILOA_T", "CHSP_T" }, okcodes);
+        Assert.DoesNotContain(rows, r => r.GetValueOrDefault("FNAM") as string == "LIKP-BLDAT");
+        Assert.DoesNotContain(rows, r => r.GetValueOrDefault("FNAM") as string == "LIKP-KODAT");
+        Assert.DoesNotContain(rows, r => r.GetValueOrDefault("FNAM") as string == "LIKP-KOUHR");
+    }
+
+    [Fact]
+    public void BuildSetPickedQuantityRequest_sends_LIKP_BLDAT_once_per_screen_when_supplied()
+    {
+        var request = WarehouseHelpers.BuildSetPickedQuantityRequest(new SetPickedQuantityRequest
+        {
+            DeliveryNumber = "0082291409", PickedQuantities = [400m], BillingDate = "29.04.2022",
+        });
+
+        var rows = request.InputTablesItems["BDCTABLE"];
+        var bldatRows = rows.Where(r => r.GetValueOrDefault("FNAM") as string == "LIKP-BLDAT").ToList();
+        Assert.Equal(2, bldatRows.Count); // sent once per screen-1000 hit, matching the real recording
+        Assert.All(bldatRows, r => Assert.Equal("29.04.2022", r["FVAL"]));
     }
 }

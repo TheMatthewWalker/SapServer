@@ -744,7 +744,7 @@ public class WarehouseControllerTests
     public async Task SetPickedQuantity_dryRun_returns_the_built_request_without_calling_SAP()
     {
         var result = await _controller.SetPickedQuantity(
-            new SetPickedQuantityRequest { DeliveryNumber = "0082291409", ItemNumber = "900001", PickedQty = 400m },
+            new SetPickedQuantityRequest { DeliveryNumber = "0082291409", PickedQuantities = [400m] },
             dryRun: true, CancellationToken.None);
 
         var ok = ControllerTestHelpers.AssertOk(result);
@@ -760,7 +760,7 @@ public class WarehouseControllerTests
             .ReturnsAsync(new RfcResponse());
 
         var result = await _controller.SetPickedQuantity(
-            new SetPickedQuantityRequest { DeliveryNumber = "0082291409", ItemNumber = "900001", PickedQty = 400m },
+            new SetPickedQuantityRequest { DeliveryNumber = "0082291409", PickedQuantities = [400m] },
             dryRun: false, CancellationToken.None);
 
         ControllerTestHelpers.AssertOk(result);
