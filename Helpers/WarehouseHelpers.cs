@@ -959,6 +959,18 @@ internal static class WarehouseHelpers
     // fills in the weight/pallet-count fields (BDC_CURSOR on LIKP-ANZPK,
     // =SAVE). GEWEI is always "KG" — the portal only ever records weights in
     // kilograms, so it's hardcoded rather than taking a unit from the caller.
+    // BTGEW/NTGEW screen input rejected a plain decimal.ToString() with
+    // "Input must be in the format ___.___.___.__~,___" -- confirmed live
+    // (endpoint-test-log-2026-08-28-delivery-0082291409.md) this SAP
+    // system's screen mask wants comma-decimal (matching every other real
+    // quantity value seen from this system this session, e.g. "300,000",
+    // "1.297,000"), not BdcBuilder.Field(string,decimal)'s own
+    // InvariantCulture period-decimal convention -- and this call was
+    // bypassing that overload entirely anyway by calling .ToString()
+    // directly (culture-dependent, not even guaranteed invariant).
+    private static string FormatZdelWeight(decimal value) =>
+        value.ToString("0.000", System.Globalization.CultureInfo.InvariantCulture).Replace('.', ',');
+
     internal static RfcRequest BuildZdelRequest(SetDeliveryWeightRequest body) =>
         BdcBuilder.For("ZDEL")
             .Screen("SAPMZDEL", "0100")
@@ -968,9 +980,19 @@ internal static class WarehouseHelpers
             .Screen("SAPMZDEL", "0100")
                 .Field("BDC_CURSOR", "LIKP-ANZPK")
                 .Field("BDC_OKCODE", "=SAVE")
-                .Field("LIKP-VBELN", SapPad.Pad(body.DeliveryNumber, 10))
-                .Field("LIKP-BTGEW", body.GrossWeight.ToString())
-                .Field("LIKP-NTGEW", body.NetWeight.ToString())
+                // Confirmed via a real SHDB recording (2026-08-28): unlike
+                // screen 1, VBELN here is NOT zero-padded -- SAP's own UI
+                // re-displays the already-selected document in its "natural"
+                // (leading-zeros-stripped) numeric form on this screen, and
+                // the custom ZDEL program's own internal lookup apparently
+                // depends on matching that exact unpadded representation.
+                // Sending the padded 10-digit form here (as this code
+                // previously did on both screens identically) caused a real,
+                // confirmed-live CH 004 "table does not contain an entry"
+                // rejection.
+                .Field("LIKP-VBELN", body.DeliveryNumber.TrimStart('0'))
+                .Field("LIKP-BTGEW", FormatZdelWeight(body.GrossWeight))
+                .Field("LIKP-NTGEW", FormatZdelWeight(body.NetWeight))
                 .Field("LIKP-GEWEI", "KG")
                 .Field("LIKP-ANZPK", body.PalletCount.ToString())
             .Build();

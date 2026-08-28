@@ -751,12 +751,14 @@ public sealed class WarehouseController : SapControllerBase
         return Ok(ApiResponse<MaintainZdelflagResponse>.Ok(ZdelflagHelpers.ParseMaintainResponse(response)));
     }
 
-    // ── Goods Issue posting (BAPI_DELIVERYPROCESSING_EXEC) ────────────────────
+    // ── Goods Issue posting (BAPI_OUTB_DELIVERY_CONFIRM_DEC) ──────────────────
     //
     // Fired automatically by Normanton-Nexus right after ZDELFLAG/ZDELPACK
     // maintenance succeeds for a delivery — no manual approval step. See
-    // GoodsIssueModels.cs for the full caveat on REQUEST's minimal field set
-    // being a starting point pending live confirmation.
+    // GoodsIssueModels.cs for why this replaced an earlier
+    // BAPI_DELIVERYPROCESSING_EXEC attempt that never worked live (real
+    // testing against delivery 0082291409 confirmed this business's actual
+    // production process never uses that BAPI at all).
     //
     // Unlike CreateStockAdjustment below, this has NO CheckPermissionAsync
     // gate — same rationale as the zdelflag/* endpoints above: called from
@@ -764,12 +766,8 @@ public sealed class WarehouseController : SapControllerBase
     // not directly by a logged-in user, so there's no "which user approved
     // this" to authorize.
     //
-    // A real BAPI (unlike ZDELFLAG's self-committing custom Z-BAPI), so it
-    // needs the same pinned-session commit/rollback pattern as
-    // CreateStockAdjustment — that pattern is confirmed working in
-    // production for BAPI_GOODSMVT_CREATE; whether it's actually required
-    // here too (vs. GI committing through some other mechanism) is one of
-    // the things to confirm during live testing.
+    // A real BAPI, so it needs the same pinned-session commit/rollback
+    // pattern as CreateStockAdjustment/BAPI_OUTB_DELIVERY_CHANGE.
 
     [HttpPost]
     [Route("goods-issue")]
@@ -789,7 +787,7 @@ public sealed class WarehouseController : SapControllerBase
             var data     = await _pool.ExecuteOnWorkerAsync(worker, request, ct);
             var response = GoodsIssueHelper.ParseGoodsIssueResponse(data, body.DeliveryNumber);
 
-            if (body.TestRun || body.CheckMode)
+            if (body.TestRun)
             {
                 await _pool.ExecuteOnWorkerAsync(worker, CommitHelper.BuildBapiRollback(), ct);
                 return Ok(ApiResponse<GoodsIssueResponse>.Ok(response));

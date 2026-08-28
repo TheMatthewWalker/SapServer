@@ -116,6 +116,25 @@ public sealed class DeliveryChangeItem
     public string? BaseUom { get; init; }
 
     /// <summary>
+    /// Real batch number for a batch-split sub-item — maps to ITEM_DATA-BATCH.
+    /// Only set this on a NEW sub-item row (a fresh ItemNumber, e.g. "11"/
+    /// "12"/"13" under parent item "10"), together with HierItem — a plain
+    /// quantity/weight change on an EXISTING item should leave this null.
+    /// Replaces the legacy ZDELHAND_9 ABAP program's VL02N-BDC batch-split
+    /// screen flow (see this class's header comment) — confirmed via public
+    /// SAP documentation that this BAPI supports batch splits directly via
+    /// ITEM_DATA-BATCH/HIERARITEM/USEHIERITM, not yet live-verified.
+    /// </summary>
+    public string? Batch { get; init; }
+
+    /// <summary>
+    /// Parent (main) delivery item number for a batch-split sub-item — maps
+    /// to ITEM_DATA-HIERARITEM (padded to 6, same convention as ItemNumber).
+    /// Set together with Batch; leave null for a plain item change.
+    /// </summary>
+    public string? HierItem { get; init; }
+
+    /// <summary>
     /// Sales unit for Quantity — maps to ITEM_DATA-SALES_UNIT. Confirmed live
     /// (2026-08-28) this is required: omitting SALES_UNIT/DLV_QTY_IMUNIT
     /// entirely made every real call fail with VLBAPI 004/VL 268 ("quantity
@@ -155,6 +174,42 @@ public sealed class DeliveryChangeItem
 
     /// <summary>Sales-to-base-unit conversion denominator — maps to ITEM_DATA-FACT_UNIT_DENOM (LIPS-UMVKN). Same default/caveat as FactUnitNom.</summary>
     public decimal? FactUnitDenom { get; init; }
+
+    /// <summary>
+    /// New gross weight (LIPS-BRGEW) for this item — maps to ITEM_DATA-GROSS_WT,
+    /// with ITEM_CONTROL-GROSS_WT_FLG set to "X" to apply it. Opt-in: only
+    /// sent (and only sets the flag) when non-null, so a caller that only
+    /// wants to correct quantity doesn't unintentionally touch weight. Added
+    /// as the replacement for the legacy ZDEL BDC transaction (unreliable —
+    /// see WarehouseHelpers.BuildZdelRequest's history) — this BAPI already
+    /// exposes GROSS_WT/NET_WEIGHT/VOLUME directly, confirmed via the real
+    /// BAPI Inspector signature, so there's no need for a separate screen-
+    /// based call.
+    /// </summary>
+    public decimal? GrossWeight { get; init; }
+
+    /// <summary>New net weight (LIPS-NTGEW) — maps to ITEM_DATA-NET_WEIGHT + ITEM_CONTROL-NET_WT_FLG. Same opt-in convention as GrossWeight.</summary>
+    public decimal? NetWeight { get; init; }
+
+    /// <summary>
+    /// Unit for GrossWeight/NetWeight (e.g. "KG") — maps to ITEM_DATA-
+    /// UNIT_OF_WT. Required when either weight is set; not defaulted, since
+    /// (unlike BaseUom for quantity) there's no other field on this request
+    /// a sensible weight-unit default could come from.
+    /// </summary>
+    public string? WeightUnit { get; init; }
+
+    /// <summary>ISO code for WeightUnit — maps to ITEM_DATA-UNIT_OF_WT_ISO. Defaults to WeightUnit's plain text when not given — same per-unit-T006-property caveat as SalesUnitIso (confirmed correct for "KG" not yet verified the way "EA" was).</summary>
+    public string? WeightUnitIso { get; init; }
+
+    /// <summary>New volume (LIPS-VOLUM) — maps to ITEM_DATA-VOLUME + ITEM_CONTROL-VOLUME_FLG. Same opt-in convention as GrossWeight.</summary>
+    public decimal? Volume { get; init; }
+
+    /// <summary>Unit for Volume (e.g. "M3", "L") — maps to ITEM_DATA-VOLUMEUNIT. Required when Volume is set.</summary>
+    public string? VolumeUnit { get; init; }
+
+    /// <summary>ISO code for VolumeUnit — maps to ITEM_DATA-VOLUMEUNIT_ISO. Same default/caveat as WeightUnitIso.</summary>
+    public string? VolumeUnitIso { get; init; }
 }
 
 public sealed class DeliveryChangeResponse

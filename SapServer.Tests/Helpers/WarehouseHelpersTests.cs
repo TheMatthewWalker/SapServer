@@ -599,4 +599,49 @@ public class WarehouseHelpersTests
         Assert.Single(candidates);
         Assert.DoesNotContain(WarehouseHelpers.ReasonAlreadyTransferred, candidates[0].Reasons);
     }
+
+    [Fact]
+    public void BuildZdelRequest_formats_weights_as_comma_decimal_not_a_plain_ToString()
+    {
+        // Regression test for a real, confirmed-live SAP rejection: this
+        // used to call body.GrossWeight.ToString() directly (culture-
+        // dependent, not even routed through BdcBuilder's own
+        // InvariantCulture decimal formatting) and SAP's real screen mask
+        // rejected it outright ("Input must be in the format
+        // ___.___.___.__~,___") -- this system's screens want comma-decimal,
+        // matching every other real quantity value seen from it this
+        // session (e.g. "300,000", "1.297,000").
+        var request = WarehouseHelpers.BuildZdelRequest(new SetDeliveryWeightRequest
+        {
+            DeliveryNumber = "0082291409", GrossWeight = 12m, NetWeight = 11.5m, PalletCount = 3,
+        });
+
+        var rows = request.InputTablesItems["BDCTABLE"];
+        Assert.Equal("12,000", rows.Single(r => r.GetValueOrDefault("FNAM") as string == "LIKP-BTGEW")["FVAL"]);
+        Assert.Equal("11,500", rows.Single(r => r.GetValueOrDefault("FNAM") as string == "LIKP-NTGEW")["FVAL"]);
+        Assert.Equal("3", rows.Single(r => r.GetValueOrDefault("FNAM") as string == "LIKP-ANZPK")["FVAL"]);
+    }
+
+    [Fact]
+    public void BuildZdelRequest_pads_VBELN_on_screen_1_but_leaves_it_unpadded_on_screen_2()
+    {
+        // Regression test for a real, confirmed-live SAP rejection (CH 004,
+        // "table does not contain an entry"): a real SHDB recording showed
+        // screen 1's LIKP-VBELN as zero-padded ("0082291409") but screen 2's
+        // as NOT padded ("82291409") -- SAP's own UI re-displays the
+        // already-selected document in its natural form on the second
+        // screen, and sending the padded form there (as this code
+        // previously did on both screens identically) broke the custom
+        // ZDEL program's own internal lookup.
+        var request = WarehouseHelpers.BuildZdelRequest(new SetDeliveryWeightRequest
+        {
+            DeliveryNumber = "0082291409", GrossWeight = 12m, NetWeight = 12m, PalletCount = 3,
+        });
+
+        var rows = request.InputTablesItems["BDCTABLE"];
+        var vbelnRows = rows.Where(r => r.GetValueOrDefault("FNAM") as string == "LIKP-VBELN").ToList();
+        Assert.Equal(2, vbelnRows.Count);
+        Assert.Equal("0082291409", vbelnRows[0]["FVAL"]); // screen 1 (=SELE) -- padded
+        Assert.Equal("82291409", vbelnRows[1]["FVAL"]);   // screen 2 (=SAVE) -- NOT padded
+    }
 }

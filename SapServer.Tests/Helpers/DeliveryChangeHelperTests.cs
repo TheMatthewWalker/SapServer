@@ -198,4 +198,121 @@ public class DeliveryChangeHelperTests
         Assert.True(result.Success);
         Assert.Empty(result.Messages);
     }
+
+    [Fact]
+    public void BuildDeliveryChangeRequest_leaves_weight_and_volume_untouched_when_not_supplied()
+    {
+        // Opt-in: a caller that only wants to correct quantity (the
+        // original, still-most-common use case) shouldn't accidentally
+        // touch weight/volume at all.
+        var request = DeliveryChangeHelper.BuildDeliveryChangeRequest(new DeliveryChangeRequest
+        {
+            DeliveryNumber = "80001234",
+            Items = [new DeliveryChangeItem { ItemNumber = "10", Quantity = 5.5m, BaseUom = "EA" }],
+        });
+
+        var controlRow = request.InputTables["ITEM_CONTROL"][0];
+        Assert.Equal("", controlRow["GROSS_WT_FLG"]);
+        Assert.Equal("", controlRow["NET_WT_FLG"]);
+        Assert.Equal("", controlRow["VOLUME_FLG"]);
+
+        var dataRow = request.InputTables["ITEM_DATA"][0];
+        Assert.False(dataRow.ContainsKey("GROSS_WT"));
+        Assert.False(dataRow.ContainsKey("NET_WEIGHT"));
+        Assert.False(dataRow.ContainsKey("VOLUME"));
+    }
+
+    [Fact]
+    public void BuildDeliveryChangeRequest_sets_weight_and_volume_with_their_control_flags_when_supplied()
+    {
+        // Replaces the legacy ZDEL BDC transaction (see this class's
+        // header comment for why it was dropped) — this BAPI already
+        // exposes GROSS_WT/NET_WEIGHT/VOLUME directly, confirmed via the
+        // real BAPI Inspector signature.
+        var request = DeliveryChangeHelper.BuildDeliveryChangeRequest(new DeliveryChangeRequest
+        {
+            DeliveryNumber = "80001234",
+            Items =
+            [
+                new DeliveryChangeItem
+                {
+                    ItemNumber = "10", Quantity = 1200m, BaseUom = "EA",
+                    GrossWeight = 12.5m, NetWeight = 12.0m, WeightUnit = "KG",
+                    Volume = 0.5m, VolumeUnit = "M3",
+                },
+            ],
+        });
+
+        var controlRow = request.InputTables["ITEM_CONTROL"][0];
+        Assert.Equal("X", controlRow["GROSS_WT_FLG"]);
+        Assert.Equal("X", controlRow["NET_WT_FLG"]);
+        Assert.Equal("X", controlRow["VOLUME_FLG"]);
+
+        var dataRow = request.InputTables["ITEM_DATA"][0];
+        Assert.Equal(12.5m, dataRow["GROSS_WT"]);
+        Assert.Equal(12.0m, dataRow["NET_WEIGHT"]);
+        Assert.Equal("KG", dataRow["UNIT_OF_WT"]);
+        Assert.Equal("KG", dataRow["UNIT_OF_WT_ISO"]); // defaults to plain unit text
+        Assert.Equal(0.5m, dataRow["VOLUME"]);
+        Assert.Equal("M3", dataRow["VOLUMEUNIT"]);
+        Assert.Equal("M3", dataRow["VOLUMEUNIT_ISO"]);
+    }
+
+    [Fact]
+    public void BuildDeliveryChangeRequest_only_flags_the_weight_fields_actually_supplied()
+    {
+        // GrossWeight without NetWeight (or vice versa) should only flag
+        // and send the one that was actually given.
+        var request = DeliveryChangeHelper.BuildDeliveryChangeRequest(new DeliveryChangeRequest
+        {
+            DeliveryNumber = "80001234",
+            Items = [new DeliveryChangeItem { ItemNumber = "10", Quantity = 1m, GrossWeight = 5m, WeightUnit = "KG" }],
+        });
+
+        var controlRow = request.InputTables["ITEM_CONTROL"][0];
+        Assert.Equal("X", controlRow["GROSS_WT_FLG"]);
+        Assert.Equal("", controlRow["NET_WT_FLG"]);
+
+        var dataRow = request.InputTables["ITEM_DATA"][0];
+        Assert.Equal(5m, dataRow["GROSS_WT"]);
+        Assert.False(dataRow.ContainsKey("NET_WEIGHT"));
+    }
+
+    [Fact]
+    public void BuildDeliveryChangeRequest_sets_batch_split_fields_when_Batch_and_HierItem_are_both_given()
+    {
+        // Replaces the legacy ZDELHAND_9 ABAP program's VL02N-BDC batch-
+        // split screen flow (see this class's header comment). USEHIERITM
+        // is the literal string "1", not the usual "X" flag convention.
+        var request = DeliveryChangeHelper.BuildDeliveryChangeRequest(new DeliveryChangeRequest
+        {
+            DeliveryNumber = "0082291409",
+            Items = [new DeliveryChangeItem
+            {
+                ItemNumber = "11", Material = "CP1442", Quantity = 400m, BaseUom = "EA",
+                Batch = "0000000001", HierItem = "10",
+            }],
+        });
+
+        var dataRow = request.InputTables["ITEM_DATA"][0];
+        Assert.Equal("000011", dataRow["DELIV_ITEM"]);
+        Assert.Equal("0000000001", dataRow["BATCH"]);
+        Assert.Equal("000010", dataRow["HIERARITEM"]);
+        Assert.Equal("1", dataRow["USEHIERITM"]);
+    }
+
+    [Fact]
+    public void BuildDeliveryChangeRequest_leaves_batch_split_fields_unset_when_only_one_of_Batch_HierItem_given()
+    {
+        var request = DeliveryChangeHelper.BuildDeliveryChangeRequest(new DeliveryChangeRequest
+        {
+            DeliveryNumber = "80001234",
+            Items = [new DeliveryChangeItem { ItemNumber = "10", Quantity = 1m, Batch = "0000000001" }], // no HierItem
+        });
+
+        var dataRow = request.InputTables["ITEM_DATA"][0];
+        Assert.False(dataRow.ContainsKey("BATCH"));
+        Assert.False(dataRow.ContainsKey("HIERARITEM"));
+        Assert.False(dataRow.ContainsKey("USEHIERITM"));
+    }
 }

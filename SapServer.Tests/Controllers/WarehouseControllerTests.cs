@@ -308,7 +308,7 @@ public class WarehouseControllerTests
 
         var ok = ControllerTestHelpers.AssertOk(result);
         var body = Assert.IsType<ApiResponse<RfcRequest>>(ok);
-        Assert.Equal(GoodsIssueHelper.FnDeliveryProcessingExec, body.Data!.FunctionName);
+        Assert.Equal(GoodsIssueHelper.FnOutbDeliveryConfirmDec, body.Data!.FunctionName);
         _pool.Verify(p => p.AcquireWorkerAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
