@@ -276,3 +276,34 @@ public sealed class SetDeliveryWeightResponse
 {
     public string Message { get; init; } = string.Empty;
 }
+
+// ── SetPickedQuantity (VL02N BDC) ────────────────────────────────────────────
+//
+// Fixes LIPS-PIKMG (picked quantity) for one delivery item so
+// BAPI_OUTB_DELIVERY_CONFIRM_DEC's picking-confirmation check passes. No BAPI
+// exposes PIKMG directly (WS_DELIVERY_UPDATE/_2, the internal function
+// modules VL02N's own screen flow uses, are confirmed NOT RFC-accessible via
+// a real RFC_GET_FUNCTION_INTERFACE check) — this is a deliberately
+// narrow, last-resort BDC, not a general VL02N replication. See
+// WarehouseHelpers.BuildSetPickedQuantityRequest for the screen sequence and
+// its confirmed-unverified caveats.
+//
+// Called per real delivery ITEM — for a batch-split item that's the real
+// sub-item SAP auto-assigned (e.g. "900001"), not the item originally
+// requested when creating the split, same convention as
+// GoodsIssueItem.ItemNumber.
+
+public sealed class SetPickedQuantityRequest
+{
+    [Required, MinLength(1)] public string DeliveryNumber { get; init; } = string.Empty; // LIKP-VBELN
+    [Required, MinLength(1)] public string ItemNumber     { get; init; } = string.Empty; // RV50A-POSNR
+    [Range(0, double.MaxValue)] public decimal NetWeight   { get; init; }                // LIPS-NTGEW
+    [Range(0, double.MaxValue)] public decimal GrossWeight { get; init; }                // LIPS-BRGEW
+    [Range(0, double.MaxValue)] public decimal PickedQty   { get; init; }                // LIPS-PIKMG
+    public string? Unit { get; init; }                                                   // LIPS-MEINS/VRKME, defaults "EA"
+}
+
+public sealed class SetPickedQuantityResponse
+{
+    public string Message { get; init; } = string.Empty;
+}

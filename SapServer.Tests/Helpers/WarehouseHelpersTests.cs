@@ -644,4 +644,62 @@ public class WarehouseHelpersTests
         Assert.Equal("0082291409", vbelnRows[0]["FVAL"]); // screen 1 (=SELE) -- padded
         Assert.Equal("82291409", vbelnRows[1]["FVAL"]);   // screen 2 (=SAVE) -- NOT padded
     }
+
+    [Fact]
+    public void BuildSetPickedQuantityRequest_pads_VBELN_and_POSNR()
+    {
+        var request = WarehouseHelpers.BuildSetPickedQuantityRequest(new SetPickedQuantityRequest
+        {
+            DeliveryNumber = "82291409", ItemNumber = "900001",
+            NetWeight = 12m, GrossWeight = 12m, PickedQty = 400m,
+        });
+
+        var rows = request.InputTablesItems["BDCTABLE"];
+        Assert.Equal("0082291409", rows.Single(r => r.GetValueOrDefault("FNAM") as string == "LIKP-VBELN")["FVAL"]);
+        Assert.Equal("900001", rows.Single(r => r.GetValueOrDefault("FNAM") as string == "RV50A-POSNR")["FVAL"]);
+    }
+
+    [Fact]
+    public void BuildSetPickedQuantityRequest_formats_weight_and_PIKMG_as_comma_decimal()
+    {
+        // Same comma-decimal convention as ZDEL -- see
+        // BuildZdelRequest_formats_weights_as_comma_decimal_not_a_plain_ToString.
+        var request = WarehouseHelpers.BuildSetPickedQuantityRequest(new SetPickedQuantityRequest
+        {
+            DeliveryNumber = "0082291409", ItemNumber = "10",
+            NetWeight = 11.5m, GrossWeight = 12m, PickedQty = 400m,
+        });
+
+        var rows = request.InputTablesItems["BDCTABLE"];
+        Assert.Equal("11,500", rows.Single(r => r.GetValueOrDefault("FNAM") as string == "LIPS-NTGEW")["FVAL"]);
+        Assert.Equal("12,000", rows.Single(r => r.GetValueOrDefault("FNAM") as string == "LIPS-BRGEW")["FVAL"]);
+        Assert.Equal("400,000", rows.Single(r => r.GetValueOrDefault("FNAM") as string == "LIPS-PIKMG")["FVAL"]);
+    }
+
+    [Fact]
+    public void BuildSetPickedQuantityRequest_defaults_unit_to_EA_when_not_supplied()
+    {
+        var request = WarehouseHelpers.BuildSetPickedQuantityRequest(new SetPickedQuantityRequest
+        {
+            DeliveryNumber = "0082291409", ItemNumber = "10", PickedQty = 400m,
+        });
+
+        var rows = request.InputTablesItems["BDCTABLE"];
+        Assert.Equal("EA", rows.Single(r => r.GetValueOrDefault("FNAM") as string == "LIPS-MEINS")["FVAL"]);
+    }
+
+    [Fact]
+    public void BuildSetPickedQuantityRequest_marks_the_item_and_navigates_via_ILOA_T_then_CHSP_T()
+    {
+        var request = WarehouseHelpers.BuildSetPickedQuantityRequest(new SetPickedQuantityRequest
+        {
+            DeliveryNumber = "0082291409", ItemNumber = "10", PickedQty = 400m,
+        });
+
+        var rows = request.InputTablesItems["BDCTABLE"];
+        Assert.Equal("X", rows.Single(r => r.GetValueOrDefault("FNAM") as string == "RV50A-LIPS_SELKZ(1)")["FVAL"]);
+        var okcodes = rows.Where(r => r.GetValueOrDefault("FNAM") as string == "BDC_OKCODE")
+                          .Select(r => r["FVAL"] as string).ToList();
+        Assert.Equal(new[] { "/00", "POPO_T", "=WEIT", "ILOA_T", "CHSP_T" }, okcodes);
+    }
 }

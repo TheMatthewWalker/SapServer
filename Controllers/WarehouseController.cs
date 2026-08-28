@@ -687,6 +687,36 @@ public sealed class WarehouseController : SapControllerBase
         return Ok(ApiResponse<SetDeliveryWeightResponse>.Ok(WarehouseHelpers.ParseZdelResponse(response)));
     }
 
+    // ── Picked-quantity correction (VL02N BDC) ─────────────────────────────────
+    //
+    // Last-resort BDC for LIPS-PIKMG -- no BAPI exposes it (see
+    // SetPickedQuantityRequest's doc comment). Called once per real delivery
+    // item, immediately before retrying goods-issue, when
+    // BAPI_OUTB_DELIVERY_CONFIRM_DEC rejects with "Delivery has not yet been
+    // put away / picked (completely)" despite ITEM_DATA_SPL-QTY_POST being
+    // supplied. No CheckPermissionAsync gate, same as set-delivery-weight --
+    // called from Node via the shared service token, not directly by a
+    // logged-in user. A plain BDC via Z_RFC_CALL_TRANSACTION, not a
+    // transactional BAPI, so no pinned-worker commit/rollback needed here
+    // (matches set-delivery-weight/zdelflag's ExecuteAsync-only shape).
+
+    [HttpPost]
+
+    [Route("set-picked-quantity")]
+    public async Task<IHttpActionResult> SetPickedQuantity(
+        [FromBody] SetPickedQuantityRequest body,
+        [FromUri] bool dryRun = false,
+        CancellationToken ct = default)
+    {
+        var request = WarehouseHelpers.BuildSetPickedQuantityRequest(body);
+
+        if (dryRun)
+            return Ok(ApiResponse<RfcRequest>.Ok(request));
+
+        var response = await _pool.ExecuteAsync(request, ct);
+        return Ok(ApiResponse<SetPickedQuantityResponse>.Ok(WarehouseHelpers.ParseSetPickedQuantityResponse(response)));
+    }
+
     // ── ZDELFLAG/ZDELPACK maintenance (transaction ZPIL9) ─────────────────────
     //
     // Fired after set-delivery-weight when a delivery is marked complete —

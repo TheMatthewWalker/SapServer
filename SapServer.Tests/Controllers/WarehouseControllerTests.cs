@@ -734,4 +734,37 @@ public class WarehouseControllerTests
         ControllerTestHelpers.AssertOk(result);
         _permissions.Verify(p => p.CanExecuteAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
+
+    // SetPickedQuantity has no CheckPermissionAsync gate, same rationale as
+    // set-delivery-weight/zdelflag/* above, and uses plain ExecuteAsync (not
+    // a pinned worker) since it's a single BDC call, not a transactional BAPI
+    // needing commit/rollback.
+
+    [Fact]
+    public async Task SetPickedQuantity_dryRun_returns_the_built_request_without_calling_SAP()
+    {
+        var result = await _controller.SetPickedQuantity(
+            new SetPickedQuantityRequest { DeliveryNumber = "0082291409", ItemNumber = "900001", PickedQty = 400m },
+            dryRun: true, CancellationToken.None);
+
+        var ok = ControllerTestHelpers.AssertOk(result);
+        var body = Assert.IsType<ApiResponse<RfcRequest>>(ok);
+        Assert.NotNull(body.Data);
+        _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task SetPickedQuantity_requires_no_permission_check_and_calls_ExecuteAsync()
+    {
+        _pool.Setup(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new RfcResponse());
+
+        var result = await _controller.SetPickedQuantity(
+            new SetPickedQuantityRequest { DeliveryNumber = "0082291409", ItemNumber = "900001", PickedQty = 400m },
+            dryRun: false, CancellationToken.None);
+
+        ControllerTestHelpers.AssertOk(result);
+        _permissions.Verify(p => p.CanExecuteAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
 }

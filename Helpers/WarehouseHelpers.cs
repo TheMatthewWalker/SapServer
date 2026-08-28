@@ -1002,4 +1002,75 @@ internal static class WarehouseHelpers
         {
             Message = ReturnTableHelper.GetParam(response, "MESSG") ?? ""
         };
+
+    /// <summary>
+    /// Sets LIPS-PIKMG (picked quantity) for one delivery item via a VL02N
+    /// BDC, along with NTGEW/BRGEW on the same screen.
+    ///
+    /// Reconstructed from the real production ABAP program ZDELHAND_9's
+    /// `FORM pos` (a CALL TRANSACTION 'VL02N' BDC) shared by the user, minus
+    /// its own batch-split loop (POAN_T screen, LIPS-CHARG(2)/LGORT(2)/
+    /// LFIMG(2)/VRKME(2)) — that loop exists in ZDELHAND_9 because ITS
+    /// process does the batch split itself via BDC. This delivery's items
+    /// are already real, SAP-assigned batch-managed sub-items (created via
+    /// BAPI_OUTB_DELIVERY_CHANGE's batch-split fields — see
+    /// DeliveryChangeModels.cs), so there is nothing left to split; each
+    /// sub-item already carries its own single batch/quantity/storage
+    /// location, and only PIKMG/weight need setting per sub-item.
+    ///
+    /// UNVERIFIED / needs live SHDB confirmation, same as ZDEL's screen
+    /// sequence needed correcting once against a real recording:
+    ///  - Screen 'SAPMV50A'/'0111' (RV50A-POSNR item search) and the
+    ///    '1000'/'3000' screens/okcodes (POPO_T, =WEIT, ILOA_T, CHSP_T) are
+    ///    taken directly from ZDELHAND_9's own PERFORM bdc_dynpro calls.
+    ///  - Whether LIPS-PIKMG is actually BDC-enterable on screen 3000
+    ///    (the shipping-details/weight screen ZDELHAND_9 reaches via
+    ///    ILOA_T) or lives on a different item-detail tab/screen is NOT
+    ///    confirmed against a real recording -- the field name itself
+    ///    (LIPS-PIKMG) was confirmed by the user directly as VL02N's real
+    ///    "picked quantity" field, but not its screen location.
+    ///  - CHSP_T (ZDELHAND_9's "push Batch Split" okcode) is kept here as
+    ///    the save/confirm action for the weight+PIKMG screen even though
+    ///    this delivery needs no further splitting -- if CHSP_T pops up a
+    ///    batch-split dialog regardless (since the item IS batch-managed),
+    ///    expect a live CH-series rejection and swap to a plain save okcode
+    ///    (e.g. '/00' or '=WEIT' again) instead once confirmed via SHDB.
+    /// </summary>
+    internal static RfcRequest BuildSetPickedQuantityRequest(SetPickedQuantityRequest body)
+    {
+        var posnr = SapPad.Pad(body.ItemNumber, 6);
+        var unit  = string.IsNullOrWhiteSpace(body.Unit) ? "EA" : body.Unit!;
+
+        return BdcBuilder.For("VL02N")
+            .Screen("SAPMV50A", "4004")
+                .Field("BDC_OKCODE", "/00")
+                .Field("LIKP-VBELN", SapPad.Pad(body.DeliveryNumber, 10))
+            .Screen("SAPMV50A", "1000")
+                .Field("BDC_OKCODE", "POPO_T")
+            .Screen("SAPMV50A", "0111")
+                .Field("RV50A-POSNR", posnr)
+                .Field("BDC_OKCODE", "=WEIT")
+            .Screen("SAPMV50A", "1000")
+                .Field("RV50A-LIPS_SELKZ(1)", "X")
+                .Field("BDC_OKCODE", "ILOA_T")
+            .Screen("SAPMV50A", "3000")
+                .Field("LIPS-NTGEW", FormatZdelWeight(body.NetWeight))
+                .Field("LIPS-BRGEW", FormatZdelWeight(body.GrossWeight))
+                // Comma-decimal, same as FormatZdelWeight -- every raw SAP
+                // dump seen live this session for a quantity field came back
+                // comma-decimal (e.g. "300,000" = 300), so screen input is
+                // assumed to match rather than risk the same 1000x-off
+                // failure class BdcBuilder.Field(decimal)'s own doc comment
+                // warns about.
+                .Field("LIPS-PIKMG", FormatZdelWeight(body.PickedQty))
+                .Field("LIPS-MEINS", unit)
+                .Field("BDC_OKCODE", "CHSP_T")
+            .Build();
+    }
+
+    internal static SetPickedQuantityResponse ParseSetPickedQuantityResponse(RfcResponse response) =>
+        new SetPickedQuantityResponse
+        {
+            Message = ReturnTableHelper.GetParam(response, "MESSG") ?? ""
+        };
 }
