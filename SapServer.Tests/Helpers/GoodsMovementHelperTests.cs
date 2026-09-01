@@ -100,7 +100,7 @@ public class GoodsMovementHelperTests
             Components = [new GoodsMovementComponent { Material = "30007R", Quantity = 1m, Unit = "KG" }],
         };
         var request = GoodsMovementHelper.BuildGoodsMovementRequest(body, new Dictionary<string, string>());
-        Assert.Equal("CO000001230000000000EXTRA"[..16], request.StructImportParameters["GOODSMVT_HEADER"]["REF_DOC_NO"]);
+        Assert.Equal("CO000001230000000000EXTRA".Substring(0, 16), request.StructImportParameters["GOODSMVT_HEADER"]["REF_DOC_NO"]); // net48 lacks string range indexers
     }
 
     [Fact]

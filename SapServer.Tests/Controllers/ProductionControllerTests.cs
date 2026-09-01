@@ -6,6 +6,7 @@ using SapServer.Models;
 using SapServer.Models.Bapi;
 using SapServer.Services;
 using SapServer.Tests.Infrastructure;
+using System.Web.Http;
 
 namespace SapServer.Tests.Controllers;
 
@@ -82,6 +83,62 @@ public class ProductionControllerTests : IClassFixture<SapServerTestFactory>
         Assert.Equal("1710", body.Data.StorageLocation);
     }
 
+    // PostScrap (BomScrapRequest) had no test coverage at all before this
+    // regression pair — added specifically to cover the ScrapReason
+    // nullability fix, since a Moq-direct-instantiation test can't exercise
+    // real Web API model binding/validation the way this TestServer-based
+    // class does.
+
+    [Fact]
+    public async Task PostScrap_with_omitted_ScrapReason_passes_validation_and_reaches_business_logic()
+    {
+        // Regression test: BomScrapRequest.ScrapReason used to be a non-
+        // nullable string defaulting to "" — an omitted JSON property bound
+        // to "", which failed [StringLength(4, MinimumLength=4)] once
+        // ValidateModelAttribute started enforcing it globally, even though
+        // Normanton-Nexus always omits this field whenever the real reason
+        // code from prod.ScrapReasons isn't exactly 4 characters (routes/
+        // productionnexus.js). Now nullable, so an omitted field binds to
+        // null, which StringLengthAttribute correctly treats as valid.
+        _factory.PermissionsMock
+            .Setup(p => p.CanExecuteAsync(1, ProductionHelpers.FnCreate, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        _factory.PoolMock
+            .SetupSequence(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()))
+            // profit-centre lookup first — ParseSingleSapResult throws on a
+            // genuinely empty response, so this needs one real row.
+            .ReturnsAsync(new RfcResponse { Tables = new() { ["data_display"] = new() { new() { ["WA"] = "header" }, new() { ["WA"] = "9912" } } } })
+            .ReturnsAsync(new RfcResponse()); // BOM lookup comes back empty -> fast 400 from real business logic
+
+        var client = _factory.CreateAuthenticatedClient(userId: 1);
+        var response = await client.PostAsJsonAsync("/api/production/scrap/post", new BomScrapRequest
+        {
+            Material = "30005R", Quantity = 25.5m, Header = "MX00000123", MovementType = "551",
+            // ScrapReason deliberately omitted
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<ApiResponse<RfcResponse>>();
+        // Reached PostScrap's own "no BOM components" check, not blocked by
+        // model validation — proves the omitted ScrapReason was accepted.
+        Assert.Equal("No Components in BOM - Unable to Scrap", body!.Error!.Message);
+    }
+
+    [Fact]
+    public async Task PostScrap_with_a_ScrapReason_of_the_wrong_length_is_still_rejected_by_validation()
+    {
+        var client = _factory.CreateAuthenticatedClient(userId: 1);
+        var response = await client.PostAsJsonAsync("/api/production/scrap/post", new BomScrapRequest
+        {
+            Material = "30005R", Quantity = 25.5m, Header = "MX00000123", MovementType = "551", ScrapReason = "12",
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<ApiResponse<object>>();
+        Assert.Contains("ScrapReason", body!.Error!.Message);
+        _factory.PoolMock.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Never); // never reaches business logic
+    }
+
     // PostMixingScrap posts via BAPI_GOODSMVT_CREATE on a pinned worker
     // (AcquireWorker/ExecuteOnWorkerAsync), same convention as
     // WarehouseControllerTests' CreateStockAdjustment coverage — see
@@ -103,7 +160,7 @@ public class ProductionControllerTests : IClassFixture<SapServerTestFactory>
         });
 
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
-        _factory.PoolMock.Verify(p => p.AcquireWorker(), Times.Never);
+        _factory.PoolMock.Verify(p => p.AcquireWorkerAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -123,7 +180,7 @@ public class ProductionControllerTests : IClassFixture<SapServerTestFactory>
         });
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        _factory.PoolMock.Verify(p => p.AcquireWorker(), Times.Never); // never even reaches the BAPI
+        _factory.PoolMock.Verify(p => p.AcquireWorkerAsync(It.IsAny<CancellationToken>()), Times.Never); // never even reaches the BAPI
     }
 
     [Fact]
@@ -145,7 +202,7 @@ public class ProductionControllerTests : IClassFixture<SapServerTestFactory>
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var body = await response.Content.ReadFromJsonAsync<ApiResponse<RfcRequest>>();
         Assert.Equal(StockAdjustmentHelper.FnGoodsMvtCreate, body!.Data!.FunctionName);
-        _factory.PoolMock.Verify(p => p.AcquireWorker(), Times.Never);
+        _factory.PoolMock.Verify(p => p.AcquireWorkerAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -196,7 +253,7 @@ public class ProductionControllerTests : IClassFixture<SapServerTestFactory>
             Material = "30005R", Quantity = 25.5m, Header = "MX00000123", ScrapReason = "4917",
         });
 
-        Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
+        Assert.Equal((HttpStatusCode)422, response.StatusCode); // net48's HttpStatusCode enum predates UnprocessableEntity
         _factory.PoolMock.Verify(p => p.ExecuteOnWorkerAsync(It.IsAny<SapWorkerHandle>(),
             It.Is<RfcRequest>(r => r.FunctionName == "BAPI_TRANSACTION_ROLLBACK"), It.IsAny<CancellationToken>()), Times.Once);
     }

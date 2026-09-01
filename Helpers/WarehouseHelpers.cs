@@ -102,7 +102,7 @@ internal static class WarehouseHelpers
                 StorageType     = cols[1],
                 Bin             = cols[2],
                 Material        = cols[3],
-                AvailableQty    = decimal.TryParse(cols[4], out var qty) ? qty : 0m,
+                AvailableQty    = RfcRowExtensions.ParseSapDecimal(cols[4]) ?? 0m,
                 Batch           = cols[5],
                 StockCategory   = cols[6],
                 SpecialStockInd = cols[7],
@@ -181,7 +181,7 @@ internal static class WarehouseHelpers
                 Plant           = cols[0],
                 StorageLocation = cols[1],
                 Material        = cols[2],
-                AvailableQty    = decimal.TryParse(cols[3], out var qty) ? qty : 0m,
+                AvailableQty    = RfcRowExtensions.ParseSapDecimal(cols[3]) ?? 0m,
             })
             .ToArray();
     }
@@ -482,10 +482,10 @@ internal static class WarehouseHelpers
                 TrNumber         = cols[1],
                 Material         = cols[2],
                 StorageLocation  = cols[3],
-                Quantity         = decimal.TryParse(cols[4], out var qty) ? qty : 0m,
+                Quantity         = RfcRowExtensions.ParseSapDecimal(cols[4]) ?? 0m,
                 Uom              = cols[5],
                 Batch            = cols[6],
-                UnrestrictedQty  = decimal.TryParse(cols[7], out var clabs) ? clabs : (decimal?)null,
+                UnrestrictedQty  = RfcRowExtensions.ParseSapDecimal(cols[7]),
             })
             .ToArray();
     }
@@ -530,7 +530,7 @@ internal static class WarehouseHelpers
         return SapDelimitedParser
             .ParseRows(sapRows, '|', skipHeader: true)
             .Where(cols => cols.Length >= 4)
-            .Where(cols => cols[1] != "901" && decimal.TryParse(cols[3], out var q) && q > 0)
+            .Where(cols => cols[1] != "901" && (RfcRowExtensions.ParseSapDecimal(cols[3]) ?? 0m) > 0)
             .Select(cols => cols[0].TrimStart('0'))
             .ToHashSet();
     }
@@ -673,7 +673,7 @@ internal static class WarehouseHelpers
                 TrNumber         = cols[1],
                 Material         = cols[2],
                 StorageLocation  = cols[3],
-                Quantity         = decimal.TryParse(cols[4], out var qty) ? qty : 0m,
+                Quantity         = RfcRowExtensions.ParseSapDecimal(cols[4]) ?? 0m,
                 Uom              = cols[5],
                 DocumentText     = cols[6],
                 MaterialDocument = cols[7],
@@ -959,6 +959,18 @@ internal static class WarehouseHelpers
     // fills in the weight/pallet-count fields (BDC_CURSOR on LIKP-ANZPK,
     // =SAVE). GEWEI is always "KG" — the portal only ever records weights in
     // kilograms, so it's hardcoded rather than taking a unit from the caller.
+    // BTGEW/NTGEW screen input rejected a plain decimal.ToString() with
+    // "Input must be in the format ___.___.___.__~,___" -- confirmed live
+    // (endpoint-test-log-2026-08-28-delivery-0082291409.md) this SAP
+    // system's screen mask wants comma-decimal (matching every other real
+    // quantity value seen from this system this session, e.g. "300,000",
+    // "1.297,000"), not BdcBuilder.Field(string,decimal)'s own
+    // InvariantCulture period-decimal convention -- and this call was
+    // bypassing that overload entirely anyway by calling .ToString()
+    // directly (culture-dependent, not even guaranteed invariant).
+    private static string FormatZdelWeight(decimal value) =>
+        value.ToString("0.000", System.Globalization.CultureInfo.InvariantCulture).Replace('.', ',');
+
     internal static RfcRequest BuildZdelRequest(SetDeliveryWeightRequest body) =>
         BdcBuilder.For("ZDEL")
             .Screen("SAPMZDEL", "0100")
@@ -968,15 +980,129 @@ internal static class WarehouseHelpers
             .Screen("SAPMZDEL", "0100")
                 .Field("BDC_CURSOR", "LIKP-ANZPK")
                 .Field("BDC_OKCODE", "=SAVE")
-                .Field("LIKP-VBELN", SapPad.Pad(body.DeliveryNumber, 10))
-                .Field("LIKP-BTGEW", body.GrossWeight.ToString())
-                .Field("LIKP-NTGEW", body.NetWeight.ToString())
+                // Confirmed via a real SHDB recording (2026-08-28): unlike
+                // screen 1, VBELN here is NOT zero-padded -- SAP's own UI
+                // re-displays the already-selected document in its "natural"
+                // (leading-zeros-stripped) numeric form on this screen, and
+                // the custom ZDEL program's own internal lookup apparently
+                // depends on matching that exact unpadded representation.
+                // Sending the padded 10-digit form here (as this code
+                // previously did on both screens identically) caused a real,
+                // confirmed-live CH 004 "table does not contain an entry"
+                // rejection.
+                .Field("LIKP-VBELN", body.DeliveryNumber.TrimStart('0'))
+                .Field("LIKP-BTGEW", FormatZdelWeight(body.GrossWeight))
+                .Field("LIKP-NTGEW", FormatZdelWeight(body.NetWeight))
                 .Field("LIKP-GEWEI", "KG")
                 .Field("LIKP-ANZPK", body.PalletCount.ToString())
             .Build();
 
     internal static SetDeliveryWeightResponse ParseZdelResponse(RfcResponse response) =>
         new SetDeliveryWeightResponse
+        {
+            Message = ReturnTableHelper.GetParam(response, "MESSG") ?? ""
+        };
+
+    /// <summary>
+    /// Sets LIPS-PIKMG (picked quantity) for a delivery item's batch-split
+    /// rows via a VL02N BDC. Weight (NTGEW/BRGEW) is handled separately by
+    /// BAPI_OUTB_DELIVERY_CHANGE (see DeliveryChangeModels.cs) -- confirmed
+    /// live this session that PIKMG is NOT reachable via that BAPI or any
+    /// other (WS_DELIVERY_UPDATE/_2, the internal function modules VL02N's
+    /// own screen flow drives it through, are confirmed NOT RFC-accessible
+    /// via a real RFC_GET_FUNCTION_INTERFACE check), so this is a
+    /// deliberately narrow, last-resort BDC for PIKMG alone.
+    ///
+    /// Built from a real SHDB recording of delivery 0082291409 (the user's
+    /// own real test delivery, 3-way batch split, 400 EA each) -- NOT a
+    /// reconstruction from ZDELHAND_9 like the first attempt at this helper
+    /// was; that attempt (screens 0111/3000, okcodes POPO_T/ILOA_T/CHSP_T)
+    /// was tried live and confirmed wrong: PIKMG isn't reachable that way at
+    /// all (real T100 rejections: item search only knows the parent item,
+    /// and neither LIPS-MEINS nor LIPS-PIKMG exist on the weight screen).
+    ///
+    /// The real sequence: enter the delivery (unpadded VBELN, matching
+    /// SHDB exactly -- confirmed different from the padded convention
+    /// BAPI/other BDC calls use), then on the item-overview screen
+    /// (SAPMV50A/1000, which embeds the item table control directly as a
+    /// subscreen -- there is no separate item-detail screen navigation at
+    /// all) push '=CHPL_T01' to expand item 10's batch-split rows, then
+    /// push '=SICH_T' (save) with LIPSD-PIKMG(02)/(03)/(04) set -- one field
+    /// per expanded batch row, 1-indexed from row 2 (row 1 is the parent
+    /// item's own, already-zero, aggregate row).
+    ///
+    /// FRAGILE BY CONSTRUCTION, flagged directly by the user reviewing this
+    /// recording: LIPSD-PIKMG(nn) addresses a table-control ROW POSITION,
+    /// not a batch/item number -- VL02N's table-control BDC has no
+    /// "find the row for CHARG=X" mechanism. PickedQuantities must be
+    /// supplied in the exact order SAP's own grid displays the expanded
+    /// batch rows (confirmed, for this delivery's real 3-way split, to be
+    /// ascending by the sub-item numbers SAP itself assigned during the
+    /// BAPI_OUTB_DELIVERY_CHANGE batch split -- i.e. 900001/900002/900003
+    /// order) -- there is no cross-check here that the caller supplied the
+    /// right order; a wrong order posts a wrong batch's quantity as another
+    /// batch's PIKMG with no error from SAP at all.
+    ///
+    /// BillingDate is an SHDB-recorded echo of LIKP-BLDAT, confirmed live
+    /// (via a raw LIKP read) to be this delivery's real, current, unchanged
+    /// header value, not stale recording-time demo data -- SAP's own
+    /// item-overview screen displays it regardless of what's being edited.
+    /// SHDB also recorded LIKP-KODAT/KOUHR alongside it, but both are
+    /// confirmed NOT real settable fields here -- a live replay rejected
+    /// each with "Field ... does not exist in dynpro SAPMV50A 1000"
+    /// (message class 00, number 349) despite SHDB showing them populated,
+    /// so they're omitted entirely rather than sent as dead/misleading
+    /// FieldIf calls.
+    ///
+    /// CONFIRMED WORKING END TO END (2026-08-28) against delivery
+    /// 0082291409's real 3-way batch split: this call returned "S VL 311
+    /// Delivery 82291409 has been saved", and BAPI_OUTB_DELIVERY_CONFIRM_DEC
+    /// went from consistently rejecting every attempt to a clean TestRun
+    /// with zero messages immediately afterward.
+    /// </summary>
+    internal static RfcRequest BuildSetPickedQuantityRequest(SetPickedQuantityRequest body)
+    {
+        var vbeln = body.DeliveryNumber.TrimStart('0');
+
+        var builder = BdcBuilder.For("VL02N")
+            .Screen("SAPMV50A", "4004")
+                .Field("BDC_CURSOR", "LIKP-VBELN")
+                .Field("BDC_OKCODE", "/00")
+                .Field("LIKP-VBELN", vbeln)
+            .Screen("SAPMV50A", "1000")
+                .Field("BDC_OKCODE", "=CHPL_T01")
+                .Field("BDC_SUBSCR", Subscr("1502", "SUBSCREEN_HEADER"))
+                .FieldIf(!string.IsNullOrWhiteSpace(body.BillingDate), "LIKP-BLDAT", body.BillingDate ?? "")
+                .Field("BDC_SUBSCR", Subscr("1104", "SUBSCREEN_BODY"))
+                .Field("BDC_CURSOR", "RV50A-CHMULT(01)")
+                .Field("BDC_SUBSCR", Subscr("0611", "SUBSCREEN_BOTTOM"))
+                .Field("BDC_SUBSCR", Subscr("1708", "SUBSCREEN_ICONBAR"))
+            .Screen("SAPMV50A", "1000")
+                .Field("BDC_OKCODE", "=SICH_T")
+                .Field("BDC_SUBSCR", Subscr("1502", "SUBSCREEN_HEADER"))
+                .FieldIf(!string.IsNullOrWhiteSpace(body.BillingDate), "LIKP-BLDAT", body.BillingDate ?? "")
+                .Field("BDC_SUBSCR", Subscr("1104", "SUBSCREEN_BODY"))
+                .Field("BDC_CURSOR", "LIPSD-PIKMG(02)");
+
+        for (var i = 0; i < body.PickedQuantities.Count; i++)
+            builder.Field($"LIPSD-PIKMG({i + 2:D2})", FormatZdelWeight(body.PickedQuantities[i]));
+
+        builder
+            .Field("BDC_SUBSCR", Subscr("0611", "SUBSCREEN_BOTTOM"))
+            .Field("BDC_SUBSCR", Subscr("1708", "SUBSCREEN_ICONBAR"));
+
+        return builder.Build();
+    }
+
+    // BDC_SUBSCR packs PROGRAM (fixed 40-char field), DYNPRO (4 digits), and
+    // the subscreen area name into one un-delimited value -- confirmed real
+    // via a live SHDB recording of VL02N's item-overview screen, which
+    // embeds its item table control as subscreen 1104/SUBSCREEN_BODY inside
+    // parent dynpro 1000.
+    private static string Subscr(string dynpro, string area) => "SAPMV50A".PadRight(40) + dynpro + area;
+
+    internal static SetPickedQuantityResponse ParseSetPickedQuantityResponse(RfcResponse response) =>
+        new SetPickedQuantityResponse
         {
             Message = ReturnTableHelper.GetParam(response, "MESSG") ?? ""
         };

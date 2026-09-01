@@ -1,64 +1,53 @@
-using System.Globalization;
 using SapServer.Models;
 using SapServer.Models.Bapi;
 
 namespace SapServer.Helpers;
 
 /// <summary>
-/// Goods Issue posting via BAPI_DELIVERYPROCESSING_EXEC. See
-/// GoodsIssueModels.cs for the full caveat on why REQUEST's field set is a
-/// deliberately minimal starting point pending live confirmation, and why
-/// RETURN-parsing here (unlike ZDELFLAG's ET_MESSAGE) is low-risk — it's a
-/// standard BAPIRET2 table.
+/// Goods Issue posting via BAPI_OUTB_DELIVERY_CONFIRM_DEC. See
+/// GoodsIssueModels.cs for why this replaced an earlier BAPI_DELIVERYPROCESSING_EXEC
+/// attempt that never worked live.
 /// </summary>
 internal static class GoodsIssueHelper
 {
-    internal const string FnDeliveryProcessingExec = "BAPI_DELIVERYPROCESSING_EXEC";
+    internal const string FnOutbDeliveryConfirmDec = "BAPI_OUTB_DELIVERY_CONFIRM_DEC";
 
     internal static RfcRequest BuildGoodsIssueRequest(GoodsIssueRequest body)
     {
-        var deliveryDate   = NormaliseDate(body.DeliveryDate);
-        var goodsIssueDate = NormaliseDate(body.GoodsIssueDate);
-        var checkMode      = body.CheckMode || body.TestRun;
+        var deliv = SapPad.Pad(body.DeliveryNumber, 10);
 
-        var builder = new RfcRequestBuilder(FnDeliveryProcessingExec)
-            .StructImport("DELIVERY_EXTEND", new
-            {
-                DELIVERY_NUMBER      = SapPad.Pad(body.DeliveryNumber, 10),
-                NEW_DELIVERY_ALLOWED = body.NewDeliveryAllowed ? "X" : "",
-            })
-            .StructImport("TECHN_CONTROL", new
-            {
-                DEBUG_FLG         = body.Debug ? "X" : "",
-                SENDER_SYSTEM     = "",
-                PROCESS_GUID      = "",
-                ERROR_TOLERANCE   = "",
-                CHECK_MODE        = checkMode ? "X" : "",
-                IDOCNUM           = "",
-                APOTRGUID         = "",
-                SPE_SCENARIO_FLAG = "",
-                // Deliberately left off (not "X") for phase 0 so the first
-                // live tests are synchronous/observable in one round-trip —
-                // see GoodsIssueModels.cs's header comment.
-                POST_ASYNC        = "",
-            });
+        // Confirmed via the real BAPI Inspector signature (2026-08-28):
+        // POST_GI_FLG lives on HEADER_CONTROL (BAPIOBDLVHDRCTRLCON), not
+        // HEADER_DATA — the user's original sample code had it on the wrong
+        // structure (a real, working call still needs HEADER_CONTROL's own
+        // DELIV_NUMB set as the key). HEADER_DATA-DELIV_NUMB is set
+        // defensively alongside it, same lesson learned from
+        // BAPI_OUTB_DELIVERY_CHANGE needing both HEADER_DATA and
+        // HEADER_CONTROL populated with DELIV_NUMB before it stopped
+        // rejecting with "Delivery & does not exist" (VL 302).
+        var builder = new RfcRequestBuilder(FnOutbDeliveryConfirmDec)
+            .StructImport("HEADER_DATA", new { DELIV_NUMB = deliv })
+            .StructImport("HEADER_CONTROL", new { DELIV_NUMB = deliv, POST_GI_FLG = "X" });
 
-        // REQUEST: one header-only row for phase 0 (see GoodsIssueModels.cs's
-        // caveat) — DOCUMENT_NUMB identifies the delivery, the two dates are
-        // the only other fields we have reason to believe matter yet.
-        builder.TableRow("REQUEST", new
+        // Confirmed live: POST_GI_FLG alone isn't enough -- SAP rejected
+        // with "Delivery has not yet been put away / picked (completely)"
+        // for every item until ITEM_DATA_SPL rows confirmed each item's
+        // picked quantity. See GoodsIssueItem's doc comment.
+        foreach (var item in body.Items)
         {
-            DOCUMENT_NUMB    = SapPad.Pad(body.DeliveryNumber, 10),
-            DELIVERY_DATE    = deliveryDate,
-            GOODS_ISSUE_DATE = goodsIssueDate,
-        });
+            builder.TableRow("ITEM_DATA_SPL", new
+            {
+                DELIV_NUMB = deliv,
+                DELIV_ITEM = SapPad.Pad(item.ItemNumber, 6),
+                QTY_POST   = item.Quantity,
+                BASE_UOM   = item.BaseUom ?? "",
+            });
+        }
 
         return builder
             .ReadTable("RETURN", "TYPE", "ID", "NUMBER", "MESSAGE", "LOG_NO", "LOG_MSG_NO",
                                   "MESSAGE_V1", "MESSAGE_V2", "MESSAGE_V3", "MESSAGE_V4",
                                   "PARAMETER", "ROW", "FIELD", "SYSTEM")
-            .ReadTable("CREATEDITEMS", "DOCUMENT_NUMB", "DOCUMENT_ITEM", "MATERIAL",
-                                        "QUANTITY_SALES_UOM", "SALES_UNIT")
             .Build();
     }
 
@@ -68,29 +57,12 @@ internal static class GoodsIssueHelper
             .Select(m => new SapReturnMessage { Type = m.Type, Message = m.Message })
             .ToList();
 
-        var createdCount = response.Tables.TryGetValue("CREATEDITEMS", out var rows) ? rows.Count : 0;
-
         return new GoodsIssueResponse
         {
-            DeliveryNumber   = deliveryNumber,
-            Success          = !ReturnTableHelper.HasBlockingError(
-                                    messages.Select(m => new ReturnTableHelper.SapMessage(m.Type, m.Message))),
-            Messages         = messages,
-            CreatedItemCount = createdCount,
+            DeliveryNumber = deliveryNumber,
+            Success        = !ReturnTableHelper.HasBlockingError(
+                                 messages.Select(m => new ReturnTableHelper.SapMessage(m.Type, m.Message))),
+            Messages       = messages,
         };
-    }
-
-    private static string NormaliseDate(string? date)
-    {
-        if (string.IsNullOrWhiteSpace(date)) return DateTime.Now.ToString("yyyyMMdd", CultureInfo.InvariantCulture);
-        if (date.Length == 8 && date.All(char.IsDigit)) return date; // already yyyyMMdd
-
-        if (DateTime.TryParseExact(date, "dd.MM.yyyy", CultureInfo.InvariantCulture, DateTimeStyles.None, out var d1))
-            return d1.ToString("yyyyMMdd", CultureInfo.InvariantCulture);
-
-        if (DateTime.TryParse(date, CultureInfo.InvariantCulture, DateTimeStyles.None, out var d2))
-            return d2.ToString("yyyyMMdd", CultureInfo.InvariantCulture);
-
-        return date;
     }
 }

@@ -1,4 +1,5 @@
-using Microsoft.AspNetCore.Mvc;
+using System.Net;
+using System.Web.Http;
 using SapServer.Helpers;
 using SapServer.Models;
 using SapServer.Models.Bapi;
@@ -14,7 +15,7 @@ namespace SapServer.Controllers;
 // Nexus-side department/permission gating in routes/consignment.js is what
 // actually protects this — see VENDOR_CONSIGNMENT (Normanton-Nexus) for the
 // declaration-confirm step specifically.
-[Route("api/consignment")]
+[RoutePrefix("api/consignment")]
 public sealed class ConsignmentController : SapControllerBase
 {
     public ConsignmentController(
@@ -35,16 +36,30 @@ public sealed class ConsignmentController : SapControllerBase
     // that's actually confirmed to work. A `materials` query param sent by
     // an older Node build is harmless here — it's simply not bound/used;
     // the WHERE filter is LIFNR-based again (see BuildVendorGrRequest).
-    [HttpGet("gr")]
-    [ProducesResponseType(typeof(ApiResponse<ConsignmentGrRow[]>), 200)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 400)]
-    public async Task<IActionResult> GetVendorGr(
-        [FromQuery] string sapVendorNumber,
-        [FromQuery] string? sinceDate,
-        CancellationToken ct)
+    [HttpGet]
+    [Route("gr")]
+    public async Task<IHttpActionResult> GetVendorGr(
+        [FromUri] string sapVendorNumber,
+        // Confirmed for real against this live IIS deploy (2026-08-27): Web
+        // API 2's [FromUri] binder 404s the ENTIRE request — not just this
+        // parameter — when sinceDate is omitted from the query string
+        // entirely, even though it's already string? (nullable reference
+        // type). That contradicts this file's own "nullable reference types
+        // don't need an explicit default" assumption documented elsewhere in
+        // CLAUDE.md for the dryRun-style gotcha — apparently that only holds
+        // for a complex [FromUri] object, not a bare nullable string. Every
+        // normal caller (Normanton-Nexus's daily cron and its manual "Sync
+        // GR from SAP" button) omits sinceDate on every call except a
+        // deliberately date-floored re-sync, so this broke ALL consignment
+        // GR syncing for every vendor the moment this endpoint's [FromQuery]
+        // -> [FromUri] rebuild reached production. The explicit default
+        // fixes it the same way the CLAUDE.md-documented value-type cases
+        // were fixed.
+        [FromUri] string? sinceDate = null,
+        CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(sapVendorNumber))
-            return BadRequest(ApiResponse<ConsignmentGrRow[]>.Fail("400", "sapVendorNumber is required.", []));
+            return Content(HttpStatusCode.BadRequest, ApiResponse<ConsignmentGrRow[]>.Fail("400", "sapVendorNumber is required.", []));
 
         var response101 = await _pool.ExecuteAsync(
             ConsignmentHelpers.BuildVendorGrRequest(sapVendorNumber, "101", sinceDate), ct);
@@ -72,9 +87,9 @@ public sealed class ConsignmentController : SapControllerBase
     // caller filters the returned per-material dictionary down to the vendor's
     // own material list itself (Node already knows which materials belong to
     // which vendor via dbo.VendorMaterial).
-    [HttpGet("stock")]
-    [ProducesResponseType(typeof(ApiResponse<Dictionary<string, decimal>>), 200)]
-    public async Task<IActionResult> GetConsignmentStock(CancellationToken ct)
+    [HttpGet]
+    [Route("stock")]
+    public async Task<IHttpActionResult> GetConsignmentStock(CancellationToken ct)
     {
         var response = await _pool.ExecuteAsync(PerformanceHelpers.BuildConsignmentStockRequest(), ct);
         return Ok(ApiResponse<Dictionary<string, decimal>>.Ok(PerformanceHelpers.ParseConsignmentStockRows(response)));

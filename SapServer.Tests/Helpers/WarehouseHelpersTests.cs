@@ -407,7 +407,7 @@ public class WarehouseHelpersTests
         var fields = request.InputTablesItems["query_FIELDS"];
 
         Assert.Contains(fields, f => f["TABNAME"]!.Equals("LTBP") && f["FIELDNAME"]!.Equals("CHARG"));
-        Assert.Equal("CHARG", fields[^1]["FIELDNAME"]); // last-registered, matching OpenTrColumns' appended position
+        Assert.Equal("CHARG", fields[fields.Count - 1]["FIELDNAME"]); // last-registered, matching OpenTrColumns' appended position (net48 lacks the ^ index operator)
     }
 
     [Fact]
@@ -421,6 +421,27 @@ public class WarehouseHelpersTests
         Assert.Single(rows);
         Assert.Equal("4500001234", rows[0].TrNumber);
         Assert.Equal("0000123456", rows[0].Batch);
+    }
+
+    [Fact]
+    public void ParseOpenTransferRequirementRows_parses_a_European_comma_decimal_quantity_correctly()
+    {
+        // Confirmed for real against a live SAP system: this parser used a
+        // bare decimal.TryParse(cols[4], out var qty), which uses the current
+        // culture's NumberStyles.Number (AllowThousands) - under en-US/en-GB
+        // that treats ',' as a thousands separator, so a genuine SAP value of
+        // "300,000" (European convention: comma is the decimal point, meaning
+        // 300.000 = 300) parsed as three hundred THOUSAND instead of three
+        // hundred - exactly the reported symptom ("300,000 EA should be
+        // parsed to 300 EA"). Fixed by routing through the shared,
+        // culture-independent RfcRowExtensions.ParseSapDecimal.
+        var response = StockResponse(
+            "101|4500001234|30005R|1710|300,000|EA|Doc text|5000001111|JSMITH|01.01.26|08:00:00|SA|BIN-01|999|0000123456");
+
+        var rows = WarehouseHelpers.ParseOpenTransferRequirementRows(response);
+
+        Assert.Single(rows);
+        Assert.Equal(300m, rows[0].Quantity);
     }
 
     // ── Delete TR (LB02) ─────────────────────────────────────────────────────
@@ -577,5 +598,130 @@ public class WarehouseHelpersTests
 
         Assert.Single(candidates);
         Assert.DoesNotContain(WarehouseHelpers.ReasonAlreadyTransferred, candidates[0].Reasons);
+    }
+
+    [Fact]
+    public void BuildZdelRequest_formats_weights_as_comma_decimal_not_a_plain_ToString()
+    {
+        // Regression test for a real, confirmed-live SAP rejection: this
+        // used to call body.GrossWeight.ToString() directly (culture-
+        // dependent, not even routed through BdcBuilder's own
+        // InvariantCulture decimal formatting) and SAP's real screen mask
+        // rejected it outright ("Input must be in the format
+        // ___.___.___.__~,___") -- this system's screens want comma-decimal,
+        // matching every other real quantity value seen from it this
+        // session (e.g. "300,000", "1.297,000").
+        var request = WarehouseHelpers.BuildZdelRequest(new SetDeliveryWeightRequest
+        {
+            DeliveryNumber = "0082291409", GrossWeight = 12m, NetWeight = 11.5m, PalletCount = 3,
+        });
+
+        var rows = request.InputTablesItems["BDCTABLE"];
+        Assert.Equal("12,000", rows.Single(r => r.GetValueOrDefault("FNAM") as string == "LIKP-BTGEW")["FVAL"]);
+        Assert.Equal("11,500", rows.Single(r => r.GetValueOrDefault("FNAM") as string == "LIKP-NTGEW")["FVAL"]);
+        Assert.Equal("3", rows.Single(r => r.GetValueOrDefault("FNAM") as string == "LIKP-ANZPK")["FVAL"]);
+    }
+
+    [Fact]
+    public void BuildZdelRequest_pads_VBELN_on_screen_1_but_leaves_it_unpadded_on_screen_2()
+    {
+        // Regression test for a real, confirmed-live SAP rejection (CH 004,
+        // "table does not contain an entry"): a real SHDB recording showed
+        // screen 1's LIKP-VBELN as zero-padded ("0082291409") but screen 2's
+        // as NOT padded ("82291409") -- SAP's own UI re-displays the
+        // already-selected document in its natural form on the second
+        // screen, and sending the padded form there (as this code
+        // previously did on both screens identically) broke the custom
+        // ZDEL program's own internal lookup.
+        var request = WarehouseHelpers.BuildZdelRequest(new SetDeliveryWeightRequest
+        {
+            DeliveryNumber = "0082291409", GrossWeight = 12m, NetWeight = 12m, PalletCount = 3,
+        });
+
+        var rows = request.InputTablesItems["BDCTABLE"];
+        var vbelnRows = rows.Where(r => r.GetValueOrDefault("FNAM") as string == "LIKP-VBELN").ToList();
+        Assert.Equal(2, vbelnRows.Count);
+        Assert.Equal("0082291409", vbelnRows[0]["FVAL"]); // screen 1 (=SELE) -- padded
+        Assert.Equal("82291409", vbelnRows[1]["FVAL"]);   // screen 2 (=SAVE) -- NOT padded
+    }
+
+    [Fact]
+    public void BuildSetPickedQuantityRequest_sends_VBELN_unpadded_matching_the_real_recording()
+    {
+        // Confirmed via a real SHDB recording of delivery 0082291409:
+        // VL02N's own initial screen wants VBELN unpadded, unlike the padded
+        // convention BAPI/other BDC calls in this codebase use.
+        var request = WarehouseHelpers.BuildSetPickedQuantityRequest(new SetPickedQuantityRequest
+        {
+            DeliveryNumber = "0082291409", PickedQuantities = [400m],
+        });
+
+        var rows = request.InputTablesItems["BDCTABLE"];
+        var vbelnRows = rows.Where(r => r.GetValueOrDefault("FNAM") as string == "LIKP-VBELN").ToList();
+        Assert.All(vbelnRows, r => Assert.Equal("82291409", r["FVAL"]));
+    }
+
+    [Fact]
+    public void BuildSetPickedQuantityRequest_uses_the_real_okcodes_CHPL_T01_then_SICH_T()
+    {
+        var request = WarehouseHelpers.BuildSetPickedQuantityRequest(new SetPickedQuantityRequest
+        {
+            DeliveryNumber = "0082291409", PickedQuantities = [400m, 400m, 400m],
+        });
+
+        var okcodes = request.InputTablesItems["BDCTABLE"]
+            .Where(r => r.GetValueOrDefault("FNAM") as string == "BDC_OKCODE")
+            .Select(r => r["FVAL"] as string).ToList();
+        Assert.Equal(new[] { "/00", "=CHPL_T01", "=SICH_T" }, okcodes);
+    }
+
+    [Fact]
+    public void BuildSetPickedQuantityRequest_sets_one_LIPSD_PIKMG_row_per_quantity_starting_at_index_02()
+    {
+        // Real, confirmed-live table-control mechanics: row 1 is the parent
+        // item's own (already-zero) aggregate row; the batch-split rows
+        // start at index 2 -- fragile-by-construction, flagged directly by
+        // the user, since this addresses a screen ROW POSITION, not a
+        // batch/item number.
+        var request = WarehouseHelpers.BuildSetPickedQuantityRequest(new SetPickedQuantityRequest
+        {
+            DeliveryNumber = "0082291409", PickedQuantities = [400m, 400m, 400m],
+        });
+
+        var rows = request.InputTablesItems["BDCTABLE"];
+        Assert.Equal("400,000", rows.Single(r => r.GetValueOrDefault("FNAM") as string == "LIPSD-PIKMG(02)")["FVAL"]);
+        Assert.Equal("400,000", rows.Single(r => r.GetValueOrDefault("FNAM") as string == "LIPSD-PIKMG(03)")["FVAL"]);
+        Assert.Equal("400,000", rows.Single(r => r.GetValueOrDefault("FNAM") as string == "LIPSD-PIKMG(04)")["FVAL"]);
+    }
+
+    [Fact]
+    public void BuildSetPickedQuantityRequest_omits_LIKP_BLDAT_when_not_supplied_and_never_sends_KODAT_or_KOUHR()
+    {
+        // KODAT/KOUHR are never sent at all -- confirmed live that both are
+        // rejected as "Field ... does not exist in dynpro SAPMV50A 1000"
+        // despite SHDB recording them alongside BLDAT.
+        var request = WarehouseHelpers.BuildSetPickedQuantityRequest(new SetPickedQuantityRequest
+        {
+            DeliveryNumber = "0082291409", PickedQuantities = [400m],
+        });
+
+        var rows = request.InputTablesItems["BDCTABLE"];
+        Assert.DoesNotContain(rows, r => r.GetValueOrDefault("FNAM") as string == "LIKP-BLDAT");
+        Assert.DoesNotContain(rows, r => r.GetValueOrDefault("FNAM") as string == "LIKP-KODAT");
+        Assert.DoesNotContain(rows, r => r.GetValueOrDefault("FNAM") as string == "LIKP-KOUHR");
+    }
+
+    [Fact]
+    public void BuildSetPickedQuantityRequest_sends_LIKP_BLDAT_once_per_screen_when_supplied()
+    {
+        var request = WarehouseHelpers.BuildSetPickedQuantityRequest(new SetPickedQuantityRequest
+        {
+            DeliveryNumber = "0082291409", PickedQuantities = [400m], BillingDate = "29.04.2022",
+        });
+
+        var rows = request.InputTablesItems["BDCTABLE"];
+        var bldatRows = rows.Where(r => r.GetValueOrDefault("FNAM") as string == "LIKP-BLDAT").ToList();
+        Assert.Equal(2, bldatRows.Count); // sent once per screen-1000 hit, matching the real recording
+        Assert.All(bldatRows, r => Assert.Equal("29.04.2022", r["FVAL"]));
     }
 }

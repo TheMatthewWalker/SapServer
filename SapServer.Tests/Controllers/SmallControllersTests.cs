@@ -1,4 +1,3 @@
-using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using SapServer.Controllers;
@@ -8,6 +7,7 @@ using SapServer.Models;
 using SapServer.Models.Bapi;
 using SapServer.Services.Interfaces;
 using SapServer.Tests.Infrastructure;
+using System.Web.Http;
 
 namespace SapServer.Tests.Controllers;
 
@@ -39,7 +39,7 @@ public class LogisticsControllerTests
 
         var result = await _controller.GetOpenPicksheets(CancellationToken.None);
 
-        Assert.IsType<OkObjectResult>(result);
+        ControllerTestHelpers.AssertOk(result);
         _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
     }
 }
@@ -79,8 +79,8 @@ public class FunctionControllerTests
 
         var result = await _controller.GetFunctionParams(new FunctionQuery { FunctionName = "Z_SOME_RFC" }, CancellationToken.None);
 
-        var ok = Assert.IsType<OkObjectResult>(result);
-        var body = Assert.IsType<ApiResponse<FunctionParams[]>>(ok.Value);
+        var ok = ControllerTestHelpers.AssertOk(result);
+        var body = Assert.IsType<ApiResponse<FunctionParams[]>>(ok);
         Assert.Equal(2, body.Data!.Length);
         _pool.Verify(p => p.ExecuteAsync(It.Is<RfcRequest>(r => r.FunctionName == FunctionHelper.FnGetFunctionFields), It.IsAny<CancellationToken>()), Times.Once);
     }
@@ -103,7 +103,7 @@ public class ConsignmentControllerTests
     {
         var result = await _controller.GetVendorGr(sapVendorNumber: "", sinceDate: null, CancellationToken.None);
 
-        Assert.IsType<BadRequestObjectResult>(result);
+        ControllerTestHelpers.AssertBadRequest(result);
         _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -115,7 +115,7 @@ public class ConsignmentControllerTests
 
         var result = await _controller.GetVendorGr("0000100123", null, CancellationToken.None);
 
-        Assert.IsType<OkObjectResult>(result);
+        ControllerTestHelpers.AssertOk(result);
         _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
     }
 
@@ -127,7 +127,7 @@ public class ConsignmentControllerTests
 
         var result = await _controller.GetConsignmentStock(CancellationToken.None);
 
-        Assert.IsType<OkObjectResult>(result);
+        ControllerTestHelpers.AssertOk(result);
         _permissions.Verify(p => p.CanExecuteAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 }
@@ -170,8 +170,8 @@ public class MrpAnalysisControllerTests
 
         var result = await _controller.GetConsumptionByYear(CancellationToken.None);
 
-        var ok = Assert.IsType<OkObjectResult>(result);
-        var body = Assert.IsType<ApiResponse<ConsumptionByYearRow[]>>(ok.Value);
+        var ok = ControllerTestHelpers.AssertOk(result);
+        var body = Assert.IsType<ApiResponse<ConsumptionByYearRow[]>>(ok);
         var row = Assert.Single(body.Data!);
         Assert.Equal("30005R", row.Material);
         Assert.Equal(2025, row.FiscalYear);
@@ -216,8 +216,8 @@ public class MrpAnalysisControllerTests
 
         var result = await _controller.GetGoodsReceiptHistory(null, CancellationToken.None);
 
-        var ok = Assert.IsType<OkObjectResult>(result);
-        var body = Assert.IsType<ApiResponse<GoodsReceiptHistoryRow[]>>(ok.Value);
+        var ok = ControllerTestHelpers.AssertOk(result);
+        var body = Assert.IsType<ApiResponse<GoodsReceiptHistoryRow[]>>(ok);
         var row = Assert.Single(body.Data!);
         Assert.Equal("30005R", row.Material);
         Assert.Equal("0000099999", row.Vendor); // resolved via EKKO, not MSEG (which was blank)
@@ -266,8 +266,8 @@ public class MrpAnalysisControllerTests
             new BomExplosionRequest { Items = [new BomExplosionItem { Material = "FG1", Quantity = 10m }] },
             CancellationToken.None);
 
-        var ok = Assert.IsType<OkObjectResult>(result);
-        var body = Assert.IsType<ApiResponse<BomExplosionResult>>(ok.Value);
+        var ok = ControllerTestHelpers.AssertOk(result);
+        var body = Assert.IsType<ApiResponse<BomExplosionResult>>(ok);
         var row = Assert.Single(body.Data!.RawMaterials);
         Assert.Equal("RAW1", row.Material);
         Assert.Equal(20m, row.Quantity); // 10 * 2

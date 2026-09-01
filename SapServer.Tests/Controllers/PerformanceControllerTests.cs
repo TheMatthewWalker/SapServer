@@ -1,4 +1,3 @@
-using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using SapServer.Controllers;
@@ -8,6 +7,7 @@ using SapServer.Models;
 using SapServer.Models.Bapi;
 using SapServer.Services.Interfaces;
 using SapServer.Tests.Infrastructure;
+using System.Web.Http;
 
 namespace SapServer.Tests.Controllers;
 
@@ -41,7 +41,7 @@ public class PerformanceControllerTests
     {
         _pool.Setup(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>())).ReturnsAsync(new RfcResponse());
         var result = await _controller.GetStock(CancellationToken.None);
-        Assert.IsType<OkObjectResult>(result);
+        ControllerTestHelpers.AssertOk(result);
         _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
     }
 
@@ -50,7 +50,7 @@ public class PerformanceControllerTests
     {
         _pool.Setup(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>())).ReturnsAsync(new RfcResponse());
         var result = await _controller.GetVbfaOrderLink("0080001234", CancellationToken.None);
-        Assert.IsType<OkObjectResult>(result);
+        ControllerTestHelpers.AssertOk(result);
     }
 
     [Fact]
@@ -58,7 +58,7 @@ public class PerformanceControllerTests
     {
         _pool.Setup(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>())).ReturnsAsync(new RfcResponse());
         var result = await _controller.GetValuationClasses(CancellationToken.None);
-        Assert.IsType<OkObjectResult>(result);
+        ControllerTestHelpers.AssertOk(result);
         _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
@@ -71,8 +71,22 @@ public class PerformanceControllerTests
 
         var result = await _controller.GetTurnsValClass(new TurnsValClassQuery(), CancellationToken.None);
 
-        Assert.IsType<OkObjectResult>(result);
+        ControllerTestHelpers.AssertOk(result);
         _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Exactly(2)); // master + forecast only
+    }
+
+    [Fact]
+    public async Task GetTurnsValClass_does_not_throw_when_query_is_null()
+    {
+        // Same [FromUri]-binds-null-for-an-all-optional-complex-type fix as
+        // WarehouseController.GetOpenTransferRequirements - see that test class.
+        _pool.SetupSequence(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new RfcResponse())
+            .ReturnsAsync(new RfcResponse());
+
+        var result = await _controller.GetTurnsValClass(null!, CancellationToken.None);
+
+        ControllerTestHelpers.AssertOk(result);
     }
 
     [Fact]
@@ -80,7 +94,7 @@ public class PerformanceControllerTests
     {
         var result = await _controller.ChangeValuationClass(new ChangeValuationClassRequest { Order = "", Changes = [] }, CancellationToken.None);
 
-        Assert.IsType<UnprocessableEntityObjectResult>(result);
+        ControllerTestHelpers.AssertUnprocessableEntity(result);
         _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -90,7 +104,7 @@ public class PerformanceControllerTests
         var result = await _controller.ChangeValuationClass(
             new ChangeValuationClassRequest { Order = "000001234500", Changes = [] }, CancellationToken.None);
 
-        Assert.IsType<UnprocessableEntityObjectResult>(result);
+        ControllerTestHelpers.AssertUnprocessableEntity(result);
         _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -107,8 +121,8 @@ public class PerformanceControllerTests
             Changes = [new ValClassChangeItem { Material = "30005R", NewValuationClass = "3000" }],
         }, CancellationToken.None);
 
-        var unprocessable = Assert.IsType<UnprocessableEntityObjectResult>(result);
-        var body = Assert.IsType<ApiResponse<ChangeValuationClassResponse>>(unprocessable.Value);
+        var unprocessable = ControllerTestHelpers.AssertUnprocessableEntity(result);
+        var body = Assert.IsType<ApiResponse<ChangeValuationClassResponse>>(unprocessable);
         Assert.False(body.Data!.Success);
         Assert.Contains("does not exist in company code", body.Error!.Message);
         // Only the two company-code lookups — never reaches the material master / stock / MB1A steps.

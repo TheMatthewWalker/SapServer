@@ -1,6 +1,6 @@
 using System.Text.Json;
-using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Owin;
 using SapServer.Exceptions;
 using SapServer.Middleware;
 
@@ -8,14 +8,25 @@ namespace SapServer.Tests.Middleware;
 
 public class ExceptionHandlingMiddlewareTests
 {
+    // OwinMiddleware's Invoke is what ExceptionHandlingMiddleware.Invoke calls
+    // as Next.Invoke(context) — this stands in for "the rest of the pipeline
+    // threw", the OWIN-middleware equivalent of the old RequestDelegate lambda.
+    private sealed class ThrowingMiddleware : OwinMiddleware
+    {
+        private readonly Exception _exception;
+        public ThrowingMiddleware(Exception exception) : base(null!) => _exception = exception;
+        public override Task Invoke(IOwinContext context) => throw _exception;
+    }
+
     private static async Task<(int StatusCode, JsonElement Body)> InvokeAsync(Exception thrown)
     {
-        var middleware = new ExceptionHandlingMiddleware(_ => throw thrown, NullLogger<ExceptionHandlingMiddleware>.Instance);
+        var middleware = new ExceptionHandlingMiddleware(
+            new ThrowingMiddleware(thrown), NullLogger<ExceptionHandlingMiddleware>.Instance);
 
-        var context = new DefaultHttpContext();
+        var context = new OwinContext();
         context.Response.Body = new MemoryStream();
 
-        await middleware.InvokeAsync(context);
+        await middleware.Invoke(context);
 
         context.Response.Body.Seek(0, SeekOrigin.Begin);
         using var doc = await JsonDocument.ParseAsync(context.Response.Body);

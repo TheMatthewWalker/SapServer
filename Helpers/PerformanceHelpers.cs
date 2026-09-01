@@ -58,8 +58,8 @@ internal static class PerformanceHelpers
                 Batch           = cols[1],
                 StorageBin      = cols[2],
                 StorageType     = cols[3],
-                TotalQty        = decimal.TryParse(cols[4], out var gesme) ? gesme : 0m,
-                AvailableQty    = decimal.TryParse(cols[5], out var verme) ? verme : 0m,
+                TotalQty        = RfcRowExtensions.ParseSapDecimal(cols[4]) ?? 0m,
+                AvailableQty    = RfcRowExtensions.ParseSapDecimal(cols[5]) ?? 0m,
                 StorageLocation = cols[6],
                 PackagingMaterial = cols[7],
                 ProfitCentre = pcList.GetValueOrDefault(
@@ -331,7 +331,10 @@ internal static class PerformanceHelpers
     {
         var builder = new RfcRequestBuilder(FnReadTables)
             .Import("DELIMITER", "|")
-            .Import("ROWCOUNT",  "")
+            // See LogisticsHelpers.BuildPicksheetRequest's comment - ROWCOUNT
+            // must be a real integer for real SAP NCo (0 = RFC_READ_TABLE's
+            // standard "no limit"), not an empty string.
+            .Import("ROWCOUNT",  0)
             .Import("NO_DATA",   " ")
             .TableRow("QUERY_TABLES", new { TABNAME = "MARC" })
             .TableItemRow("query_FIELDS", new { TABNAME = "MARC", FIELDNAME = "MATNR" })
@@ -490,23 +493,18 @@ internal static class PerformanceHelpers
     private static string Str(Dictionary<string, object?> row, string key) =>
         row.GetValueOrDefault(key)?.ToString() ?? "";
 
-    // SAP decimals often arrive in European format ("1.234,56", or a rate like
-    // "1,00000") — strip thousands-separator dots and convert the decimal comma
-    // to a point before parsing, same normalization as RfcRowExtensions.GetDecimal.
-    // Without this, decimal.TryParse (culture-dependent, no NumberStyles override)
-    // silently treated the comma as a thousands separator instead of a decimal
-    // point, inflating values by ~100,000x — e.g. a currency rate of "1,00000"
-    // parsed as 100000 instead of 1.0. That corrupted every non-empty-currency
-    // row's LocalAmount via ApplyCurrencyConversion (rate = Dec(r, "UKURS")).
+    // Same shared parsing as RfcRowExtensions.ParseSapDecimal - see its doc
+    // comment for why this can't just unconditionally strip every '.' as a
+    // thousands separator (that was a genuine bug: it silently inflated any
+    // plain-invariant value, e.g. a currency rate of "1.00000", by a power
+    // of ten matching its decimal-place count, confirmed for real against a
+    // live SAP system).
     private static decimal Dec(Dictionary<string, object?> row, string key, decimal fallback = 0m)
     {
         var s = row.GetValueOrDefault(key)?.ToString();
         if (string.IsNullOrWhiteSpace(s)) return fallback;
 
-        s = s.Replace(".", "").Replace(',', '.');
-        //Console.WriteLine(s);
-
-        return decimal.TryParse(s, NumberStyles.Any, CultureInfo.InvariantCulture, out var v) ? v : fallback;
+        return RfcRowExtensions.ParseSapDecimal(s) ?? fallback;
     }
 
     private static DateTime? ParseSapDate(object? value) => value switch
@@ -750,7 +748,7 @@ internal static class PerformanceHelpers
 
             var material = NormaliseMaterial(Str(matnrList[idx - 1], "MATNR"));
             var period   = Str(req, "PERIOD"); // "YYYYMM"
-            if (period.Length != 6 || !int.TryParse(period[..4], out var y) || !int.TryParse(period[4..], out var m))
+            if (period.Length != 6 || !int.TryParse(period.Substring(0, 4), out var y) || !int.TryParse(period.Substring(4), out var m)) // net48 lacks string range indexers
                 continue;
 
             var offset = (y - today.Year) * 12 + (m - today.Month);
@@ -846,7 +844,7 @@ internal static class PerformanceHelpers
                 var offset = (year - today.Year) * 12 + (m - today.Month);
                 if (offset < -(HistoryMonths - 1) || offset > 0) continue;
 
-                arr[offset + HistoryMonths - 1] += decimal.TryParse(cols[2 + m].Trim(), out var qty) ? qty : 0m;
+                arr[offset + HistoryMonths - 1] += RfcRowExtensions.ParseSapDecimal(cols[2 + m]) ?? 0m;
             }
         }
 
@@ -893,7 +891,7 @@ internal static class PerformanceHelpers
 
             decimal yearTotal = 0m;
             for (var m = 1; m <= 12; m++)
-                yearTotal += decimal.TryParse(cols[2 + m].Trim(), out var qty) ? qty : 0m;
+                yearTotal += RfcRowExtensions.ParseSapDecimal(cols[2 + m]) ?? 0m;
 
             var key = (material, year);
             totals[key] = totals.GetValueOrDefault(key) + yearTotal;
@@ -1024,7 +1022,7 @@ internal static class PerformanceHelpers
             if (cols.Length < MkolColumns.Length) continue;
 
             var material = NormaliseMaterial(cols[0]);
-            var qty      = decimal.TryParse(cols[2].Trim(), out var v) ? v : 0m;
+            var qty      = RfcRowExtensions.ParseSapDecimal(cols[2]) ?? 0m;
 
             result[material] = result.GetValueOrDefault(material) + qty;
         }
@@ -1094,7 +1092,7 @@ internal static class PerformanceHelpers
         bool historyMode,
         Dictionary<string, decimal>? consignmentStock = null)
     {
-        turnMonths = Math.Clamp(turnMonths, 1, 12);
+        turnMonths = turnMonths < 1 ? 1 : turnMonths > 12 ? 12 : turnMonths; // net48 lacks Math.Clamp
         var today   = DateTime.Today;
         var results = new List<TurnsValClassRow>(materialMasterRows.Count);
 
@@ -1285,7 +1283,7 @@ internal static class PerformanceHelpers
         if (!response.Tables.TryGetValue("data_display", out var sapRows))
             return [];
 
-        static decimal N(string s) => decimal.TryParse(s.Trim(), out var v) ? v : 0m;
+        static decimal N(string s) => RfcRowExtensions.ParseSapDecimal(s) ?? 0m;
 
         return SapDelimitedParser
             .ParseRows(sapRows, '|', skipHeader: true)
@@ -1415,7 +1413,7 @@ internal static class PerformanceHelpers
             .Where(c => c.Length >= 5)
             .Select(c => new StockMovementLine(
                 NormaliseMaterial(c[0]), c[1].Trim(), c[2].Trim(),
-                decimal.TryParse(c[3].Trim(), out var qty) ? qty : 0m, c[4].Trim(), null))
+                RfcRowExtensions.ParseSapDecimal(c[3]) ?? 0m, c[4].Trim(), null))
             .Where(l => l.Quantity != 0)
             .ToList();
     }
@@ -1430,7 +1428,7 @@ internal static class PerformanceHelpers
             .Where(c => c.Length >= 6)
             .Select(c => new StockMovementLine(
                 NormaliseMaterial(c[0]), c[1].Trim(), c[2].Trim(),
-                decimal.TryParse(c[3].Trim(), out var qty) ? qty : 0m, c[4].Trim(), c[5].Trim()))
+                RfcRowExtensions.ParseSapDecimal(c[3]) ?? 0m, c[4].Trim(), c[5].Trim()))
             .Where(l => l.Quantity != 0)
             .ToList();
     }

@@ -30,7 +30,15 @@ internal static class LogisticsHelpers
         int records = 0;
         var builder = new RfcRequestBuilder(FnReadTables)
             .Import("DELIMITER", "|")
-            .Import("ROWCOUNT",  "")
+            // ROWCOUNT=0 is RFC_READ_TABLE-family's standard "no limit"
+            // convention. The old COM/VARIANT transport apparently tolerated
+            // an empty string here (silently coerced/ignored), but real SAP
+            // NCo's typed RfcDataContainer.SetValue rejects "" for an INT4
+            // parameter outright - confirmed for real against a live IIS
+            // deploy: RfcTypeConversionException, "cannot convert String
+            // into INT4 ... Cannot convert "" into INT4", thrown before the
+            // RFC call is even made.
+            .Import("ROWCOUNT",  0)
             .Import("NO_DATA",   " ")
             .TableRow("QUERY_TABLES", new { TABNAME = table });
 
@@ -87,7 +95,15 @@ internal static class LogisticsHelpers
         var table = "VBUK";
         var builder = new RfcRequestBuilder(FnReadTables)
             .Import("DELIMITER", "|")
-            .Import("ROWCOUNT",  "")
+            // ROWCOUNT=0 is RFC_READ_TABLE-family's standard "no limit"
+            // convention. The old COM/VARIANT transport apparently tolerated
+            // an empty string here (silently coerced/ignored), but real SAP
+            // NCo's typed RfcDataContainer.SetValue rejects "" for an INT4
+            // parameter outright - confirmed for real against a live IIS
+            // deploy: RfcTypeConversionException, "cannot convert String
+            // into INT4 ... Cannot convert "" into INT4", thrown before the
+            // RFC call is even made.
+            .Import("ROWCOUNT",  0)
             .Import("NO_DATA",   " ")
             .TableRow("QUERY_TABLES", new { TABNAME = table });
 

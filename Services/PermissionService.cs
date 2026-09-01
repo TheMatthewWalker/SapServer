@@ -79,10 +79,14 @@ public sealed class PermissionService : IPermissionService
 
         try
         {
-            await using var conn = new SqlConnection(_auth.SqlConnectionString);
+            // net48's Microsoft.Data.SqlClient build doesn't implement
+            // IAsyncDisposable on SqlConnection/SqlCommand (that only came
+            // with the netstandard2.1+/net6.0+ targets) — plain `using` still
+            // disposes synchronously, which is fine here.
+            using var conn = new SqlConnection(_auth.SqlConnectionString);
             await conn.OpenAsync(ct);
 
-            await using var cmd = new SqlCommand(sql, conn);
+            using var cmd = new SqlCommand(sql, conn);
             cmd.Parameters.Add("@userId", System.Data.SqlDbType.Int).Value    = userId;
             cmd.Parameters.Add("@fn",     System.Data.SqlDbType.NVarChar, 100).Value = functionName;
 

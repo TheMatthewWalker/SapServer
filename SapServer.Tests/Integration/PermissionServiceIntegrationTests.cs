@@ -33,7 +33,7 @@ public class PermissionServiceIntegrationTests : IAsyncLifetime
     {
         if (!StagingDb.IsConfigured) return;
 
-        await using var conn = new SqlConnection(StagingDb.ConnectionString());
+        using var conn = new SqlConnection(StagingDb.ConnectionString());
         await conn.OpenAsync();
 
         _activeUserId = await InsertUser(conn, "jest.perm.active", isActive: true, isLocked: false);
@@ -48,14 +48,14 @@ public class PermissionServiceIntegrationTests : IAsyncLifetime
         await InsertDepartment(conn, _wildcardUserId, TestDepartment + "_wildcard");
         // _noPermissionUserId deliberately gets no department at all.
 
-        await using (var cmd = new SqlCommand(
+        using (var cmd = new SqlCommand(
             "INSERT INTO dbo.SapDepartmentPermissions (Department, FunctionName, GrantedBy) VALUES (@dept, @fn, 'jest')", conn))
         {
             cmd.Parameters.AddWithValue("@dept", TestDepartment);
             cmd.Parameters.AddWithValue("@fn", TestFunctionName);
             await cmd.ExecuteNonQueryAsync();
         }
-        await using (var cmd = new SqlCommand(
+        using (var cmd = new SqlCommand(
             "INSERT INTO dbo.SapDepartmentPermissions (Department, FunctionName, GrantedBy) VALUES (@dept, '*', 'jest')", conn))
         {
             cmd.Parameters.AddWithValue("@dept", TestDepartment + "_wildcard");
@@ -67,10 +67,10 @@ public class PermissionServiceIntegrationTests : IAsyncLifetime
     {
         if (!StagingDb.IsConfigured) return;
 
-        await using var conn = new SqlConnection(StagingDb.ConnectionString());
+        using var conn = new SqlConnection(StagingDb.ConnectionString());
         await conn.OpenAsync();
 
-        await using var cmd = new SqlCommand(@"
+        using var cmd = new SqlCommand(@"
             DELETE FROM dbo.SapDepartmentPermissions WHERE Department LIKE @deptPrefix + '%';
             DELETE FROM dbo.PortalUserDepartments WHERE Department LIKE @deptPrefix + '%';
             DELETE FROM dbo.PortalUsers WHERE Username LIKE 'jest.perm.%';", conn);
@@ -80,7 +80,7 @@ public class PermissionServiceIntegrationTests : IAsyncLifetime
 
     private static async Task<int> InsertUser(SqlConnection conn, string username, bool isActive, bool isLocked)
     {
-        await using var cmd = new SqlCommand(@"
+        using var cmd = new SqlCommand(@"
             INSERT INTO dbo.PortalUsers (Username, FirstName, LastName, Email, PasswordHash, Role, IsActive, IsLocked)
             OUTPUT INSERTED.UserID
             VALUES (@u, 'Jest', 'Integration', @email, 'unused-hash', 'operator', @active, @locked)", conn);
@@ -93,7 +93,7 @@ public class PermissionServiceIntegrationTests : IAsyncLifetime
 
     private static async Task InsertDepartment(SqlConnection conn, int userId, string department)
     {
-        await using var cmd = new SqlCommand(
+        using var cmd = new SqlCommand(
             "INSERT INTO dbo.PortalUserDepartments (UserID, Department) VALUES (@u, @d)", conn);
         cmd.Parameters.AddWithValue("@u", userId);
         cmd.Parameters.AddWithValue("@d", department);

@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Mvc;
+using System.Web.Http;
 using SapServer.Helpers;
 using SapServer.Models;
 using SapServer.Models.Bapi;
@@ -6,7 +6,7 @@ using SapServer.Services.Interfaces;
 
 namespace SapServer.Controllers;
 
-[Route("api/function")]
+[RoutePrefix("api/function")]
 public sealed class FunctionController : SapControllerBase
 {
     public FunctionController(
@@ -17,10 +17,10 @@ public sealed class FunctionController : SapControllerBase
 
     // ── GET /api/function/params ──────────────────────────────────────────────
 
-    [HttpGet("params")]
-    [ProducesResponseType(typeof(ApiResponse<FunctionParams[]>), 200)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
-    public async Task<IActionResult> GetFunctionParams([FromBody] FunctionQuery body, CancellationToken ct)
+    [HttpGet]
+
+    [Route("params")]
+    public async Task<IHttpActionResult> GetFunctionParams([FromBody] FunctionQuery body, CancellationToken ct)
     {
         await CheckPermissionAsync(GetUserId(), FunctionHelper.FnGetFunction, ct);
 

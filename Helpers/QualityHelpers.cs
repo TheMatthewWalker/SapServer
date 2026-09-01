@@ -61,7 +61,7 @@ internal static class QualityHelpers
                 StorageType     = cols[1],
                 Bin             = cols[2],
                 Material        = cols[3],
-                AvailableQty    = decimal.TryParse(cols[4], out var qty) ? qty : 0m,
+                AvailableQty    = RfcRowExtensions.ParseSapDecimal(cols[4]) ?? 0m,
                 Batch           = cols[5],
                 StockCategory   = cols[6],
                 SpecialStockInd = cols[7],

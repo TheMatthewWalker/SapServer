@@ -1,4 +1,5 @@
-using Microsoft.AspNetCore.Mvc;
+using System.Net;
+using System.Web.Http;
 using Microsoft.Extensions.Options;
 using SapServer.Configuration;
 using SapServer.Helpers;
@@ -8,15 +9,15 @@ using SapServer.Services.Interfaces;
 
 namespace SapServer.Controllers;
 
-[Route("api/purchasing")]
+[RoutePrefix("api/purchasing")]
 public sealed class PurchasingController : SapControllerBase
 {
-    private readonly SapPoolOptions _poolOptions;
+    private readonly SapNcoOptions _poolOptions;
 
     public PurchasingController(
         ISapConnectionPool pool,
         IPermissionService permissions,
-        IOptions<SapPoolOptions> poolOptions,
+        IOptions<SapNcoOptions> poolOptions,
         ILogger<PurchasingController> logger)
         : base(pool, permissions, logger)
     {
@@ -35,13 +36,12 @@ public sealed class PurchasingController : SapControllerBase
     /// BAPI call, matching the pattern already established in
     /// CostingController.PostFreight for BAPI_ACC_DOCUMENT_POST.
     /// </summary>
-    [HttpPost("create-po")]
-    [ProducesResponseType(typeof(ApiResponse<PoCreateRow>), 200)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
-    public async Task<IActionResult> CreatePurchaseOrder(
+    [HttpPost]
+    [Route("create-po")]
+    public async Task<IHttpActionResult> CreatePurchaseOrder(
         [FromBody] PoCreateRequest body,
-        [FromQuery] bool dryRun,
-        CancellationToken ct)
+        [FromUri] bool dryRun = false,
+        CancellationToken ct = default)
     {
         await CheckPermissionAsync(GetUserId(), PurchasingHelper.FnPoCreate, ct);
 
@@ -50,19 +50,25 @@ public sealed class PurchasingController : SapControllerBase
         if (dryRun)
             return Ok(ApiResponse<RfcRequest>.Ok(request));
 
-        var worker = _pool.AcquireWorker();
-
-        var data = await _pool.ExecuteOnWorkerAsync(worker, request, ct);
-        var response = PurchasingHelper.ParsePoCreateResult(data);
-
-        if (!response.Success)
+        var worker = await _pool.AcquireWorkerAsync(ct);
+        try
         {
-            await _pool.ExecuteOnWorkerAsync(worker, CommitHelper.BuildBapiRollback(), ct);
-            return BadRequest(ApiResponse<PoCreateRow>.Fail("INVALID_DATA", "Purchase order creation failed. Transaction rolled back.", response));
-        }
+            var data = await _pool.ExecuteOnWorkerAsync(worker, request, ct);
+            var response = PurchasingHelper.ParsePoCreateResult(data);
 
-        await _pool.ExecuteOnWorkerAsync(worker, CommitHelper.BuildBapiCommit(), ct);
-        return Ok(ApiResponse<PoCreateRow>.Ok(response));
+            if (!response.Success)
+            {
+                await _pool.ExecuteOnWorkerAsync(worker, CommitHelper.BuildBapiRollback(), ct);
+                return Content(HttpStatusCode.BadRequest, ApiResponse<PoCreateRow>.Fail("INVALID_DATA", "Purchase order creation failed. Transaction rolled back.", response));
+            }
+
+            await _pool.ExecuteOnWorkerAsync(worker, CommitHelper.BuildBapiCommit(), ct);
+            return Ok(ApiResponse<PoCreateRow>.Ok(response));
+        }
+        finally
+        {
+            await _pool.ReleaseWorkerAsync(worker);
+        }
     }
 
     /// <summary>
@@ -75,10 +81,9 @@ public sealed class PurchasingController : SapControllerBase
     /// determination set it). A plain service-worker read — no elevation
     /// needed, this doesn't create or change anything in SAP.
     /// </summary>
-    [HttpGet("{poNumber}/price")]
-    [ProducesResponseType(typeof(ApiResponse<Dictionary<string, decimal>>), 200)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
-    public async Task<IActionResult> GetPoPrice(string poNumber, CancellationToken ct)
+    [HttpGet]
+    [Route("{poNumber}/price")]
+    public async Task<IHttpActionResult> GetPoPrice(string poNumber, CancellationToken ct)
     {
         await CheckPermissionAsync(GetUserId(), PurchasingHelper.FnPoCreate, ct);
 
@@ -107,13 +112,12 @@ public sealed class PurchasingController : SapControllerBase
     /// DocumentNumber field is exactly what's needed to store the material
     /// document per cost line for later individual reversal.
     /// </summary>
-    [HttpPost("post-goods-receipt")]
-    [ProducesResponseType(typeof(ApiResponse<BdcResponse>), 200)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
-    public async Task<IActionResult> PostGoodsReceipt(
+    [HttpPost]
+    [Route("post-goods-receipt")]
+    public async Task<IHttpActionResult> PostGoodsReceipt(
         [FromBody] GoodsReceiptRequest body,
-        [FromQuery] bool dryRun,
-        CancellationToken ct)
+        [FromUri] bool dryRun = false,
+        CancellationToken ct = default)
     {
         await CheckPermissionAsync(GetUserId(), GoodsReceiptHelper.TransactionCode, ct);
 
@@ -141,13 +145,12 @@ public sealed class PurchasingController : SapControllerBase
     /// material document number of the one cost line's GR being reversed
     /// (see PostGoodsReceipt/BdcResponse.DocumentNumber).
     /// </summary>
-    [HttpPost("reverse-goods-receipt")]
-    [ProducesResponseType(typeof(ApiResponse<BdcResponse>), 200)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
-    public async Task<IActionResult> ReverseGoodsReceipt(
+    [HttpPost]
+    [Route("reverse-goods-receipt")]
+    public async Task<IHttpActionResult> ReverseGoodsReceipt(
         [FromBody] Mf41Request body,
-        [FromQuery] bool dryRun,
-        CancellationToken ct)
+        [FromUri] bool dryRun = false,
+        CancellationToken ct = default)
     {
         await CheckPermissionAsync(GetUserId(), ProductionHelpers.FnCreate, ct);
 
@@ -185,29 +188,28 @@ public sealed class PurchasingController : SapControllerBase
     /// back out) regardless of how far the flow got, so a slot can never be
     /// left logged in as one user waiting to be handed to somebody else.
     /// </summary>
-    [HttpPost("create-po-and-receipt")]
-    [ProducesResponseType(typeof(ApiResponse<CreatePoAndReceiptResponse>), 200)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 400)]
-    public async Task<IActionResult> CreatePurchaseOrderAndReceipt(
+    [HttpPost]
+    [Route("create-po-and-receipt")]
+    public async Task<IHttpActionResult> CreatePurchaseOrderAndReceipt(
         [FromBody] CreatePoAndReceiptRequest body,
         CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(body.SapUsername) || string.IsNullOrWhiteSpace(body.SapPassword))
-            return BadRequest(ApiResponse<CreatePoAndReceiptResponse>.Fail(
+            return Content(HttpStatusCode.BadRequest, ApiResponse<CreatePoAndReceiptResponse>.Fail(
                 "MISSING_CREDENTIALS", "SAP username and password are required for this elevated action.",
                 new CreatePoAndReceiptResponse()));
 
         if (body.Items.Count == 0)
-            return BadRequest(ApiResponse<CreatePoAndReceiptResponse>.Fail(
+            return Content(HttpStatusCode.BadRequest, ApiResponse<CreatePoAndReceiptResponse>.Fail(
                 "NO_ITEMS", "At least one PO item is required.", new CreatePoAndReceiptResponse()));
 
         // Same SAP system/client as the service account — only the logon user
         // and password differ, matching one specific portal user's own SAP access.
         var elevatedCreds = new SapConnectionOptions
         {
-            System   = _poolOptions.ServiceAccount.System,
+            AppServerHost = _poolOptions.ServiceAccount.AppServerHost,
             Client   = _poolOptions.ServiceAccount.Client,
-            SystemId = _poolOptions.ServiceAccount.SystemId,
+            SystemNumber  = _poolOptions.ServiceAccount.SystemNumber,
             User     = body.SapUsername,
             Password = body.SapPassword,
             Language = _poolOptions.ServiceAccount.Language,
@@ -242,7 +244,7 @@ public sealed class PurchasingController : SapControllerBase
             if (!poResponse.Success)
             {
                 await _pool.ExecuteOnWorkerAsync(worker, CommitHelper.BuildBapiRollback(), ct);
-                return BadRequest(ApiResponse<CreatePoAndReceiptResponse>.Fail(
+                return Content(HttpStatusCode.BadRequest, ApiResponse<CreatePoAndReceiptResponse>.Fail(
                     "INVALID_DATA", "Purchase order creation failed. Transaction rolled back.",
                     new CreatePoAndReceiptResponse
                     {
@@ -325,27 +327,26 @@ public sealed class PurchasingController : SapControllerBase
     /// nothing to receive in this same call. That happens later, separately,
     /// once the shipment is actually received.
     /// </summary>
-    [HttpPost("create-po-elevated")]
-    [ProducesResponseType(typeof(ApiResponse<CreatePoElevatedResponse>), 200)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 400)]
-    public async Task<IActionResult> CreatePurchaseOrderElevated(
+    [HttpPost]
+    [Route("create-po-elevated")]
+    public async Task<IHttpActionResult> CreatePurchaseOrderElevated(
         [FromBody] CreatePoElevatedRequest body,
         CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(body.SapUsername) || string.IsNullOrWhiteSpace(body.SapPassword))
-            return BadRequest(ApiResponse<CreatePoElevatedResponse>.Fail(
+            return Content(HttpStatusCode.BadRequest, ApiResponse<CreatePoElevatedResponse>.Fail(
                 "MISSING_CREDENTIALS", "SAP username and password are required for this elevated action.",
                 new CreatePoElevatedResponse()));
 
         if (body.Items.Count == 0)
-            return BadRequest(ApiResponse<CreatePoElevatedResponse>.Fail(
+            return Content(HttpStatusCode.BadRequest, ApiResponse<CreatePoElevatedResponse>.Fail(
                 "NO_ITEMS", "At least one PO item is required.", new CreatePoElevatedResponse()));
 
         var elevatedCreds = new SapConnectionOptions
         {
-            System   = _poolOptions.ServiceAccount.System,
+            AppServerHost = _poolOptions.ServiceAccount.AppServerHost,
             Client   = _poolOptions.ServiceAccount.Client,
-            SystemId = _poolOptions.ServiceAccount.SystemId,
+            SystemNumber  = _poolOptions.ServiceAccount.SystemNumber,
             User     = body.SapUsername,
             Password = body.SapPassword,
             Language = _poolOptions.ServiceAccount.Language,
@@ -368,7 +369,7 @@ public sealed class PurchasingController : SapControllerBase
             if (!poResponse.Success)
             {
                 await _pool.ExecuteOnWorkerAsync(worker, CommitHelper.BuildBapiRollback(), ct);
-                return BadRequest(ApiResponse<CreatePoElevatedResponse>.Fail(
+                return Content(HttpStatusCode.BadRequest, ApiResponse<CreatePoElevatedResponse>.Fail(
                     "INVALID_DATA", "Purchase order creation failed. Transaction rolled back.",
                     new CreatePoElevatedResponse
                     {

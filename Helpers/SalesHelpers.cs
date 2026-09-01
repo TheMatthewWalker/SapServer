@@ -19,9 +19,9 @@ public sealed record ScheduleWaterfallRequest
     public List<string> Materials { get; init; } = [];
     public bool IncludeForecast { get; init; } = true;
     public bool IncludeJit { get; init; } = true;
-    public DateOnly? IdocCreatedAfter { get; init; }
-    public DateOnly ScheduleDateFrom { get; init; }
-    public DateOnly ScheduleDateTo { get; init; }
+    public DateTime? IdocCreatedAfter { get; init; }
+    public DateTime ScheduleDateFrom { get; init; }
+    public DateTime ScheduleDateTo { get; init; }
 
     // Source tool's "Show Idocs with 0 Qty." checkbox — drives an outer join
     // (vs. the default inner join) on the history/current table in the VBA
@@ -51,9 +51,9 @@ public sealed record ScheduleWaterfallRow
     public string MaterialDescription { get; init; } = ""; // VBAP~ARKTX
     public string IdocNumber { get; init; } = "";           // VBLB~DOCNUM
     public decimal CumQty { get; init; }                    // VBLB~ABEFZ — SAP's own cumulative-to-date figure
-    public DateOnly? IdocCreationDate { get; init; }        // VBLB~ERDAT
+    public DateTime? IdocCreationDate { get; init; }        // VBLB~ERDAT
     public string EntryTime { get; init; } = "";            // VBLB~ERZEI
-    public DateOnly? ScheduleLineDate { get; init; }        // VBEH~EDATU / VBEP~EDATU
+    public DateTime? ScheduleLineDate { get; init; }        // VBEH~EDATU / VBEP~EDATU
     public decimal OrderQty { get; init; }                  // VBEH~WMENG / VBEP~WMENG
     public string SalesOrg { get; init; } = "";             // VBAK~VKORG
     public string ReleaseType { get; init; } = "";          // VBLB~ABART ("1" Forecast, "2" JIT)
@@ -246,7 +246,7 @@ internal static class SalesHelpers
             builder.WhereCondition($"VBLB~ERDAT GT '{SapDate(after)}'");
     }
 
-    private static string SapDate(DateOnly date) => date.ToString("yyyyMMdd", CultureInfo.InvariantCulture);
+    private static string SapDate(DateTime date) => date.ToString("yyyyMMdd", CultureInfo.InvariantCulture);
 
     // ── Response parsing ─────────────────────────────────────────────────────
 
@@ -287,25 +287,37 @@ internal static class SalesHelpers
             .ToArray();
     }
 
-    private static decimal ParseDecimal(string value) => decimal.TryParse(value, NumberStyles.Any, CultureInfo.InvariantCulture, out var d) ? d : 0m;
+    private static decimal ParseDecimal(string value) => RfcRowExtensions.ParseSapDecimal(value) ?? 0m;
 
     // SAP dates come back from ZRFC_READ_TABLES as "YYYYMMDD" (internal ABAP
     // date format) — "00000000" (or blank) means null/no value, matching
     // get_data.bas's own "00.00.0000" blank-date check.
-    private static DateOnly? ParseSapDate(string value)
+    private static DateTime? ParseSapDate(string value)
     {
         if (value.Length != 8 || value == "00000000") return null;
-        return DateOnly.TryParseExact(value, "yyyyMMdd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var d) ? d : null;
+        return DateTime.TryParseExact(value, "yyyyMMdd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var d) ? d : null;
     }
 
     // ISO-8601 week numbering (year*100 + week), equivalent to get_data.bas's
     // own WEEKNR/WEEKNR_full functions — those implement the same
-    // Thursday-of-the-week ISO rule by hand; ISOWeek does it natively.
-    private static int WeekNumber(DateOnly? date)
+    // Thursday-of-the-week ISO rule by hand. net48 predates
+    // System.Globalization.ISOWeek (added in .NET Core 3.0 / netstandard2.1),
+    // so this uses the standard pre-ISOWeek workaround instead: shift
+    // Mon–Wed dates forward to the Thursday of their week (ISO weeks belong
+    // to the year containing their Thursday), then read the week number off
+    // that shifted date with FirstFourDayWeek/Monday rules.
+    private static int WeekNumber(DateTime? date)
     {
-        if (date is not { } d) return 0;
-        var dt = d.ToDateTime(TimeOnly.MinValue);
-        return ISOWeek.GetYear(dt) * 100 + ISOWeek.GetWeekOfYear(dt);
+        if (date is not { } dt) return 0;
+
+        var day = CultureInfo.InvariantCulture.Calendar.GetDayOfWeek(dt);
+        if (day is >= DayOfWeek.Monday and <= DayOfWeek.Wednesday)
+            dt = dt.AddDays(3);
+
+        int week = CultureInfo.InvariantCulture.Calendar.GetWeekOfYear(
+            dt, CalendarWeekRule.FirstFourDayWeek, DayOfWeek.Monday);
+
+        return dt.Year * 100 + week;
     }
 
     // ── Cum. rel reconstruction ───────────────────────────────────────────

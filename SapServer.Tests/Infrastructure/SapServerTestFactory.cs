@@ -1,26 +1,31 @@
 using System.IdentityModel.Tokens.Jwt;
+using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Security.Claims;
 using System.Text;
-using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.IdentityModel.Tokens;
+using Microsoft.Owin.Testing;
 using Moq;
 using SapServer.Services.Interfaces;
 
 namespace SapServer.Tests.Infrastructure;
 
 /// <summary>
-/// WebApplicationFactory for controller-level tests. Never lets the real
-/// SapConnectionPool or PermissionService construct (the former would spin up
-/// real STA threads trying to reach a real SAP system; the latter needs a
-/// real SQL Server) — both are replaced with Moq mocks the test configures
-/// per-scenario. Also supplies the "Auth" config section Program.cs reads
-/// eagerly (and throws on if entirely missing), since there's no real
-/// appsettings.json checked in — see appsettings.example.json.
+/// OWIN TestServer for controller-level tests — the net48/OWIN replacement
+/// for WebApplicationFactory&lt;Program&gt;, which has no equivalent outside
+/// ASP.NET Core's generic host. Drives the exact same pipeline production
+/// uses (Startup.ConfigurePipeline: JWT auth, CORS, exception handling, Web
+/// API routing) rather than duplicating it, so this test still exercises the
+/// real auth/permission pipeline end to end — only ISapConnectionPool and
+/// IPermissionService are swapped for Moq mocks (via ConfigurePipeline's
+/// overrideServices hook), same as WebApplicationFactory's
+/// ConfigureWebHost + RemoveAll&lt;T&gt;() did before. SapSessionMonitor's
+/// Timer is skipped (startSessionMonitor: false) — it would otherwise ping
+/// the mocked pool for the life of the test host, harmless but pure noise.
 /// </summary>
-public sealed class SapServerTestFactory : WebApplicationFactory<Program>
+public sealed class SapServerTestFactory : IDisposable
 {
     public const string JwtSecret = "test-only-jwt-secret-at-least-32-characters-long";
     private const string JwtIssuer = "normanton-nexus";
@@ -29,47 +34,51 @@ public sealed class SapServerTestFactory : WebApplicationFactory<Program>
     public Mock<ISapConnectionPool> PoolMock { get; } = new();
     public Mock<IPermissionService> PermissionsMock { get; } = new();
 
-    // Program.cs reads AuthOptions eagerly — via builder.Configuration,
-    // BEFORE builder.Build() — as plain top-level statements, not inside a
-    // ConfigureServices/ConfigureAppConfiguration callback. WebApplicationFactory's
-    // ConfigureWebHost hook only affects the host from around .Build() onward,
-    // which is too late for that read. Environment variables, by contrast, are
-    // already loaded into builder.Configuration by WebApplicationBuilder.CreateBuilder(args)
-    // itself, the very first line of Program.cs — so they're the one config
-    // source that's actually visible in time. Static constructor: runs once,
-    // before any test in this class creates the factory.
-    static SapServerTestFactory()
-    {
-        Environment.SetEnvironmentVariable("Auth__JwtSecret", JwtSecret);
-        Environment.SetEnvironmentVariable("Auth__JwtIssuer", JwtIssuer);
-        Environment.SetEnvironmentVariable("Auth__JwtAudience", JwtAudience);
-        Environment.SetEnvironmentVariable("Auth__SqlConnectionString", "Server=unused;Database=unused;");
-        Environment.SetEnvironmentVariable("Auth__PermissionCacheSeconds", "60");
-        Environment.SetEnvironmentVariable("Auth__DevBypassAuth", "false");
-        Environment.SetEnvironmentVariable("Auth__BypassPermissions", "false");
-        Environment.SetEnvironmentVariable("SapPool__ServiceWorkerCount", "0");
-        Environment.SetEnvironmentVariable("SapPool__ElevatedWorkerCount", "0");
-        Environment.SetEnvironmentVariable("AllowedOrigins__0", "https://test-frontend.invalid");
-    }
+    private readonly TestServer _server;
 
-    protected override void ConfigureWebHost(IWebHostBuilder builder)
+    public SapServerTestFactory()
     {
-        builder.UseEnvironment("Production"); // avoid Program.cs's DevBypassAuth path — we want the real JWT/permission pipeline under test
+        var configuration = BuildTestConfiguration();
 
-        builder.ConfigureServices(services =>
+        _server = TestServer.Create(app =>
         {
-            services.RemoveAll<ISapConnectionPool>();
-            services.AddSingleton(PoolMock.Object);
-
-            services.RemoveAll<IPermissionService>();
-            services.AddSingleton(PermissionsMock.Object);
-
-            // SapSessionMonitor (a hosted BackgroundService) would otherwise
-            // start pinging the mocked pool on a timer for the life of the
-            // test host — harmless against a mock, but pure noise.
-            services.RemoveAll<Microsoft.Extensions.Hosting.IHostedService>();
+            Startup.ConfigurePipeline(
+                app,
+                configuration,
+                overrideServices: services =>
+                {
+                    services.AddSingleton(PoolMock.Object);
+                    services.AddSingleton(PermissionsMock.Object);
+                },
+                startSessionMonitor: false);
         });
     }
+
+    private static IConfiguration BuildTestConfiguration() =>
+        new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Auth:JwtSecret"] = JwtSecret,
+                ["Auth:JwtIssuer"] = JwtIssuer,
+                ["Auth:JwtAudience"] = JwtAudience,
+                ["Auth:SqlConnectionString"] = "Server=unused;Database=unused;",
+                ["Auth:PermissionCacheSeconds"] = "60",
+                ["Auth:DevBypassAuth"] = "false",
+                ["Auth:BypassPermissions"] = "false",
+                ["SapNco:MaxConcurrentPinnedSessions"] = "0",
+                ["SapNco:ElevatedWorkerCount"] = "0",
+                ["AllowedOrigins:0"] = "https://test-frontend.invalid",
+            })
+            .Build();
+
+    /// <summary>
+    /// A fresh HttpClient wrapping the same in-memory OWIN pipeline each
+    /// call — mirrors WebApplicationFactory.CreateClient()'s per-call
+    /// isolation (TestServer.HttpClient itself is one shared instance, which
+    /// would make DefaultRequestHeaders mutations from CreateAuthenticatedClient
+    /// leak across tests sharing this factory via IClassFixture).
+    /// </summary>
+    public HttpClient CreateClient() => new(_server.Handler) { BaseAddress = _server.BaseAddress };
 
     /// <summary>Builds a JWT the running test host will accept, matching the claim shape
     /// sql2005-bridge issues: a "userId" claim, plus optional role claims for
@@ -96,7 +105,9 @@ public sealed class SapServerTestFactory : WebApplicationFactory<Program>
     {
         var client = CreateClient();
         client.DefaultRequestHeaders.Authorization =
-            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", CreateToken(userId, role));
+            new AuthenticationHeaderValue("Bearer", CreateToken(userId, role));
         return client;
     }
+
+    public void Dispose() => _server.Dispose();
 }

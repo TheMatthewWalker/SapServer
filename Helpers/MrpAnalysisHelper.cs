@@ -102,7 +102,7 @@ internal static class MrpAnalysisHelper
                 // genuinely exists (mixed alnum codes like "30005R" happen to survive either way,
                 // which is what let this slip through initially).
                 Material      = cols[0].Trim(),
-                Qty           = decimal.TryParse(cols[1].Trim(), out var qty) ? qty : 0m,
+                Qty           = RfcRowExtensions.ParseSapDecimal(cols[1]) ?? 0m,
                 Uom           = cols[2].Trim(),
                 PurchaseOrder = cols[3].Trim(),
                 Vendor        = cols[4].Trim(),

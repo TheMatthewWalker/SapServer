@@ -1,4 +1,3 @@
-using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using SapServer.Controllers;
@@ -8,6 +7,7 @@ using SapServer.Models;
 using SapServer.Models.Bapi;
 using SapServer.Services.Interfaces;
 using SapServer.Tests.Infrastructure;
+using System.Web.Http;
 
 namespace SapServer.Tests.Controllers;
 
@@ -43,14 +43,27 @@ public class QualityControllerTests
     }
 
     [Fact]
+    public async Task GetBlockedStock_does_not_throw_when_query_is_null()
+    {
+        // Same [FromUri]-binds-null-for-an-all-optional-complex-type fix as
+        // WarehouseController.GetOpenTransferRequirements - see that test class.
+        _pool.Setup(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new RfcResponse { Tables = new() { ["data_display"] = new() } });
+
+        var result = ControllerTestHelpers.AssertOk(await _controller.GetBlockedStock(null!, CancellationToken.None));
+        var body = Assert.IsType<ApiResponse<StockRow[]>>(result);
+        Assert.Empty(body.Data!);
+    }
+
+    [Fact]
     public async Task BlockStock_at_a_non_WHM_location_skips_bin_checks_and_transfer_orders_entirely()
     {
         _pool.Setup(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new RfcResponse());
 
-        var result = await _controller.BlockStock(SampleRequest("3012"), CancellationToken.None); // not 1710/1711
+        var result = await _controller.BlockStock(SampleRequest("3012"), ct: CancellationToken.None); // not 1710/1711
 
-        Assert.IsType<OkObjectResult>(result);
+        ControllerTestHelpers.AssertOk(result);
         _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Once); // only the MB1B call
     }
 
@@ -64,9 +77,9 @@ public class QualityControllerTests
             .ReturnsAsync(new RfcResponse()) // transfer order 1
             .ReturnsAsync(new RfcResponse()); // transfer order 2
 
-        var result = await _controller.BlockStock(SampleRequest("1710"), CancellationToken.None);
+        var result = await _controller.BlockStock(SampleRequest("1710"), ct: CancellationToken.None);
 
-        Assert.IsType<OkObjectResult>(result);
+        ControllerTestHelpers.AssertOk(result);
         _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Exactly(5));
     }
 
@@ -77,10 +90,10 @@ public class QualityControllerTests
             .ReturnsAsync(new RfcResponse()) // MB1B
             .ReturnsAsync(new RfcResponse()); // bin check 1: no data_display at all -> does not exist
 
-        var result = await _controller.BlockStock(SampleRequest("1711"), CancellationToken.None);
+        var result = await _controller.BlockStock(SampleRequest("1711"), ct: CancellationToken.None);
 
-        var unprocessable = Assert.IsType<UnprocessableEntityObjectResult>(result);
-        Assert.IsType<ApiResponse<QualityMb1bResponse>>(unprocessable.Value);
+        var unprocessable = ControllerTestHelpers.AssertUnprocessableEntity(result);
+        Assert.IsType<ApiResponse<QualityMb1bResponse>>(unprocessable);
         _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Exactly(2)); // never reaches the transfer orders
     }
 
@@ -90,9 +103,9 @@ public class QualityControllerTests
         _pool.Setup(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new RfcResponse());
 
-        var result = await _controller.UnblockStock(SampleRequest("3012"), CancellationToken.None);
+        var result = await _controller.UnblockStock(SampleRequest("3012"), ct: CancellationToken.None);
 
-        Assert.IsType<OkObjectResult>(result);
+        ControllerTestHelpers.AssertOk(result);
         _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
@@ -113,10 +126,10 @@ public class QualityControllerTests
         _pool.Setup(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(Mb1bMessage("E", "Deficit of SL stock 5 PC : 30005R 1000 999 BIN-001"));
 
-        var result = await _controller.BlockStock(SampleRequest("3012"), CancellationToken.None); // not 1710/1711
+        var result = await _controller.BlockStock(SampleRequest("3012"), ct: CancellationToken.None); // not 1710/1711
 
-        var unprocessable = Assert.IsType<UnprocessableEntityObjectResult>(result);
-        var body = Assert.IsType<ApiResponse<QualityMb1bResponse>>(unprocessable.Value);
+        var unprocessable = ControllerTestHelpers.AssertUnprocessableEntity(result);
+        var body = Assert.IsType<ApiResponse<QualityMb1bResponse>>(unprocessable);
         Assert.False(body.Success);
         Assert.False(body.Data!.Success);
         Assert.Contains("Deficit of SL stock", body.Error!.Message);
@@ -132,8 +145,28 @@ public class QualityControllerTests
             .ReturnsAsync(new RfcResponse { Tables = new() { ["RETURN"] = new() { new() { ["TYPE"] = "E", ["MESSAGE"] = "Bin is full" } } } }) // transfer order 1: rejected
             .ReturnsAsync(new RfcResponse()); // transfer order 2
 
-        var result = await _controller.BlockStock(SampleRequest("1710"), CancellationToken.None);
+        var result = await _controller.BlockStock(SampleRequest("1710"), ct: CancellationToken.None);
 
-        Assert.IsType<UnprocessableEntityObjectResult>(result);
+        ControllerTestHelpers.AssertUnprocessableEntity(result);
+    }
+
+    [Fact]
+    public async Task BlockStock_dryRun_returns_the_built_request_without_calling_the_pool()
+    {
+        var result = await _controller.BlockStock(SampleRequest("1710"), dryRun: true, ct: CancellationToken.None);
+
+        var ok = ControllerTestHelpers.AssertOk(result);
+        Assert.IsType<ApiResponse<RfcRequest>>(ok);
+        _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task UnblockStock_dryRun_returns_the_built_request_without_calling_the_pool()
+    {
+        var result = await _controller.UnblockStock(SampleRequest("1710"), dryRun: true, ct: CancellationToken.None);
+
+        var ok = ControllerTestHelpers.AssertOk(result);
+        Assert.IsType<ApiResponse<RfcRequest>>(ok);
+        _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 }

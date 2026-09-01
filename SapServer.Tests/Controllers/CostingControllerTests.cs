@@ -1,4 +1,3 @@
-using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using SapServer.Controllers;
@@ -7,6 +6,7 @@ using SapServer.Models.Bapi;
 using SapServer.Services;
 using SapServer.Services.Interfaces;
 using SapServer.Tests.Infrastructure;
+using System.Web.Http;
 
 namespace SapServer.Tests.Controllers;
 
@@ -28,7 +28,7 @@ public class CostingControllerTests
     {
         var result = await _controller.GetCostSheet(new CostSheetRequest { Date = "01.01.2026" }, dryRun: true, CancellationToken.None);
 
-        Assert.IsType<OkObjectResult>(result);
+        ControllerTestHelpers.AssertOk(result);
         _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -42,7 +42,7 @@ public class CostingControllerTests
             new PeriodBalanceRequest { FiscalYear = "2026", PeriodFrom = "1", PeriodTo = "3", GlAccounts = ["100000", "200000", "300000"] },
             CancellationToken.None);
 
-        Assert.IsType<OkObjectResult>(result);
+        ControllerTestHelpers.AssertOk(result);
         _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Exactly(3));
     }
 
@@ -54,7 +54,7 @@ public class CostingControllerTests
 
         var result = await _controller.GetProfitCenter(new ProfitCenterRequest { DateFrom = "01.01.2026", DateTo = "31.01.2026" }, CancellationToken.None);
 
-        Assert.IsType<OkObjectResult>(result);
+        ControllerTestHelpers.AssertOk(result);
         _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
@@ -64,9 +64,9 @@ public class CostingControllerTests
         _pool.Setup(p => p.ExecuteOnWorkerAsync(It.IsAny<SapWorkerHandle>(), It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new RfcResponse { Parameters = new() { ["OBJ_KEY"] = "14000001232026" } });
 
-        var result = await _controller.PostFreight(new FreightPostingRequest { Vendor = "0000100123", Amount = 500, Currency = "GBP" }, CancellationToken.None);
+        var result = await _controller.PostFreight(new FreightPostingRequest { DocDate = "20260101", Vendor = "0000100123", Amount = 500, Currency = "GBP" }, CancellationToken.None);
 
-        Assert.IsType<OkObjectResult>(result);
+        ControllerTestHelpers.AssertOk(result);
         _pool.Verify(p => p.ExecuteOnWorkerAsync(It.IsAny<SapWorkerHandle>(),
             It.Is<RfcRequest>(r => r.FunctionName == "BAPI_TRANSACTION_COMMIT"), It.IsAny<CancellationToken>()), Times.Once);
     }
@@ -77,11 +77,25 @@ public class CostingControllerTests
         _pool.Setup(p => p.ExecuteOnWorkerAsync(It.IsAny<SapWorkerHandle>(), It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new RfcResponse());
 
-        var result = await _controller.PostFreight(new FreightPostingRequest { Vendor = "0000100123", Amount = 500, Currency = "GBP" }, CancellationToken.None);
+        var result = await _controller.PostFreight(new FreightPostingRequest { DocDate = "20260101", Vendor = "0000100123", Amount = 500, Currency = "GBP" }, CancellationToken.None);
 
-        Assert.IsType<BadRequestObjectResult>(result);
+        ControllerTestHelpers.AssertBadRequest(result);
         _pool.Verify(p => p.ExecuteOnWorkerAsync(It.IsAny<SapWorkerHandle>(),
             It.Is<RfcRequest>(r => r.FunctionName == "BAPI_TRANSACTION_ROLLBACK"), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task PostFreight_returns_BadRequest_without_calling_the_pool_when_DocDate_is_not_yyyyMMdd()
+    {
+        // Regression test: BuildFreightPostingRequest passes DocDate straight
+        // through to NCo's DATE setter with no parsing — a dd.MM.yyyy value
+        // (accepted by other date fields in this app, e.g. CostSheetRequest)
+        // crashed with an unhandled RfcTypeConversionException instead of
+        // failing cleanly (endpoint-test-log-2026-08-27.md, ROUND 2 #22/23).
+        var result = await _controller.PostFreight(new FreightPostingRequest { DocDate = "01.01.2026", Vendor = "0000100123", Amount = 500, Currency = "GBP" }, CancellationToken.None);
+
+        ControllerTestHelpers.AssertBadRequest(result);
+        _pool.Verify(p => p.AcquireWorkerAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -91,14 +105,35 @@ public class CostingControllerTests
             .ReturnsAsync(new RfcResponse { Parameters = new() { ["OBJ_KEY"] = "14000009992026" } });
 
         var requests = Enumerable.Range(1, 5)
-            .Select(i => new FreightPostingRequest { Vendor = $"000010{i:0000}", Amount = 100 * i, Currency = "GBP" })
+            .Select(i => new FreightPostingRequest { DocDate = "20260101", Vendor = $"000010{i:0000}", Amount = 100 * i, Currency = "GBP" })
             .ToList();
 
         var result = await _controller.PostFreightBatch(requests, CancellationToken.None);
 
-        var ok = Assert.IsType<OkObjectResult>(result);
-        var body = Assert.IsType<ApiResponse<List<FreightPostingRow>>>(ok.Value);
+        var ok = ControllerTestHelpers.AssertOk(result);
+        var body = Assert.IsType<ApiResponse<List<FreightPostingRow>>>(ok);
         Assert.Equal(5, body.Data!.Count);
         _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Exactly(5));
+    }
+
+    [Fact]
+    public async Task PostFreightBatch_fails_just_the_one_item_with_a_bad_DocDate_without_calling_the_pool_for_it()
+    {
+        _pool.Setup(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new RfcResponse { Parameters = new() { ["OBJ_KEY"] = "14000009992026" } });
+
+        var requests = new List<FreightPostingRequest>
+        {
+            new() { DocDate = "20260101", Vendor = "0000100001", Amount = 100, Currency = "GBP" },
+            new() { DocDate = "01.01.2026", Vendor = "0000100002", Amount = 200, Currency = "GBP" },
+        };
+
+        var result = await _controller.PostFreightBatch(requests, CancellationToken.None);
+
+        var ok = ControllerTestHelpers.AssertOk(result);
+        var body = Assert.IsType<ApiResponse<List<FreightPostingRow>>>(ok);
+        Assert.Equal(2, body.Data!.Count);
+        Assert.Contains(body.Data, r => !r.Success && r.Messages.Any(m => m.Message.Contains("yyyyMMdd")));
+        _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Once); // only the valid item
     }
 }

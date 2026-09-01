@@ -329,15 +329,11 @@ internal static class PicksheetHelpers
         Batch           = snapshot.Batch
     };
 
-    // SAP decimals often come back "1.234,56" (German/European display format)
-    // from ZRFC_READ_TABLES — same normalization as RfcRowExtensions.GetDecimal,
-    // duplicated here since this parses a plain delimited string column rather
-    // than a raw table row dictionary.
-    private static decimal ParseSapDecimal(string s)
-    {
-        if (string.IsNullOrWhiteSpace(s)) return 0m;
-        var normalized = s.Replace(".", "").Replace(',', '.');
-        return decimal.TryParse(normalized, System.Globalization.NumberStyles.Any,
-            System.Globalization.CultureInfo.InvariantCulture, out var d) ? d : 0m;
-    }
+    // Delegates to the shared RfcRowExtensions.ParseSapDecimal (per-value
+    // separator detection, not a fixed "always European-grouped" assumption
+    // - see its doc comment). This used to duplicate the old, buggy
+    // unconditional-strip-every-'.' logic locally; kept as a thin wrapper
+    // here since this parses a plain delimited string column rather than a
+    // raw table row dictionary.
+    private static decimal ParseSapDecimal(string s) => RfcRowExtensions.ParseSapDecimal(s) ?? 0m;
 }

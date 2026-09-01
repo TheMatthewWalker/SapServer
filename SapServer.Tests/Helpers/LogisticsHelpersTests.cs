@@ -16,6 +16,21 @@ public class LogisticsHelpersTests
         Assert.False(request.InputTablesItems.ContainsKey("value_list"));
     }
 
+    /// <summary>
+    /// ROWCOUNT must be a real integer, not an empty string - confirmed for
+    /// real against a live IIS deploy: SAP NCo's typed RfcDataContainer.SetValue
+    /// throws RfcTypeConversionException ("cannot convert String into INT4")
+    /// for "" before the RFC call is even made, unlike the old COM/VARIANT
+    /// transport which apparently tolerated it silently.
+    /// </summary>
+    [Fact]
+    public void BuildPicksheetRequest_sends_ROWCOUNT_as_an_integer_not_an_empty_string()
+    {
+        var request = LogisticsHelpers.BuildPicksheetRequest();
+
+        Assert.Equal(0, request.ImportParameters["ROWCOUNT"]);
+    }
+
     [Fact]
     public void BuildPicksheetRequest_adds_one_value_list_row_per_open_picksheet()
     {
@@ -67,6 +82,7 @@ public class LogisticsHelpersTests
 
         Assert.Contains("VBUK~WBSTK EQ 'A'", whereText);
         Assert.Contains("VBUK~VBTYP EQ 'J'", whereText);
+        Assert.Equal(0, request.ImportParameters["ROWCOUNT"]);
     }
 
     [Fact]

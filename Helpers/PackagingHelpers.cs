@@ -138,7 +138,13 @@ internal static class PackagingHelpers
         if (cols is not { Length: >= 4 }) return null;
         return new PackagingMaraRow
         {
-            WeightKg     = decimal.TryParse(cols[0], out var w) ? w / 1000m : 0m,
+            // No /1000 here -- same bug class as ParseZpackInstr's (see its
+            // comment). Confirmed live via a raw ZRFC_READ_TABLES bypass:
+            // CP104's real MARA-BRGEW is "0,021" (SAP's native comma-decimal
+            // format, no thousands grouping) = 0.021 kg, a plausible real
+            // component weight -- the extra /1000 made this display as an
+            // implausible 0.000021 kg. ParseSapDecimal alone is correct.
+            WeightKg     = RfcRowExtensions.ParseSapDecimal(cols[0]) ?? 0m,
             MaterialType = cols[1],
             HandlingType = cols[2],
             WeightUnit   = cols[3],
@@ -175,8 +181,24 @@ internal static class PackagingHelpers
         return new PackagingInstrRow
         {
             PackMaterial = c[0].Trim(),
-            PalletQty    = decimal.TryParse(c[1], out var pq) ? pq / 1000m : 0m,
-            SmallBoxQty  = decimal.TryParse(c[2], out var sq) ? sq / 1000m : 0m,
+            // Confirmed live (2026-08-27): the extra /1000 here was itself the
+            // bug, not a real gram->kg-style conversion. ParseSapDecimal
+            // already correctly parses SAP's native comma-decimal quantity
+            // text ("300,000" means 300, per the same convention documented
+            // for RfcRowExtensions.ParseSapDecimal/GetDecimal) -- dividing
+            // that result by 1000 again silently shrank the true value
+            // 1000x. This is what actually caused CP104's real SmallBoxQty
+            // corruption during endpoint testing: the (pre-existing, long-
+            // standing) read-side bug made 300 display as 0.300, a mass-
+            // update round-trip then wrote 0.3 straight back with no
+            // conversion (the write side never had a bug), and the same
+            // read bug then displayed THAT as 0.0003. The correct fix is
+            // removing this division, not adding a matching multiplication
+            // to the write side (BuildPackInstrMaintRequest) -- see its
+            // comment. endpoint-test-log-2026-08-27.md, ROUND 2 #16 for the
+            // full incident and this correction.
+            PalletQty    = RfcRowExtensions.ParseSapDecimal(c[1]) ?? 0m,
+            SmallBoxQty  = RfcRowExtensions.ParseSapDecimal(c[2]) ?? 0m,
             PackProd     = !string.IsNullOrWhiteSpace(c[3]),
             BoxGen       = !string.IsNullOrWhiteSpace(c[4]),
             BatchSpread  = !string.IsNullOrWhiteSpace(c[5]),
@@ -215,7 +237,14 @@ internal static class PackagingHelpers
             {
                 Component = c[0].Trim(),
                 Unit      = c[1].Trim(),
-                Quantity  = decimal.TryParse(c[2], out var m) ? m / 1000m : 0m,
+                // No /1000 here -- same bug class as ParseZpackInstr/ParseMara
+                // (see their comments). Confirmed live via a raw
+                // ZRFC_READ_TABLES bypass: IB_CARTON2_NMT's real ZBOM_INFO-
+                // MENGE is "1,000" (SAP's native comma-decimal, no thousands
+                // grouping) = exactly 1 EA, a completely standard BOM
+                // component quantity -- the extra /1000 made this display as
+                // an implausible 0.001. ParseSapDecimal alone is correct.
+                Quantity  = RfcRowExtensions.ParseSapDecimal(c[2]) ?? 0m,
             })
             .ToArray();
     }
@@ -257,14 +286,42 @@ internal static class PackagingHelpers
     }
 
 
+    // MARA-MBRSH (industry sector) for a single material -- used to read the
+    // reference material's own industry sector before MM01 creation, since
+    // BDC/call-transaction needs it supplied explicitly (see
+    // BuildCreateMaterialRequest's header comment).
+    internal static RfcRequest BuildIndustrySectorRequest(string material)
+    {
+        var builder = new RfcRequestBuilder(FnReadTables)
+            .Import("DELIMITER", "|")
+            .Import("NO_DATA",   " ")
+            .TableRow("QUERY_TABLES", new { TABNAME = "MARA" })
+            .TableItemRow("query_FIELDS", new { TABNAME = "MARA", FIELDNAME = "MBRSH" });
+
+        builder.WhereCondition($"MARA~MATNR EQ '{SapPad.Pad(material, 18)}'");
+
+        return builder.ReadTable("data_display").Build();
+    }
+
 // ── Writes: MM01 create material / CS01 create BOM ─────────────────────────
 // Direct port of new_packaging_code.bas's Create_mm01 screen sequence.
 
-    internal static RfcRequest BuildCreateMaterialRequest(string material, string referenceMaterial) =>
+    // industrySector -> RMMG1-MBRSH. Confirmed live: MM01 rejects with "Enter
+    // an industry sector" without this field set, even when a reference
+    // material is supplied on the same screen -- unlike the real SAP GUI
+    // dialog (which auto-populates MBRSH from the reference material once
+    // it's typed in), BDC/call-transaction requires every screen field to be
+    // supplied explicitly. Callers should read the reference material's own
+    // MARA-MBRSH (BuildMaraRequest/ParseMara) and pass that value through
+    // rather than guessing a fixed industry-sector code -- this endpoint
+    // creates real, permanent material masters, so silently baking in a
+    // wrong guess is worse than requiring the caller supply a confirmed one.
+    internal static RfcRequest BuildCreateMaterialRequest(string material, string referenceMaterial, string industrySector) =>
         BdcBuilder.For("MM01")
             .Screen("SAPLMGMM", "0060")
                 .Field("BDC_OKCODE", "=AUSW")
                 .Field("RMMG1-MATNR", material)
+                .Field("RMMG1-MBRSH", industrySector)
                 .Field("RMMG1-MTART", "VERP")
                 .Field("RMMG1_REF-MATNR", referenceMaterial)
             .Screen("SAPLMGMM", "0070")
@@ -358,6 +415,13 @@ internal static class PackagingHelpers
             ["WERKS"]  = Plant,
             ["KUNNR"]  = string.IsNullOrWhiteSpace(req.Customer) ? "" : SapPad.Pad(req.Customer, 10),
             ["PALL_MATNR"]  = req.PackMaterial ?? "",
+            // No scaling here -- PalletQty/SmallBoxQty are plain quantities;
+            // NCo's typed SetValue stores the real numeric value directly,
+            // no gram/kg-style conversion involved. See ParseZpackInstr's
+            // comment for the corrected read-side counterpart -- ParseSapDecimal
+            // alone already parses SAP's comma-decimal quantity text (e.g.
+            // "300,000" meaning 300) correctly; no further division belongs
+            // here or there.
             ["PALL_QTY"]    = req.PalletQty,
             ["SMBX_QTY"]    = req.SmallBoxQty,
             ["PACK_PROD"]   = req.PackProd    ? "X" : "",

@@ -1,4 +1,3 @@
-using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -11,6 +10,7 @@ using SapServer.Models.Bapi;
 using SapServer.Services;
 using SapServer.Services.Interfaces;
 using SapServer.Tests.Infrastructure;
+using System.Web.Http;
 
 namespace SapServer.Tests.Controllers;
 
@@ -32,9 +32,9 @@ public class PackagingControllerTests
 
     public PackagingControllerTests()
     {
-        var poolOptions = Options.Create(new SapPoolOptions
+        var poolOptions = Options.Create(new SapNcoOptions
         {
-            ServiceAccount = new SapConnectionOptions { System = "SAP", Client = "100", SystemId = "01", Language = "EN" },
+            ServiceAccount = new SapConnectionOptions { AppServerHost = "sap-test-host", Client = "100", SystemNumber = "01", Language = "EN" },
         });
         _controller = new PackagingController(_pool.Object, _permissions.Object, poolOptions, NullLogger<PackagingController>.Instance);
         ControllerTestHelpers.SetUser(_controller, userId: 1);
@@ -53,16 +53,19 @@ public class PackagingControllerTests
     {
         _pool.Setup(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>())).ReturnsAsync(EmptyDisplay());
         var result = await _controller.MaterialDetails("30005R", CancellationToken.None);
-        Assert.IsType<BadRequestObjectResult>(result);
+        ControllerTestHelpers.AssertBadRequest(result);
     }
 
     [Fact]
-    public async Task MaterialDetails_returns_the_parsed_row_converting_grams_to_kg()
+    public async Task MaterialDetails_returns_the_parsed_row_with_no_extra_scaling_on_the_weight()
     {
-        _pool.Setup(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>())).ReturnsAsync(SingleRow("5000|ROH|X|KG"));
+        // "5,000" is SAP's native comma-decimal format (no thousands
+        // grouping) for the plain value 5 -- see PackagingHelpersTests'
+        // ParseMara regression test for why this isn't divided by 1000.
+        _pool.Setup(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>())).ReturnsAsync(SingleRow("5,000|ROH|X|KG"));
         var result = await _controller.MaterialDetails("30005R", CancellationToken.None);
-        var ok = Assert.IsType<OkObjectResult>(result);
-        var body = Assert.IsType<ApiResponse<PackagingMaraRow>>(ok.Value);
+        var ok = ControllerTestHelpers.AssertOk(result);
+        var body = Assert.IsType<ApiResponse<PackagingMaraRow>>(ok);
         Assert.Equal(5.0m, body.Data!.WeightKg);
     }
 
@@ -71,7 +74,7 @@ public class PackagingControllerTests
     {
         _pool.Setup(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>())).ReturnsAsync(EmptyDisplay());
         var result = await _controller.GetInstruction("30005R", null, CancellationToken.None);
-        Assert.IsType<NotFoundObjectResult>(result);
+        ControllerTestHelpers.AssertNotFound(result);
     }
 
     [Fact]
@@ -82,7 +85,7 @@ public class PackagingControllerTests
 
         var result = await _controller.SaveInstruction(new PackagingInstrSaveRequest { Material = "30005R" }, CancellationToken.None);
 
-        Assert.IsType<UnprocessableEntityObjectResult>(result);
+        ControllerTestHelpers.AssertUnprocessableEntity(result);
     }
 
     [Fact]
@@ -93,7 +96,7 @@ public class PackagingControllerTests
 
         var result = await _controller.SaveInstruction(new PackagingInstrSaveRequest { Material = "30005R" }, CancellationToken.None);
 
-        Assert.IsType<OkObjectResult>(result);
+        ControllerTestHelpers.AssertOk(result);
     }
 
     [Fact]
@@ -106,8 +109,8 @@ public class PackagingControllerTests
             Rows = [new MassPackagingUpdateRow { Material = "30005R", PackMaterial = "IB_363800_SD" }],
         }, CancellationToken.None);
 
-        var ok = Assert.IsType<OkObjectResult>(result);
-        var body = Assert.IsType<ApiResponse<List<MassPackagingUpdateResult>>>(ok.Value);
+        var ok = ControllerTestHelpers.AssertOk(result);
+        var body = Assert.IsType<ApiResponse<List<MassPackagingUpdateResult>>>(ok);
         Assert.False(body.Data![0].Success);
         Assert.Contains("use Packaging Instruction Detail", body.Data[0].Message);
         _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Once); // only the existence check
@@ -125,8 +128,8 @@ public class PackagingControllerTests
             Rows = [new MassPackagingUpdateRow { Material = "30005R", PackMaterial = "IB_363800_SD" }],
         }, CancellationToken.None);
 
-        var ok = Assert.IsType<OkObjectResult>(result);
-        var body = Assert.IsType<ApiResponse<List<MassPackagingUpdateResult>>>(ok.Value);
+        var ok = ControllerTestHelpers.AssertOk(result);
+        var body = Assert.IsType<ApiResponse<List<MassPackagingUpdateResult>>>(ok);
         Assert.True(body.Data![0].Success);
         _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
     }
@@ -136,8 +139,8 @@ public class PackagingControllerTests
     {
         var result = await _controller.Create(new CreatePackagingRequest { CustomerPart = "CUST123", Codes = ["ZZ"] }, CancellationToken.None);
 
-        var ok = Assert.IsType<OkObjectResult>(result);
-        var body = Assert.IsType<ApiResponse<List<CreatePackagingResult>>>(ok.Value);
+        var ok = ControllerTestHelpers.AssertOk(result);
+        var body = Assert.IsType<ApiResponse<List<CreatePackagingResult>>>(ok);
         Assert.Contains("Unknown packaging code", body.Data![0].Message);
         _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Never);
     }
@@ -149,8 +152,8 @@ public class PackagingControllerTests
 
         var result = await _controller.Create(new CreatePackagingRequest { CustomerPart = "CUST123", Codes = ["SD"] }, CancellationToken.None);
 
-        var ok = Assert.IsType<OkObjectResult>(result);
-        var body = Assert.IsType<ApiResponse<List<CreatePackagingResult>>>(ok.Value);
+        var ok = ControllerTestHelpers.AssertOk(result);
+        var body = Assert.IsType<ApiResponse<List<CreatePackagingResult>>>(ok);
         Assert.True(body.Data![0].AlreadyExisted);
         _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Once); // only the exists check
     }
@@ -160,14 +163,31 @@ public class PackagingControllerTests
     {
         _pool.SetupSequence(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(EmptyDisplay())                          // exists check: does not exist
+            .ReturnsAsync(SingleRow("M"))                          // reference material's industry sector
             .ReturnsAsync(Bdc("E", "Material type invalid"));       // MM01: fails
 
         var result = await _controller.Create(new CreatePackagingRequest { CustomerPart = "CUST123", Codes = ["SD"] }, CancellationToken.None);
 
-        var ok = Assert.IsType<OkObjectResult>(result);
-        var body = Assert.IsType<ApiResponse<List<CreatePackagingResult>>>(ok.Value);
+        var ok = ControllerTestHelpers.AssertOk(result);
+        var body = Assert.IsType<ApiResponse<List<CreatePackagingResult>>>(ok);
         Assert.False(body.Data![0].MaterialCreated);
-        _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Exactly(2)); // never reaches CS01
+        _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Exactly(3)); // never reaches CS01
+    }
+
+    [Fact]
+    public async Task Create_fails_cleanly_when_the_reference_materials_industry_sector_cannot_be_read()
+    {
+        _pool.SetupSequence(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(EmptyDisplay())   // exists check: does not exist
+            .ReturnsAsync(EmptyDisplay());  // industry sector read: nothing found
+
+        var result = await _controller.Create(new CreatePackagingRequest { CustomerPart = "CUST123", Codes = ["SD"] }, CancellationToken.None);
+
+        var ok = ControllerTestHelpers.AssertOk(result);
+        var body = Assert.IsType<ApiResponse<List<CreatePackagingResult>>>(ok);
+        Assert.False(body.Data![0].MaterialCreated);
+        Assert.Contains("industry sector", body.Data[0].Message);
+        _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Exactly(2)); // never reaches MM01
     }
 
     [Fact]
@@ -175,16 +195,17 @@ public class PackagingControllerTests
     {
         _pool.SetupSequence(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(EmptyDisplay())                     // exists check: does not exist
+            .ReturnsAsync(SingleRow("M"))                     // reference material's industry sector
             .ReturnsAsync(Bdc("S", "Material created"))       // MM01: success
             .ReturnsAsync(Bdc("S", "BOM created"));           // CS01: success
 
         var result = await _controller.Create(new CreatePackagingRequest { CustomerPart = "CUST123", Codes = ["SD"] }, CancellationToken.None);
 
-        var ok = Assert.IsType<OkObjectResult>(result);
-        var body = Assert.IsType<ApiResponse<List<CreatePackagingResult>>>(ok.Value);
+        var ok = ControllerTestHelpers.AssertOk(result);
+        var body = Assert.IsType<ApiResponse<List<CreatePackagingResult>>>(ok);
         Assert.True(body.Data![0].MaterialCreated);
         Assert.True(body.Data[0].BomCreated);
-        _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Exactly(3));
+        _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Exactly(4));
     }
 
     [Fact]
@@ -192,7 +213,7 @@ public class PackagingControllerTests
     {
         var result = await _controller.CreateElevated(new CreatePackagingElevatedRequest { CustomerPart = "CUST123" }, CancellationToken.None);
 
-        Assert.IsType<BadRequestObjectResult>(result);
+        ControllerTestHelpers.AssertBadRequest(result);
         _pool.Verify(p => p.AcquireElevatedWorkerAsync(It.IsAny<SapConnectionOptions>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -209,7 +230,7 @@ public class PackagingControllerTests
             SapUsername = "j.smith", SapPassword = "pw", CustomerPart = "CUST123", Codes = ["SD"],
         }, CancellationToken.None);
 
-        Assert.IsType<OkObjectResult>(result);
+        ControllerTestHelpers.AssertOk(result);
         _pool.Verify(p => p.ReleaseElevatedWorkerAsync(It.IsAny<SapWorkerHandle>()), Times.Once);
     }
 }

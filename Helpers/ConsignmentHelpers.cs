@@ -45,7 +45,16 @@ internal static class ConsignmentHelpers
     // straight from SAP rather than assuming "BWART 102 always means
     // negative" — same reasoning as everywhere else in this file: a wrong
     // guess here would misstate a vendor's delivered total.
-    private static readonly string[] MsegColumns = ["MATNR", "MBLNR", "ZEILE", "MENGE", "MEINS", "LIFNR", "XBLNR_MKPF", "SHKZG"];
+    // SMBLN/SMBLP ("material document/item for reversal") — populated only on
+    // the MSEG line that cancels another document (transaction MBST),
+    // pointing back at the document+item it reverses. Confirmed for real
+    // against this plant's Raaj Ratna data (2026-08-27): a cancelled GR's
+    // quantity already nets correctly into the aggregate Delivered/Undeclared
+    // balance via SHKZG's sign, but the CANCELLED document's own RemainingQty
+    // was never being zeroed out downstream in Nexus without this — see
+    // routes/consignmentsql.js's computeReversalCancellations there for the
+    // parity-walk this feeds.
+    private static readonly string[] MsegColumns = ["MATNR", "MBLNR", "ZEILE", "MENGE", "MEINS", "LIFNR", "XBLNR_MKPF", "SHKZG", "SMBLN", "SMBLP"];
     private static readonly string[] MkpfColumns  = ["BLDAT", "BUDAT"];
 
     /// <summary>
@@ -133,8 +142,8 @@ internal static class ConsignmentHelpers
             {
                 // Column order follows registration order: MsegColumns
                 // (MATNR, MBLNR, ZEILE, MENGE, MEINS, LIFNR, XBLNR_MKPF,
-                // SHKZG) then MkpfColumns (BLDAT, BUDAT).
-                var rawQty = decimal.TryParse(cols[3].Trim(), out var qty) ? qty : 0m;
+                // SHKZG, SMBLN, SMBLP) then MkpfColumns (BLDAT, BUDAT).
+                var rawQty = RfcRowExtensions.ParseSapDecimal(cols[3]) ?? 0m;
                 var shkzg  = cols[7].Trim();
                 // 'H' = credit / stock decrease — a 102 reversal. 'S' (or
                 // anything else, defensively) = debit / stock increase, the
@@ -151,8 +160,10 @@ internal static class ConsignmentHelpers
                     Uom              = cols[4],
                     Vendor           = cols[5],
                     InvoiceNumber    = cols[6],
-                    DocumentDate     = cols[8],
-                    PostingDate      = cols[9],
+                    ReversalOfMaterialDocument = cols[8].Trim(),
+                    ReversalOfMaterialDocItem  = cols[9].Trim(),
+                    DocumentDate     = cols[10],
+                    PostingDate      = cols[11],
                 };
             })
             .ToArray();

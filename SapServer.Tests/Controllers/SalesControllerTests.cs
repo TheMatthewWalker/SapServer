@@ -1,4 +1,3 @@
-using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using SapServer.Controllers;
@@ -7,6 +6,7 @@ using SapServer.Helpers;
 using SapServer.Models;
 using SapServer.Services.Interfaces;
 using SapServer.Tests.Infrastructure;
+using System.Web.Http;
 
 namespace SapServer.Tests.Controllers;
 
@@ -20,8 +20,8 @@ public class SalesControllerTests
     {
         SalesOrg = "302",
         ShipToParties = ["302879"],
-        ScheduleDateFrom = new DateOnly(2020, 1, 1),
-        ScheduleDateTo = new DateOnly(2020, 12, 31),
+        ScheduleDateFrom = new DateTime(2020, 1, 1),
+        ScheduleDateTo = new DateTime(2020, 12, 31),
     };
 
     public SalesControllerTests()
@@ -36,7 +36,7 @@ public class SalesControllerTests
     {
         var result = await _controller.ScheduleWaterfall(BaseRequest() with { SalesOrg = "" }, CancellationToken.None);
 
-        Assert.Empty(Assert.IsType<ApiResponse<ScheduleWaterfallRow[]>>(Assert.IsType<OkObjectResult>(result).Value).Data!);
+        Assert.Empty(Assert.IsType<ApiResponse<ScheduleWaterfallRow[]>>(ControllerTestHelpers.AssertOk(result)).Data!);
         _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Never);
         _permissions.Verify(p => p.CanExecuteAsync(It.IsAny<int>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
@@ -80,7 +80,7 @@ public class SalesControllerTests
 
         var result = await _controller.ScheduleWaterfall(BaseRequest(), CancellationToken.None);
 
-        var rows = Assert.IsType<ApiResponse<ScheduleWaterfallRow[]>>(Assert.IsType<OkObjectResult>(result).Value).Data!;
+        var rows = Assert.IsType<ApiResponse<ScheduleWaterfallRow[]>>(ControllerTestHelpers.AssertOk(result)).Data!;
         Assert.Equal(2, rows.Length);
         Assert.Contains(rows, r => !r.IsCurrent && r.IdocNumber == "25753188");
         Assert.Contains(rows, r => r.IsCurrent);

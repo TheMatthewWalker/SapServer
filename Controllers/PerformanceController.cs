@@ -1,7 +1,7 @@
 using System.Data;
+using System.Net;
 using System.Globalization;
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.OpenApi.Services;
+using System.Web.Http;
 using SapServer.Helpers;
 using SapServer.Models;
 using SapServer.Models.Bapi;
@@ -12,7 +12,7 @@ namespace SapServer.Controllers;
 // Pure SAP RFC gateway — no database access. Pulls fresh data from SAP and
 // returns it as JSON; Node is responsible for caching it into SQL Server and
 // for computing DockStockAllocated / PickedStockAllocated on AgreementRow.
-[Route("api/performance")]
+[RoutePrefix("api/performance")]
 public sealed class PerformanceController : SapControllerBase
 {
     public PerformanceController(
@@ -23,10 +23,10 @@ public sealed class PerformanceController : SapControllerBase
 
     // ── GET /api/performance/stock ───────────────────────────────────────
 
-    [HttpGet("stock")]
-    [ProducesResponseType(typeof(ApiResponse<PerformanceStockRow[]>), 200)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
-    public async Task<IActionResult> GetStock(CancellationToken ct)
+    [HttpGet]
+
+    [Route("stock")]
+    public async Task<IHttpActionResult> GetStock(CancellationToken ct)
     {
         await CheckPermissionAsync(GetUserId(), ProductionHelpers.FnReadTables, ct);
 
@@ -42,10 +42,10 @@ public sealed class PerformanceController : SapControllerBase
 
     // ── GET /api/performance/agreements ──────────────────────────────────
 
-    [HttpGet("agreements")]
-    [ProducesResponseType(typeof(ApiResponse<AgreementRow[]>), 200)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
-    public async Task<IActionResult> GetAgreements([FromQuery] int? horizonDays, CancellationToken ct)
+    [HttpGet]
+
+    [Route("agreements")]
+    public async Task<IHttpActionResult> GetAgreements([FromUri] int? horizonDays = null, CancellationToken ct = default)
     {
         await CheckPermissionAsync(GetUserId(), PerformanceHelpers.FnStockReqList, ct);
 
@@ -112,10 +112,10 @@ public sealed class PerformanceController : SapControllerBase
     // Z_STOCK_REQ_LIST has handed back a delivery number instead of the
     // original order — see PerformanceHelpers.BuildVbfaOrderLinkRequest.
 
-    [HttpGet("vbfa-order-link/{delivery}")]
-    [ProducesResponseType(typeof(ApiResponse<VbfaOrderLinkRow[]>), 200)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
-    public async Task<IActionResult> GetVbfaOrderLink(string delivery, CancellationToken ct)
+    [HttpGet]
+
+    [Route("vbfa-order-link/{delivery}")]
+    public async Task<IHttpActionResult> GetVbfaOrderLink(string delivery, CancellationToken ct)
     {
         await CheckPermissionAsync(GetUserId(), PerformanceHelpers.FnReadTables, ct);
 
@@ -127,10 +127,10 @@ public sealed class PerformanceController : SapControllerBase
 
     // ── GET /api/performance/invoicing ───────────────────────────────────
 
-    [HttpGet("invoicing")]
-    [ProducesResponseType(typeof(ApiResponse<InvoiceRow[]>), 200)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
-    public async Task<IActionResult> GetInvoicing([FromQuery] DateTime? from, [FromQuery] DateTime? to, CancellationToken ct)
+    [HttpGet]
+
+    [Route("invoicing")]
+    public async Task<IHttpActionResult> GetInvoicing([FromUri] DateTime? from = null, [FromUri] DateTime? to = null, CancellationToken ct = default)
     {
         await CheckPermissionAsync(GetUserId(), PerformanceHelpers.FnSaleAnalHist, ct);
 
@@ -148,10 +148,10 @@ public sealed class PerformanceController : SapControllerBase
 
     // ── GET /api/performance/otif ─────────────────────────────────────────
 
-    [HttpGet("otif")]
-    [ProducesResponseType(typeof(ApiResponse<OtifRow[]>), 200)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
-    public async Task<IActionResult> GetOtif([FromQuery] DateTime? from, [FromQuery] DateTime? to, CancellationToken ct)
+    [HttpGet]
+
+    [Route("otif")]
+    public async Task<IHttpActionResult> GetOtif([FromUri] DateTime? from = null, [FromUri] DateTime? to = null, CancellationToken ct = default)
     {
         await CheckPermissionAsync(GetUserId(), PerformanceHelpers.FnCustIndexAnal, ct);
 
@@ -170,11 +170,12 @@ public sealed class PerformanceController : SapControllerBase
     // valuation, book value, turns/days-in-stock, 13mo consumption history
     // and 13mo demand forecast, one row per material.
 
-    [HttpGet("turns-valclass")]
-    [ProducesResponseType(typeof(ApiResponse<TurnsValClassRow[]>), 200)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
-    public async Task<IActionResult> GetTurnsValClass([FromQuery] TurnsValClassQuery query, CancellationToken ct)
+    [HttpGet]
+
+    [Route("turns-valclass")]
+    public async Task<IHttpActionResult> GetTurnsValClass([FromUri] TurnsValClassQuery query, CancellationToken ct)
     {
+        query ??= new TurnsValClassQuery();
         await CheckPermissionAsync(GetUserId(), PerformanceHelpers.FnReadTables, ct);
         await CheckPermissionAsync(GetUserId(), PerformanceHelpers.FnStockReqList, ct);
 
@@ -238,10 +239,10 @@ public sealed class PerformanceController : SapControllerBase
     // ── GET /api/performance/turns-valclass/valuation-classes ─────────────
     // Direct port of Get_T025_T025T_T134 — the "valid new valuation class" catalog for client-side dropdowns.
 
-    [HttpGet("turns-valclass/valuation-classes")]
-    [ProducesResponseType(typeof(ApiResponse<ValClassRow[]>), 200)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
-    public async Task<IActionResult> GetValuationClasses(CancellationToken ct)
+    [HttpGet]
+
+    [Route("turns-valclass/valuation-classes")]
+    public async Task<IHttpActionResult> GetValuationClasses(CancellationToken ct)
     {
         await CheckPermissionAsync(GetUserId(), PerformanceHelpers.FnReadTables, ct);
 
@@ -257,11 +258,10 @@ public sealed class PerformanceController : SapControllerBase
     // then moves stock back in (MB1A 292). All-or-nothing pre-check first —
     // if any requested material fails validation, nothing is posted to SAP.
 
-    [HttpPost("turns-valclass/change-valuation-class")]
-    [ProducesResponseType(typeof(ApiResponse<ChangeValuationClassResponse>), 200)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 422)]
-    public async Task<IActionResult> ChangeValuationClass([FromBody] ChangeValuationClassRequest body, CancellationToken ct)
+    [HttpPost]
+
+    [Route("turns-valclass/change-valuation-class")]
+    public async Task<IHttpActionResult> ChangeValuationClass([FromBody] ChangeValuationClassRequest body, CancellationToken ct)
     {
         await CheckPermissionAsync(GetUserId(), PerformanceHelpers.FnCreate, ct);
 
@@ -270,7 +270,7 @@ public sealed class PerformanceController : SapControllerBase
         if (string.IsNullOrWhiteSpace(body.Order) || body.Changes.Count == 0)
         {
             const string msg = "An order and at least one material change are required.";
-            return UnprocessableEntity(ApiResponse<ChangeValuationClassResponse>.Fail("422", msg,
+            return Content((HttpStatusCode)422, ApiResponse<ChangeValuationClassResponse>.Fail("422", msg,
                 new ChangeValuationClassResponse { Success = false, ErrorMessage = msg }));
         }
 
@@ -288,7 +288,7 @@ public sealed class PerformanceController : SapControllerBase
         if (string.IsNullOrEmpty(orderCompanyCode) || orderCompanyCode != companyCode)
         {
             var msg = $"Order {body.Order} does not exist in company code {companyCode}.";
-            return UnprocessableEntity(ApiResponse<ChangeValuationClassResponse>.Fail("422", msg,
+            return Content((HttpStatusCode)422, ApiResponse<ChangeValuationClassResponse>.Fail("422", msg,
                 new ChangeValuationClassResponse { Success = false, ErrorMessage = msg }));
         }
 
@@ -307,7 +307,7 @@ public sealed class PerformanceController : SapControllerBase
         if (errors.Count > 0)
         {
             var msg = string.Join(" ", errors);
-            return UnprocessableEntity(ApiResponse<ChangeValuationClassResponse>.Fail("422", msg,
+            return Content((HttpStatusCode)422, ApiResponse<ChangeValuationClassResponse>.Fail("422", msg,
                 new ChangeValuationClassResponse { Success = false, ErrorMessage = msg }));
         }
 

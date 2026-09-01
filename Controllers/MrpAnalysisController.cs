@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Mvc;
+using System.Web.Http;
 using SapServer.Helpers;
 using SapServer.Models;
 using SapServer.Models.Bapi;
@@ -11,7 +11,7 @@ namespace SapServer.Controllers;
 // raw-material purchasing number: a %-increase extrapolation against past consumption, and
 // a full sales-unit breakdown exploded down through SAP's multi-level BOM to raw materials
 // (profit centre 2012). See MrpAnalysisHelper's own comment for the endpoint-to-RFC map.
-[Route("api/mrp-analysis")]
+[RoutePrefix("api/mrp-analysis")]
 public sealed class MrpAnalysisController : SapControllerBase
 {
     public MrpAnalysisController(
@@ -28,10 +28,10 @@ public sealed class MrpAnalysisController : SapControllerBase
     // with ParseConsumptionHistoryByYear instead of the rolling-36-month parser. No new RFC
     // call — this is the same SAP round trip, read a second way.
 
-    [HttpGet("consumption-by-year")]
-    [ProducesResponseType(typeof(ApiResponse<ConsumptionByYearRow[]>), 200)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
-    public async Task<IActionResult> GetConsumptionByYear(CancellationToken ct)
+    [HttpGet]
+
+    [Route("consumption-by-year")]
+    public async Task<IHttpActionResult> GetConsumptionByYear(CancellationToken ct)
     {
         await CheckPermissionAsync(GetUserId(), MrpAnalysisHelper.FnMrpAnalysis, ct);
 
@@ -48,10 +48,10 @@ public sealed class MrpAnalysisController : SapControllerBase
     // summed in memory by MrpAnalysisHelper.AggregateGoodsReceiptHistory. sinceDate (optional,
     // SAP dd.MM.yyyy) bounds both pulls — omit for a first-ever full-history sync.
 
-    [HttpGet("goods-receipt-history")]
-    [ProducesResponseType(typeof(ApiResponse<GoodsReceiptHistoryRow[]>), 200)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
-    public async Task<IActionResult> GetGoodsReceiptHistory([FromQuery] string? sinceDate, CancellationToken ct)
+    [HttpGet]
+
+    [Route("goods-receipt-history")]
+    public async Task<IHttpActionResult> GetGoodsReceiptHistory([FromUri] string? sinceDate = null, CancellationToken ct = default)
     {
         await CheckPermissionAsync(GetUserId(), MrpAnalysisHelper.FnMrpAnalysis, ct);
 
@@ -79,10 +79,10 @@ public sealed class MrpAnalysisController : SapControllerBase
     // quantities. Validate against at least one known real multi-level BOM before trusting it
     // for an actual blanket PO (see this method's own risk note in the implementation plan).
 
-    [HttpPost("explode-bom")]
-    [ProducesResponseType(typeof(ApiResponse<BomExplosionResult>), 200)]
-    [ProducesResponseType(typeof(ApiResponse<object>), 403)]
-    public async Task<IActionResult> ExplodeBom([FromBody] BomExplosionRequest body, CancellationToken ct)
+    [HttpPost]
+
+    [Route("explode-bom")]
+    public async Task<IHttpActionResult> ExplodeBom([FromBody] BomExplosionRequest body, CancellationToken ct)
     {
         await CheckPermissionAsync(GetUserId(), MrpAnalysisHelper.FnMrpAnalysis, ct);
 

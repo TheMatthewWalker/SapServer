@@ -276,3 +276,52 @@ public sealed class SetDeliveryWeightResponse
 {
     public string Message { get; init; } = string.Empty;
 }
+
+// ── SetPickedQuantity (VL02N BDC) ────────────────────────────────────────────
+//
+// Fixes LIPS-PIKMG (picked quantity) for a delivery's batch-split rows so
+// BAPI_OUTB_DELIVERY_CONFIRM_DEC's picking-confirmation check passes. No BAPI
+// exposes PIKMG directly (WS_DELIVERY_UPDATE/_2, the internal function
+// modules VL02N's own screen flow uses, are confirmed NOT RFC-accessible via
+// a real RFC_GET_FUNCTION_INTERFACE check) — this is a deliberately narrow,
+// last-resort BDC, not a general VL02N replication. Built from a real SHDB
+// recording (not the initial ZDELHAND_9-derived guess, which was tried live
+// and confirmed wrong — see WarehouseHelpers.BuildSetPickedQuantityRequest
+// for the full diagnosis history and the real, fragile, position-indexed
+// table-control mechanics this depends on).
+//
+// CONFIRMED WORKING END TO END live against delivery 0082291409 (real
+// 3-way batch split, 400 EA each): this call returned "S VL 311 Delivery
+// ... has been saved", and a subsequent BAPI_OUTB_DELIVERY_CONFIRM_DEC
+// TestRun (previously blocked with "Delivery has not yet been put away /
+// picked (completely)" on every attempt) came back with zero rejections.
+
+public sealed class SetPickedQuantityRequest
+{
+    [Required, MinLength(1)] public string DeliveryNumber { get; init; } = string.Empty; // LIKP-VBELN (sent unpadded, matching the real recording)
+
+    // SHDB recorded LIKP-BLDAT/KODAT/KOUHR (billing block date/pricing
+    // date/pricing time) as echoed values alongside the picking screen, but
+    // only BLDAT is confirmed live to actually be a real, settable field in
+    // a BDC replay -- KODAT and KOUHR both rejected with a real "Field ...
+    // does not exist in dynpro SAPMV50A 1000" (message class 00, number
+    // 349) despite SHDB showing them as populated. Left blank skips sending
+    // it; supply the delivery's real current LIKP-BLDAT (a small LIKP read,
+    // same convention as zdelflag/likp-ablad) if a live call rejects on a
+    // missing/stale header date.
+    public string? BillingDate { get; init; } // LIKP-BLDAT, format DD.MM.YYYY
+
+    // One quantity per expanded batch-split row, in the EXACT order SAP's own
+    // item-overview table control displays them (confirmed for a real 3-way
+    // split to be ascending by the sub-item numbers SAP itself assigned during
+    // the BAPI_OUTB_DELIVERY_CHANGE split) — maps to LIPSD-PIKMG(02), (03), (04)...
+    // This is a raw table-control ROW POSITION, not a batch/item lookup; a wrong
+    // order silently posts one batch's quantity onto another's row with no error
+    // from SAP at all. See the helper's doc comment for the full caveat.
+    public List<decimal> PickedQuantities { get; init; } = [];
+}
+
+public sealed class SetPickedQuantityResponse
+{
+    public string Message { get; init; } = string.Empty;
+}

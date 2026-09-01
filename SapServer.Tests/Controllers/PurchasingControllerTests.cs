@@ -1,4 +1,3 @@
-using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -10,6 +9,7 @@ using SapServer.Models.Bapi;
 using SapServer.Services;
 using SapServer.Services.Interfaces;
 using SapServer.Tests.Infrastructure;
+using System.Web.Http;
 
 namespace SapServer.Tests.Controllers;
 
@@ -21,9 +21,9 @@ public class PurchasingControllerTests
 
     public PurchasingControllerTests()
     {
-        var poolOptions = Options.Create(new SapPoolOptions
+        var poolOptions = Options.Create(new SapNcoOptions
         {
-            ServiceAccount = new SapConnectionOptions { System = "SAP", Client = "100", SystemId = "01", Language = "EN" },
+            ServiceAccount = new SapConnectionOptions { AppServerHost = "sap-test-host", Client = "100", SystemNumber = "01", Language = "EN" },
         });
         _controller = new PurchasingController(_pool.Object, _permissions.Object, poolOptions, NullLogger<PurchasingController>.Instance);
         ControllerTestHelpers.SetUser(_controller, userId: 1);
@@ -42,9 +42,9 @@ public class PurchasingControllerTests
     {
         var result = await _controller.CreatePurchaseOrder(SamplePo(), dryRun: true, CancellationToken.None);
 
-        var ok = Assert.IsType<OkObjectResult>(result);
-        Assert.IsType<ApiResponse<RfcRequest>>(ok.Value);
-        _pool.Verify(p => p.AcquireWorker(), Times.Never);
+        var ok = ControllerTestHelpers.AssertOk(result);
+        Assert.IsType<ApiResponse<RfcRequest>>(ok);
+        _pool.Verify(p => p.AcquireWorkerAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -55,8 +55,8 @@ public class PurchasingControllerTests
 
         var result = await _controller.CreatePurchaseOrder(SamplePo(), dryRun: false, CancellationToken.None);
 
-        var ok = Assert.IsType<OkObjectResult>(result);
-        var body = Assert.IsType<ApiResponse<PoCreateRow>>(ok.Value);
+        var ok = ControllerTestHelpers.AssertOk(result);
+        var body = Assert.IsType<ApiResponse<PoCreateRow>>(ok);
         Assert.Equal("4500001234", body.Data!.PurchaseOrder);
         _pool.Verify(p => p.ExecuteOnWorkerAsync(It.IsAny<SapWorkerHandle>(),
             It.Is<RfcRequest>(r => r.FunctionName == "BAPI_TRANSACTION_COMMIT"), It.IsAny<CancellationToken>()), Times.Once);
@@ -70,7 +70,7 @@ public class PurchasingControllerTests
 
         var result = await _controller.CreatePurchaseOrder(SamplePo(), dryRun: false, CancellationToken.None);
 
-        Assert.IsType<BadRequestObjectResult>(result); // note: BadRequest here, not UnprocessableEntity like WarehouseController
+        ControllerTestHelpers.AssertBadRequest(result); // note: BadRequest here, not UnprocessableEntity like WarehouseController
         _pool.Verify(p => p.ExecuteOnWorkerAsync(It.IsAny<SapWorkerHandle>(),
             It.Is<RfcRequest>(r => r.FunctionName == "BAPI_TRANSACTION_ROLLBACK"), It.IsAny<CancellationToken>()), Times.Once);
     }
@@ -80,7 +80,7 @@ public class PurchasingControllerTests
     {
         var result = await _controller.PostGoodsReceipt(new GoodsReceiptRequest { PurchaseOrder = "4500001234", LineNumber = 1 }, dryRun: true, CancellationToken.None);
 
-        Assert.IsType<OkObjectResult>(result);
+        ControllerTestHelpers.AssertOk(result);
         _pool.Verify(p => p.ExecuteAsync(It.IsAny<RfcRequest>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -92,8 +92,8 @@ public class PurchasingControllerTests
 
         var result = await _controller.PostGoodsReceipt(new GoodsReceiptRequest { PurchaseOrder = "4500001234", LineNumber = 1 }, dryRun: false, CancellationToken.None);
 
-        var ok = Assert.IsType<OkObjectResult>(result);
-        var body = Assert.IsType<ApiResponse<BdcResponse>>(ok.Value);
+        var ok = ControllerTestHelpers.AssertOk(result);
+        var body = Assert.IsType<ApiResponse<BdcResponse>>(ok);
         Assert.Equal("5000009999", body.Data!.DocumentNumber);
     }
 
@@ -108,8 +108,8 @@ public class PurchasingControllerTests
 
         var result = await _controller.GetPoPrice("4500001234", CancellationToken.None);
 
-        var ok = Assert.IsType<OkObjectResult>(result);
-        var body = Assert.IsType<ApiResponse<Dictionary<string, decimal>>>(ok.Value);
+        var ok = ControllerTestHelpers.AssertOk(result);
+        var body = Assert.IsType<ApiResponse<Dictionary<string, decimal>>>(ok);
         // Keyed by bare integer, not the raw padded string — see
         // PurchasingHelperTests' ParsePoPrices_normalizes_a_6_digit_ITM_NUMBER... test.
         Assert.Equal(89.25m, body.Data!["10"]);
@@ -121,7 +121,7 @@ public class PurchasingControllerTests
         var result = await _controller.CreatePurchaseOrderAndReceipt(
             new CreatePoAndReceiptRequest { Items = [new CreatePoAndReceiptItem { Material = "30005R", Quantity = 1 }] }, CancellationToken.None);
 
-        Assert.IsType<BadRequestObjectResult>(result);
+        ControllerTestHelpers.AssertBadRequest(result);
         _pool.Verify(p => p.AcquireElevatedWorkerAsync(It.IsAny<SapConnectionOptions>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -131,7 +131,7 @@ public class PurchasingControllerTests
         var result = await _controller.CreatePurchaseOrderAndReceipt(
             new CreatePoAndReceiptRequest { SapUsername = "j.smith", SapPassword = "pw", Items = [] }, CancellationToken.None);
 
-        Assert.IsType<BadRequestObjectResult>(result);
+        ControllerTestHelpers.AssertBadRequest(result);
     }
 
     [Fact]
@@ -149,7 +149,7 @@ public class PurchasingControllerTests
             Items = [new CreatePoAndReceiptItem { Material = "30005R", Quantity = 1 }],
         }, CancellationToken.None);
 
-        Assert.IsType<BadRequestObjectResult>(result);
+        ControllerTestHelpers.AssertBadRequest(result);
         _pool.Verify(p => p.ExecuteOnWorkerAsync(It.IsAny<SapWorkerHandle>(),
             It.Is<RfcRequest>(r => r.FunctionName == "BAPI_TRANSACTION_ROLLBACK"), It.IsAny<CancellationToken>()), Times.Once);
         _pool.Verify(p => p.ReleaseElevatedWorkerAsync(It.IsAny<SapWorkerHandle>()), Times.Once);
@@ -178,8 +178,8 @@ public class PurchasingControllerTests
             ],
         }, CancellationToken.None);
 
-        var ok = Assert.IsType<OkObjectResult>(result);
-        var body = Assert.IsType<ApiResponse<CreatePoAndReceiptResponse>>(ok.Value);
+        var ok = ControllerTestHelpers.AssertOk(result);
+        var body = Assert.IsType<ApiResponse<CreatePoAndReceiptResponse>>(ok);
         Assert.True(body.Data!.PoSuccess);
         Assert.Equal(2, body.Data.Lines.Count);
         Assert.True(body.Data.Lines[0].Success);
@@ -196,7 +196,7 @@ public class PurchasingControllerTests
         var result = await _controller.CreatePurchaseOrderElevated(
             new CreatePoElevatedRequest { Items = [new PoCreateItem { Material = "30005R", Quantity = 1 }] }, CancellationToken.None);
 
-        Assert.IsType<BadRequestObjectResult>(result);
+        ControllerTestHelpers.AssertBadRequest(result);
         _pool.Verify(p => p.AcquireElevatedWorkerAsync(It.IsAny<SapConnectionOptions>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -215,8 +215,8 @@ public class PurchasingControllerTests
             Items = [new PoCreateItem { Material = "30005R", Quantity = 1 }],
         }, CancellationToken.None);
 
-        var ok = Assert.IsType<OkObjectResult>(result);
-        var body = Assert.IsType<ApiResponse<CreatePoElevatedResponse>>(ok.Value);
+        var ok = ControllerTestHelpers.AssertOk(result);
+        var body = Assert.IsType<ApiResponse<CreatePoElevatedResponse>>(ok);
         Assert.Equal("4500009999", body.Data!.PurchaseOrder);
         _pool.Verify(p => p.ReleaseElevatedWorkerAsync(It.IsAny<SapWorkerHandle>()), Times.Once);
     }

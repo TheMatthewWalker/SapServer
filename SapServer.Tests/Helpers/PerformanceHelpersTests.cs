@@ -45,6 +45,20 @@ public class PerformanceHelpersTests
         Assert.Equal((decimal)expected, PerformanceHelpers.BookValueFactor(valuationClass));
     }
 
+    /// <summary>
+    /// ROWCOUNT must be a real integer, not an empty string - same real bug
+    /// found (and fixed) in LogisticsHelpers.BuildPicksheetRequest: SAP NCo's
+    /// typed RfcDataContainer.SetValue throws RfcTypeConversionException for
+    /// "" on an INT4 parameter, confirmed against a live IIS deploy.
+    /// </summary>
+    [Fact]
+    public void BuildMaterialProfitCentre_sends_ROWCOUNT_as_an_integer_not_an_empty_string()
+    {
+        var request = PerformanceHelpers.BuildMaterialProfitCentre();
+
+        Assert.Equal(0, request.ImportParameters["ROWCOUNT"]);
+    }
+
     [Fact]
     public void ApplyCurrencyConversion_leaves_LocalAmount_equal_to_Amount_when_currency_is_blank()
     {

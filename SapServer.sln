@@ -7,7 +7,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SapServer", "SapServer.cspr
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "interop-stubs", "interop-stubs", "{25C5FE1E-9001-3E23-EA5C-ED8E9A700454}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SAPFunctions64.DevStub", "interop-stubs\SAPFunctions64.DevStub\SAPFunctions64.DevStub.csproj", "{4AFC0026-3E71-4A59-8269-9878DCE83036}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SapNco.DevStub", "interop-stubs\SapNco.DevStub\SapNco.DevStub.csproj", "{4AFC0026-3E71-4A59-8269-9878DCE83036}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SapServer.Tests", "SapServer.Tests\SapServer.Tests.csproj", "{CD9C5EC0-0C4A-4625-98C6-C6FCE92B6BFC}"
 EndProject

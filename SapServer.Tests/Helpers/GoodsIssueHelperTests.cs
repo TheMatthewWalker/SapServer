@@ -7,54 +7,58 @@ namespace SapServer.Tests.Helpers;
 public class GoodsIssueHelperTests
 {
     [Fact]
-    public void BuildGoodsIssueRequest_pads_the_delivery_number_to_10_on_DELIVERY_EXTEND_and_REQUEST()
+    public void BuildGoodsIssueRequest_pads_the_delivery_number_to_10_on_both_HEADER_DATA_and_HEADER_CONTROL()
     {
         var request = GoodsIssueHelper.BuildGoodsIssueRequest(new GoodsIssueRequest { DeliveryNumber = "80001234" });
-
-        Assert.Equal("0080001234", request.StructImportParameters["DELIVERY_EXTEND"]["DELIVERY_NUMBER"]);
-        Assert.Equal("0080001234", request.InputTables["REQUEST"][0]["DOCUMENT_NUMB"]);
+        Assert.Equal("0080001234", request.StructImportParameters["HEADER_DATA"]["DELIV_NUMB"]);
+        Assert.Equal("0080001234", request.StructImportParameters["HEADER_CONTROL"]["DELIV_NUMB"]);
     }
 
     [Fact]
-    public void BuildGoodsIssueRequest_leaves_CHECK_MODE_blank_when_neither_flag_is_set()
+    public void BuildGoodsIssueRequest_sets_POST_GI_FLG_X_on_HEADER_CONTROL()
     {
+        // Confirmed via a real BAPI Inspector signature (2026-08-28):
+        // POST_GI_FLG lives on HEADER_CONTROL (BAPIOBDLVHDRCTRLCON), not
+        // HEADER_DATA as the user's original sample code suggested — see
+        // GoodsIssueModels.cs's header comment for the full diagnosis.
         var request = GoodsIssueHelper.BuildGoodsIssueRequest(new GoodsIssueRequest { DeliveryNumber = "80001234" });
-        Assert.Equal("", request.StructImportParameters["TECHN_CONTROL"]["CHECK_MODE"]);
+        Assert.Equal("X", request.StructImportParameters["HEADER_CONTROL"]["POST_GI_FLG"]);
     }
 
     [Fact]
-    public void BuildGoodsIssueRequest_CheckMode_sets_TECHN_CONTROL_CHECK_MODE_X()
+    public void BuildGoodsIssueRequest_sets_ITEM_DATA_SPL_QTY_POST_per_item()
     {
-        var request = GoodsIssueHelper.BuildGoodsIssueRequest(new GoodsIssueRequest { DeliveryNumber = "80001234", CheckMode = true });
-        Assert.Equal("X", request.StructImportParameters["TECHN_CONTROL"]["CHECK_MODE"]);
+        // Regression test: confirmed live that POST_GI_FLG alone gets
+        // rejected with "Delivery has not yet been put away / picked
+        // (completely)" -- ITEM_DATA_SPL-QTY_POST per item is what actually
+        // confirms picking. Item numbers here are SAP's own real
+        // (auto-assigned, batch-split) sub-item numbers, not what was
+        // originally requested when creating the split.
+        var request = GoodsIssueHelper.BuildGoodsIssueRequest(new GoodsIssueRequest
+        {
+            DeliveryNumber = "0082291409",
+            Items =
+            [
+                new GoodsIssueItem { ItemNumber = "900001", Quantity = 400m, BaseUom = "EA" },
+                new GoodsIssueItem { ItemNumber = "900002", Quantity = 400m, BaseUom = "EA" },
+                new GoodsIssueItem { ItemNumber = "900003", Quantity = 400m, BaseUom = "EA" },
+            ],
+        });
+
+        var rows = request.InputTables["ITEM_DATA_SPL"];
+        Assert.Equal(3, rows.Count);
+        Assert.Equal("900001", rows[0]["DELIV_ITEM"]);
+        Assert.Equal(400m, rows[0]["QTY_POST"]);
+        Assert.Equal("EA", rows[0]["BASE_UOM"]);
     }
 
     [Fact]
-    public void BuildGoodsIssueRequest_TestRun_also_sets_TECHN_CONTROL_CHECK_MODE_X()
-    {
-        var request = GoodsIssueHelper.BuildGoodsIssueRequest(new GoodsIssueRequest { DeliveryNumber = "80001234", TestRun = true });
-        Assert.Equal("X", request.StructImportParameters["TECHN_CONTROL"]["CHECK_MODE"]);
-    }
-
-    [Fact]
-    public void BuildGoodsIssueRequest_defaults_dates_to_today_when_not_supplied()
-    {
-        var today = DateTime.Now.ToString("yyyyMMdd");
-        var request = GoodsIssueHelper.BuildGoodsIssueRequest(new GoodsIssueRequest { DeliveryNumber = "80001234" });
-
-        var row = request.InputTables["REQUEST"][0];
-        Assert.Equal(today, row["DELIVERY_DATE"]);
-        Assert.Equal(today, row["GOODS_ISSUE_DATE"]);
-    }
-
-    [Fact]
-    public void BuildGoodsIssueRequest_registers_RETURN_and_CREATEDITEMS_output_tables()
+    public void BuildGoodsIssueRequest_registers_RETURN_output_table()
     {
         var request = GoodsIssueHelper.BuildGoodsIssueRequest(new GoodsIssueRequest { DeliveryNumber = "80001234" });
 
         Assert.Contains("TYPE", request.OutputTables["RETURN"]);
         Assert.Contains("MESSAGE", request.OutputTables["RETURN"]);
-        Assert.Contains("DOCUMENT_NUMB", request.OutputTables["CREATEDITEMS"]);
     }
 
     [Fact]
@@ -89,22 +93,5 @@ public class GoodsIssueHelperTests
         var result = GoodsIssueHelper.ParseGoodsIssueResponse(new RfcResponse(), "80001234");
         Assert.True(result.Success);
         Assert.Empty(result.Messages);
-    }
-
-    [Fact]
-    public void ParseGoodsIssueResponse_counts_CREATEDITEMS_rows()
-    {
-        var response = new RfcResponse
-        {
-            Tables = new()
-            {
-                ["CREATEDITEMS"] = [
-                    new() { ["DOCUMENT_NUMB"] = "0080001234", ["DOCUMENT_ITEM"] = "000010" },
-                    new() { ["DOCUMENT_NUMB"] = "0080001234", ["DOCUMENT_ITEM"] = "000020" },
-                ],
-            },
-        };
-        var result = GoodsIssueHelper.ParseGoodsIssueResponse(response, "80001234");
-        Assert.Equal(2, result.CreatedItemCount);
     }
 }

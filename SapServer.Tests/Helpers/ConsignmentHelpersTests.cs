@@ -59,9 +59,9 @@ public class ConsignmentHelpersTests
             {
                 ["data_display"] = new()
                 {
-                    new() { ["WA"] = "MATNR|MBLNR|ZEILE|MENGE|MEINS|LIFNR|XBLNR_MKPF|SHKZG|BLDAT|BUDAT" },
-                    new() { ["WA"] = "30005R|4900012345|0001|100|KG|0000012345|INV1|S|01.01.2026|02.01.2026" }, // normal GR
-                    new() { ["WA"] = "30005R|4900012346|0001|100|KG|0000012345|INV1|H|03.01.2026|04.01.2026" }, // 102 reversal
+                    new() { ["WA"] = "MATNR|MBLNR|ZEILE|MENGE|MEINS|LIFNR|XBLNR_MKPF|SHKZG|SMBLN|SMBLP|BLDAT|BUDAT" },
+                    new() { ["WA"] = "30005R|4900012345|0001|100|KG|0000012345|INV1|S| | |01.01.2026|02.01.2026" }, // normal GR
+                    new() { ["WA"] = "30005R|4900012346|0001|100|KG|0000012345|INV1|H| | |03.01.2026|04.01.2026" }, // 102 reversal
                 }
             }
         };
@@ -83,13 +83,41 @@ public class ConsignmentHelpersTests
                 ["data_display"] = new()
                 {
                     new() { ["WA"] = "header|only" },
-                    new() { ["WA"] = "00012345|4900012345|0001|100|KG|0000012345|INV1|S|01.01.2026|02.01.2026" },
+                    new() { ["WA"] = "00012345|4900012345|0001|100|KG|0000012345|INV1|S| | |01.01.2026|02.01.2026" },
                 }
             }
         };
 
         var rows = ConsignmentHelpers.ParseVendorGrRows(response);
         Assert.Equal("12345", rows[0].Material);
+    }
+
+    [Fact]
+    public void ParseVendorGrRows_reads_SMBLN_SMBLP_when_populated_and_blanks_when_not()
+    {
+        // Confirmed for real against Raaj Ratna's live SAP data (2026-08-27):
+        // an MBST cancellation line carries SMBLN/SMBLP pointing back at the
+        // document+item it reverses — an ordinary GR/reversal leaves both blank.
+        var response = new RfcResponse
+        {
+            Tables = new()
+            {
+                ["data_display"] = new()
+                {
+                    new() { ["WA"] = "header|only" },
+                    new() { ["WA"] = "30008R|5005206624|0001|1090.210|KG|0000200604|RMIE1052|H|5005206623|0001|29.04.2026|07.05.2026" }, // cancels 5005206623/0001
+                    new() { ["WA"] = "30005R|5005131208|0001|991.110|KG|0000200604|RMI/E/0626|S| | |30.08.2025|17.11.2025" }, // ordinary GR, nothing reversed
+                }
+            }
+        };
+
+        var rows = ConsignmentHelpers.ParseVendorGrRows(response);
+
+        Assert.Equal("5005206623", rows[0].ReversalOfMaterialDocument);
+        Assert.Equal("0001", rows[0].ReversalOfMaterialDocItem);
+
+        Assert.Equal("", rows[1].ReversalOfMaterialDocument);
+        Assert.Equal("", rows[1].ReversalOfMaterialDocItem);
     }
 
     [Fact]
