@@ -8,16 +8,17 @@
 # see CLAUDE.md's "SAP NCo Spike" / architecture sections for the full
 # rationale behind the .NET Framework 4.8 + NCo rebuild.
 #
-# Run as Administrator, on a machine with IIS + its PowerShell management
-# tools installed:
-#   - Windows Server: Install-WindowsFeature Web-Server, Web-Asp-Net45, Web-Scripting-Tools
-#     (Web-Scripting-Tools specifically is what provides the WebAdministration
-#     module below - easy to miss, since Web-Server/Web-Asp-Net45 alone install
-#     IIS itself but not its PowerShell cmdlets.)
-#   - Windows 10/11 (client): Enable-WindowsOptionalFeature -Online -All -FeatureName
-#     IIS-WebServerRole, IIS-WebServer, IIS-CommonHttpFeatures, IIS-HttpErrors,
-#     IIS-ApplicationDevelopment, IIS-NetFxExtensibility45, IIS-ISAPIExtensions,
-#     IIS-ISAPIFilter, IIS-ASPNET45, IIS-ManagementConsole, IIS-ManagementScriptingTools
+# Run as Administrator. IIS + its PowerShell management tools (and
+# Application Initialization, further down) are installed automatically if
+# missing - Web-Server/Web-Asp-Net45/Web-Scripting-Tools on Windows Server
+# (Web-Scripting-Tools specifically is what provides the WebAdministration
+# module everything below depends on - easy to miss, since Web-Server/
+# Web-Asp-Net45 alone install IIS itself but not its PowerShell cmdlets),
+# or the IIS-WebServerRole/IIS-WebServer/... optional-feature set on
+# Windows 10/11 client. If IIS was never installed on this machine before,
+# a reboot may be required after the first run before WebAdministration's
+# module actually registers - the script detects this and tells you to
+# re-run after rebooting rather than failing silently later.
 #Requires -RunAsAdministrator
 
 $ErrorActionPreference = 'Stop'
@@ -34,15 +35,69 @@ if ($PSVersionTable.PSEdition -eq 'Core') {
     exit $LASTEXITCODE
 }
 
+# Installs one or more Windows features/roles needed for IIS, trying the
+# Server cmdlet (ServerManager's Install-WindowsFeature) first and falling
+# back to the client cmdlet (Enable-WindowsOptionalFeature) - the two are
+# mutually exclusive depending on Windows SKU. Used both for the base IIS +
+# management-tools install below and for Application Initialization further
+# down, so this is a shared helper rather than duplicating the Server/client
+# probe-and-install logic twice.
+function Install-IISFeature {
+    param(
+        [string[]] $ServerFeatureNames,
+        [string[]] $ClientFeatureNames,
+        [string]   $DisplayName
+    )
+
+    Write-Host "Installing $DisplayName..."
+    try {
+        $result = Install-WindowsFeature -Name $ServerFeatureNames -ErrorAction Stop
+        $restartNeeded = $result.RestartNeeded -ne 'No'
+    } catch {
+        try {
+            $restartNeeded = $false
+            foreach ($feature in $ClientFeatureNames) {
+                $r = Enable-WindowsOptionalFeature -Online -FeatureName $feature -All -NoRestart -ErrorAction Stop
+                if ($r.RestartNeeded) { $restartNeeded = $true }
+            }
+        } catch {
+            Write-Host "Could not automatically install $DisplayName - $($_.Exception.Message)" -ForegroundColor Red
+            return $false
+        }
+    }
+
+    if ($restartNeeded) {
+        Write-Host "$DisplayName installed - a restart is needed before it's fully active." -ForegroundColor Yellow
+    } else {
+        Write-Host "$DisplayName installed." -ForegroundColor Green
+    }
+    return $true
+}
+
 try {
     Import-Module WebAdministration -ErrorAction Stop
 } catch {
     Write-Host ""
-    Write-Host "IIS's PowerShell management tools aren't installed on this machine." -ForegroundColor Red
-    Write-Host "On Windows Server:  Install-WindowsFeature Web-Server, Web-Asp-Net45, Web-Scripting-Tools" -ForegroundColor Yellow
-    Write-Host "On Windows 10/11:   Enable-WindowsOptionalFeature -Online -All -FeatureName IIS-WebServerRole, IIS-WebServer, IIS-CommonHttpFeatures, IIS-HttpErrors, IIS-ApplicationDevelopment, IIS-NetFxExtensibility45, IIS-ISAPIExtensions, IIS-ISAPIFilter, IIS-ASPNET45, IIS-ManagementConsole, IIS-ManagementScriptingTools" -ForegroundColor Yellow
-    Write-Host ""
-    throw
+    Write-Host "IIS's PowerShell management tools aren't installed on this machine - installing now..." -ForegroundColor Yellow
+    $installed = Install-IISFeature `
+        -ServerFeatureNames @('Web-Server', 'Web-Asp-Net45', 'Web-Scripting-Tools') `
+        -ClientFeatureNames @('IIS-WebServerRole', 'IIS-WebServer', 'IIS-CommonHttpFeatures', 'IIS-HttpErrors', 'IIS-ApplicationDevelopment', 'IIS-NetFxExtensibility45', 'IIS-ISAPIExtensions', 'IIS-ISAPIFilter', 'IIS-ASPNET45', 'IIS-ManagementConsole', 'IIS-ManagementScriptingTools') `
+        -DisplayName 'IIS + management tools'
+
+    if (-not $installed) {
+        throw "IIS's PowerShell management tools could not be installed automatically - install manually (see this script's header comment) and re-run."
+    }
+
+    try {
+        Import-Module WebAdministration -ErrorAction Stop
+    } catch {
+        Write-Host ""
+        Write-Host "IIS was just installed, but WebAdministration still isn't available - a" -ForegroundColor Red
+        Write-Host "restart is likely required before its PowerShell module registers. Reboot" -ForegroundColor Red
+        Write-Host "this machine and re-run this script." -ForegroundColor Red
+        Write-Host ""
+        throw
+    }
 }
 
 $siteName   = 'SapServer'
@@ -134,6 +189,32 @@ if (Get-Website -Name $siteName -ErrorAction SilentlyContinue) {
     New-Website -Name $siteName -PhysicalPath $publishDir -ApplicationPool $appPoolName -Port $port | Out-Null
 }
 
+# ---- File system permissions -------------------------------------------------
+# The app pool's default identity is ApplicationPoolIdentity, a virtual
+# account named "IIS AppPool\<name>" - New-Website/New-WebAppPool don't
+# reliably grant it filesystem access on every OS/folder-inheritance
+# combination, so set it explicitly rather than assuming it's already there.
+# Confirmed for real: without write access to logs\ specifically, the app
+# pool crashed instantly on every start, with no log file ever created and
+# no obvious managed exception anywhere - Serilog's File sink (Startup.cs)
+# opens/creates the log file eagerly at startup, before anything else runs,
+# so a permissions failure there took down the entire app before it could
+# even log why. Startup.cs now falls back to console-only logging if this
+# ever happens again, but granting the access up front is what actually
+# lets file logging work at all.
+$appPoolIdentity = "IIS AppPool\$appPoolName"
+Write-Host ""
+Write-Host "Granting '$appPoolIdentity' filesystem access..."
+$logsDir = Join-Path $publishDir "logs"
+if (-not (Test-Path $logsDir)) {
+    New-Item -ItemType Directory -Path $logsDir | Out-Null
+}
+# Read+execute on the whole site root - needed to load web.config/bin\*.dll
+# and serve static content at all.
+icacls $publishDir /grant "${appPoolIdentity}:(OI)(CI)RX" /T | Out-Null
+# Modify (not just write) on logs\ specifically - Serilog's retainedFileCountLimit
+# deletes old rolled-over log files, which needs delete permission, not just write.
+icacls $logsDir /grant "${appPoolIdentity}:(OI)(CI)M" /T | Out-Null
 
 # ---- Eager startup (Application Initialization) -----------------------------
 # By default the app pool's Start Mode is OnDemand and the site's application
@@ -168,9 +249,11 @@ if (-not $appInitInstalled) {
     Write-Host ""
     Write-Host "Application Initialization isn't installed - AlwaysRunning/preload are set," -ForegroundColor Yellow
     Write-Host "but IIS won't actually send the warm-up request without it (deploy.ps1's own" -ForegroundColor Yellow
-    Write-Host "warm-up request still works either way). To install it:" -ForegroundColor Yellow
-    Write-Host "  Windows Server:  Install-WindowsFeature Web-AppInit" -ForegroundColor Yellow
-    Write-Host "  Windows 10/11:   Enable-WindowsOptionalFeature -Online -FeatureName IIS-ApplicationInit" -ForegroundColor Yellow
+    Write-Host "warm-up request still works either way)." -ForegroundColor Yellow
+    Install-IISFeature `
+        -ServerFeatureNames @('Web-AppInit') `
+        -ClientFeatureNames @('IIS-ApplicationInit') `
+        -DisplayName 'Application Initialization' | Out-Null
 }
 
 Write-Host ""

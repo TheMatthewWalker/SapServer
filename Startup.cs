@@ -75,14 +75,45 @@ public class Startup
         var loggerConfig = new LoggerConfiguration().ReadFrom.Configuration(configuration);
         if (HostingEnvironment.IsHosted)
         {
+            // Serilog.Sinks.File opens/creates the log file eagerly right
+            // here, not lazily on first write. Confirmed for real: when the
+            // app pool identity (IIS AppPool\SapServer) lacked write access
+            // to this path on a fresh box, WriteTo.File/CreateLogger threw
+            // synchronously and took down the ENTIRE app before anything
+            // else even started — with no log line ever written to explain
+            // why, since the very thing meant to report the failure was
+            // what failed. install.ps1 now grants the app pool identity
+            // write access to logs\ specifically, but this try/catch is the
+            // last line of defense: a logging misconfiguration (a new box,
+            // a changed app pool identity, a permissions drift) should
+            // never again be able to take the whole API offline — it falls
+            // back to console-only logging instead, which IIS still
+            // captures via stdout redirection if configured.
             string logsPath = Path.Combine(ResolveBasePath(), "logs", "sapserver-.log");
-            loggerConfig = loggerConfig.WriteTo.File(
-                logsPath,
-                rollingInterval: RollingInterval.Day,
-                retainedFileCountLimit: 30,
-                outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] {Message:lj}{NewLine}{Exception}");
+            try
+            {
+                Log.Logger = new LoggerConfiguration()
+                    .ReadFrom.Configuration(configuration)
+                    .WriteTo.File(
+                        logsPath,
+                        rollingInterval: RollingInterval.Day,
+                        retainedFileCountLimit: 30,
+                        outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] {Message:lj}{NewLine}{Exception}")
+                    .CreateLogger();
+            }
+            catch (Exception ex)
+            {
+                // loggerConfig here has never had WriteTo.File applied to it
+                // — this is a genuinely separate, clean console-only logger,
+                // not a reuse of the broken configuration above.
+                Log.Logger = loggerConfig.CreateLogger();
+                Log.Error(ex, "Failed to initialize file logging at {LogsPath} — falling back to console-only logging.", logsPath);
+            }
         }
-        Log.Logger = loggerConfig.CreateLogger();
+        else
+        {
+            Log.Logger = loggerConfig.CreateLogger();
+        }
 
         // First line in every log file/session on purpose - the whole point
         // is to make it obvious at a glance (not just from appsettings.json,
