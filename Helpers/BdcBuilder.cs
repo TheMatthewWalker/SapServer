@@ -73,22 +73,25 @@ public sealed class BdcBuilder
     /// through as object. The old COM/VARIANT transport silently stringified
     /// this; confirmed for real against a live IIS deploy that SAP NCo's
     /// typed RfcDataContainer.SetValue throws RfcTypeConversionException
-    /// ("cannot convert Double into CHAR132") instead - NcoRfcExecutor.Unwrap
-    /// converts a boxed decimal to double before handing it to NCo, and NCo
-    /// has no auto-conversion from a numeric type into a CHAR field the way
-    /// a COM VARIANT did.
+    /// ("cannot convert Double into CHAR132") instead.
     ///
-    /// UNVERIFIED: which decimal separator this SAP system's screen input
-    /// actually expects for the calling service account (transaction SU3's
-    /// "Decimal Notation" user parameter) - formatted with InvariantCulture
-    /// (period) here as the more common default for an RFC/technical user.
-    /// If a fractional quantity gets rejected by screen validation, or
-    /// silently posts a value that's off by a power of ten (same failure
-    /// shape as RfcRowHelpers.GetDecimal's documented comma/period bug),
-    /// check that setting and swap to a comma-decimal format instead.
+    /// Confirmed against this SAP system (transaction SU3 "Decimal Notation"
+    /// user parameter) that BDC screen input expects European decimal notation:
+    /// comma as the decimal separator, period as the thousands grouping
+    /// separator. This matches every real quantity value observed from this
+    /// system (e.g. "300,000" meaning 300, "1.297,000" meaning 1297), and was
+    /// confirmed live when ZDEL's BTGEW/NTGEW fields rejected a period-decimal
+    /// with "Input must be in the format ___.___.___.__~,___".
     /// </summary>
+    // European format: ',' decimal separator, '.' thousands grouping.
+    private static readonly NumberFormatInfo SapScreenFormat = new NumberFormatInfo
+    {
+        NumberDecimalSeparator = ",",
+        NumberGroupSeparator = ".",
+    };
+
     public BdcBuilder Field(string name, decimal value) =>
-        Field(name, value.ToString("0.######", CultureInfo.InvariantCulture));
+        Field(name, value.ToString("0.######", SapScreenFormat));
 
     public BdcBuilder Field(string name, int value) =>
         Field(name, value.ToString(CultureInfo.InvariantCulture));

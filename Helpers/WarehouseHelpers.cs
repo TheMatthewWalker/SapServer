@@ -959,17 +959,19 @@ internal static class WarehouseHelpers
     // fills in the weight/pallet-count fields (BDC_CURSOR on LIKP-ANZPK,
     // =SAVE). GEWEI is always "KG" — the portal only ever records weights in
     // kilograms, so it's hardcoded rather than taking a unit from the caller.
-    // BTGEW/NTGEW screen input rejected a plain decimal.ToString() with
-    // "Input must be in the format ___.___.___.__~,___" -- confirmed live
-    // (endpoint-test-log-2026-08-28-delivery-0082291409.md) this SAP
-    // system's screen mask wants comma-decimal (matching every other real
-    // quantity value seen from this system this session, e.g. "300,000",
-    // "1.297,000"), not BdcBuilder.Field(string,decimal)'s own
-    // InvariantCulture period-decimal convention -- and this call was
-    // bypassing that overload entirely anyway by calling .ToString()
-    // directly (culture-dependent, not even guaranteed invariant).
+    // BTGEW/NTGEW screen input confirmed to require European decimal notation
+    // (comma decimal separator, period thousands grouping) -- matches
+    // BdcBuilder.Field(string,decimal)'s SapScreenFormat convention.
+    // Uses the same NumberFormatInfo shape rather than a Replace('.', ',')
+    // workaround, for consistency with the central BDC decimal format.
+    private static readonly NumberFormatInfo SapScreenFormat = new NumberFormatInfo
+    {
+        NumberDecimalSeparator = ",",
+        NumberGroupSeparator = ".",
+    };
+
     private static string FormatZdelWeight(decimal value) =>
-        value.ToString("0.000", System.Globalization.CultureInfo.InvariantCulture).Replace('.', ',');
+        value.ToString("0.000", SapScreenFormat);
 
     internal static RfcRequest BuildZdelRequest(SetDeliveryWeightRequest body) =>
         BdcBuilder.For("ZDEL")
