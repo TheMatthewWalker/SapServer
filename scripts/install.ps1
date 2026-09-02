@@ -180,6 +180,16 @@ Set-ItemProperty "IIS:\AppPools\$appPoolName" managedPipelineMode 'Integrated'
 # 64-bit worker process - matches SapServer.csproj's PlatformTarget=x64
 # (needed for the SAP NCo native binaries, which are x64-only).
 Set-ItemProperty "IIS:\AppPools\$appPoolName" enable32BitAppOnWin64 $false
+# loadUserProfile defaults to $true, but the app pool's default identity
+# (ApplicationPoolIdentity, a virtual account with no real Windows user
+# profile) can't satisfy that on every machine - confirmed for real on a
+# locked-down box: the worker process failed before the CLR even started,
+# so nothing ever reached managed code (no log line, no catchable .NET
+# exception, IIS state flapping between Stopped/Undefined) - the exact
+# same symptom class as the logs\ permissions issue above, but with a
+# completely different root cause. Disabling profile loading removes the
+# dependency entirely, since this app never needs a real user profile.
+Set-ItemProperty "IIS:\AppPools\$appPoolName" -Name processModel.loadUserProfile -Value $false
 
 # ---- Site ---------------------------------------------------------------
 Write-Host "Creating site '$siteName' (physical path: $publishDir, port: $port)..."
