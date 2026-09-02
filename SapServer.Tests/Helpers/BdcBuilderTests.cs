@@ -60,6 +60,10 @@ public class BdcBuilderTests
     /// history) - it encoded exactly the wrong assumption that caused that
     /// crash, so it's corrected here rather than just having the assertion
     /// values swapped.
+    ///
+    /// The decimal format is European (comma as decimal separator) - confirmed
+    /// live that this SAP system's screen input rejects period-decimal with
+    /// "Input must be in the format ___.___.___.__~,___".
     /// </summary>
     [Fact]
     public void Field_overloads_stringify_decimal_and_int_values_for_the_CHAR132_FVAL_column()
@@ -71,9 +75,9 @@ public class BdcBuilderTests
             .Build();
 
         var rows = request.InputTablesItems["BDCTABLE"];
-        Assert.Equal("12.5", rows[0]["FVAL"]);
+        Assert.Equal("12,5", rows[0]["FVAL"]); // European comma decimal, confirmed live
         Assert.Equal("7", rows[1]["FVAL"]);
-        Assert.Equal("15", rows[2]["FVAL"]); // no trailing ".0"/".000000"
+        Assert.Equal("15", rows[2]["FVAL"]); // no trailing ",0"/",000000"
     }
 
     [Fact]
