@@ -79,6 +79,39 @@ public sealed class ProductionController : SapControllerBase
         return Ok(ApiResponse<RfcResponse>.Ok(RfcParams));
     }
 
+// ── POST /api/production/fix-prodbatch ──────────────────────────────────────
+//
+// Z_BACKFLUSH_FROM_MES automatically writes a ZPRODBATCH/ZBATCHPACK record
+// for batch-managed products (drum/ewald/hose assembly) but uses the wrong
+// PALL_MATNR (packaging instruction). This endpoint corrects it by deleting
+// the auto-generated entry (sql_action=D) then re-inserting with the correct
+// instruction derived from Customer + PackCode (sql_action=I).
+
+    [HttpPost]
+    [Route("fix-prodbatch")]
+    public async Task<IHttpActionResult> FixProdBatch([FromBody] FixProdBatchRequest body, CancellationToken ct)
+    {
+        await CheckPermissionAsync(GetUserId(), ProductionHelpers.FnCreate, ct);
+
+        var delResult = await _pool.ExecuteAsync(
+            ProductionHelpers.BuildProdBatchDeleteRequest(body.Batch, body.Material), ct);
+        var (rcBatchD, rcPackD) = ProductionHelpers.ParseProdBatchMaintResponse(delResult);
+        _logger.LogInformation($"Z_ZPRODBATCH_MAINT D: {body.Batch}/{body.Material} — RC_BATCH={rcBatchD} RC_PACK={rcPackD}");
+
+        var packInstruction = ProductionHelpers.BuildPackagingInstruction(body.Customer, body.PackCode);
+        var insResult = await _pool.ExecuteAsync(
+            ProductionHelpers.BuildProdBatchMaintRequest(
+                body.Batch, body.Material, packInstruction, body.MaterialDocument, body.WeightKg, body.PackCode), ct);
+        var (rcBatch, rcPack) = ProductionHelpers.ParseProdBatchMaintResponse(insResult);
+        _logger.LogInformation($"Z_ZPRODBATCH_MAINT I: {body.Batch}/{body.Material} packInstr={packInstruction} — RC_BATCH={rcBatch} RC_PACK={rcPack}");
+
+        return Ok(ApiResponse<FixProdBatchResponse>.Ok(new FixProdBatchResponse
+        {
+            RcBatch = rcBatch,
+            RcPack  = rcPack,
+        }));
+    }
+
 // ── POST /api/production/drumming-backflush ──────────────────────────
 //
 // Drumming's one point of difference from every other production process:

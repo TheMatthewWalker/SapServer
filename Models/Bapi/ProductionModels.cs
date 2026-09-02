@@ -306,3 +306,24 @@ public sealed class DrumBackflushResponse
     public string[]     ExpectedComponents { get; init; } = []; // this material's BOM components (IDNRK)
     public string[]     ActualComponents   { get; init; } = []; // echoes request.TraceabilityMaterials
 }
+
+
+// ── Z_ZPRODBATCH_MAINT Fix (delete auto-generated entry, re-insert with correct packaging) ─
+// Z_BACKFLUSH_FROM_MES automatically writes a ZPRODBATCH/ZBATCHPACK record but
+// uses the wrong PALL_MATNR (packaging instruction). This endpoint deletes it and
+// re-inserts with the correct instruction derived from Customer + PackCode.
+public sealed class FixProdBatchRequest
+{
+    [Required, MinLength(1)] public string  Batch            { get; init; } = string.Empty;
+    [Required, MinLength(1)] public string  Material         { get; init; } = string.Empty;
+    [Required, MinLength(1)] public string  MaterialDocument { get; init; } = string.Empty;
+                             public string  Customer         { get; init; } = string.Empty;
+                             public string  PackCode         { get; init; } = string.Empty;
+                             public decimal WeightKg         { get; init; }
+}
+
+public sealed class FixProdBatchResponse
+{
+    public string RcBatch { get; init; } = string.Empty;
+    public string RcPack  { get; init; } = string.Empty;
+}

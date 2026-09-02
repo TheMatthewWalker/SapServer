@@ -201,6 +201,9 @@ internal static class ProductionHelpers
         .Import("BLDAT", DateTime.Today) // Document Date
         .Import("BUDAT", DateTime.Today) // Posting Date
         .Import("PNAME", "KR04") // Printer Name
+        .Import("PRT", "PRT") // Printer Name
+        .Import("PRTQUAL", "PRTQUAL") // Printer Name
+
 
         .ReadParam("RC") // Message Code
         .ReadParam("MSG") // Message Text
@@ -480,6 +483,38 @@ internal static class ProductionHelpers
             MENGE   = 1m,
             MEINS   = "EA",
             TAREWEI = weightKg,
+            GEWEI   = "KG",
+        });
+
+        return builder
+            .ReadParam("RC_BATCH")
+            .ReadParam("RC_PACK")
+            .Build();
+    }
+
+    internal static RfcRequest BuildProdBatchDeleteRequest(string charge, string material)
+    {
+        var builder = new RfcRequestBuilder(FnProdBatchMaint)
+            .Import("SQL_ACTION", "D")
+            .Import("TEST", "");
+
+        builder.TableRow("ZPRODBATCH_TBL", new
+        {
+            CHARG      = SapPad.Pad(charge, 10),
+            MATNR      = SapPad.Pad(material, 18).ToUpperInvariant(),
+            WERKS      = Plant,
+            PALL_MATNR = SapPad.Pad("", 18),
+            MBLNR      = SapPad.Pad("", 10),
+            VBELN      = "",
+        });
+
+        builder.TableRow("ZBATCHPACK_TBL", new
+        {
+            CHARG   = SapPad.Pad(charge, 10),
+            MATNR   = SapPad.Pad("", 18),
+            MENGE   = 0m,
+            MEINS   = "EA",
+            TAREWEI = 0m,
             GEWEI   = "KG",
         });
 
