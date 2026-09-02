@@ -1,5 +1,5 @@
 @baseUrl = http://localhost:7200
-@token = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJub3JtYW50b24tbmV4dXMiLCJhdWQiOiJzYXAtc2VydmVyIiwic3ViIjoiZGV2IiwidXNlcklkIjoxLCJyb2xlIjoiYWRtaW4iLCJpYXQiOjE3ODgzNDQ4NzAsImV4cCI6MTc4ODM0ODQ3MH0.SGGDOSMvZnMlI4TNXWtkcgFtJO5pE2YHIHG_70bR7DI
+@token = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJub3JtYW50b24tbmV4dXMiLCJhdWQiOiJzYXAtc2VydmVyIiwic3ViIjoiZGV2IiwidXNlcklkIjoxLCJyb2xlIjoiYWRtaW4iLCJpYXQiOjE3ODgzNDk2MzQsImV4cCI6MTc4ODM1MzIzNH0.NCtl5DqM1mfLMcLIxI-Gqgl54KiUUQ_eGr51i4tYpQk
 
 
 
@@ -10,10 +10,9 @@ Authorization: Bearer {{token}}
 
 {
     "StorageLocation": "1710",
-    "Material": "TSAV6-8B01",
+    "Material": "TSAV6-8B01/XX",
     "Quantity": 30.5,
     "Header": "TestHead",
-    "Charge": "TestCharge"
 }
 ###
 
