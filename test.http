@@ -1,5 +1,21 @@
-@baseUrl = http://localhost:5200
-@token = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJub3JtYW50b24tbmV4dXMiLCJhdWQiOiJzYXAtc2VydmVyIiwic3ViIjoiZGV2IiwidXNlcklkIjoxLCJyb2xlIjoiYWRtaW4iLCJpYXQiOjE3ODcwNjQ3MDYsImV4cCI6MTc4NzA2ODMwNn0.uwQrPvcjsJmAJG8RN1Ia1bfZ6Xe8gbJJ1t759AtstmY
+@baseUrl = http://localhost:7200
+@token = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJub3JtYW50b24tbmV4dXMiLCJhdWQiOiJzYXAtc2VydmVyIiwic3ViIjoiZGV2IiwidXNlcklkIjoxLCJyb2xlIjoiYWRtaW4iLCJpYXQiOjE3ODgzNDQ4NzAsImV4cCI6MTc4ODM0ODQ3MH0.SGGDOSMvZnMlI4TNXWtkcgFtJO5pE2YHIHG_70bR7DI
+
+
+
+### POST /api/production/backflush2
+POST {{baseUrl}}/api/production/backflush2
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+    "StorageLocation": "1710",
+    "Material": "TSAV6-8B01",
+    "Quantity": 30.5,
+    "Header": "TestHead",
+    "Charge": "TestCharge"
+}
+###
 
 
 

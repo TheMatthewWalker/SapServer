@@ -45,6 +45,40 @@ public sealed class ProductionController : SapControllerBase
         return Ok(ApiResponse<BdcResponse>.Ok(response));
     }
 
+     // ── POST /api/production/backflush ──────────────────────────────────
+
+    [HttpPost]
+
+    [Route("backflush2")]
+    public async Task<IHttpActionResult> Backflush2(
+
+        [FromBody] Zf40nRequest body,
+        CancellationToken ct)
+    {
+        await CheckPermissionAsync(GetUserId(), ProductionHelpers.FnCreate, ct);
+
+        var charge = await _pool.ExecuteAsync(ProductionHelpers.BuildRequiresCharge(body.Material), ct);
+        var zf40n    = await _pool.ExecuteAsync(
+            ProductionHelpers.BuildBackflushFromMesRequest(
+                body,
+                ProductionHelpers.ParseRequiresCharge(charge)),
+            ct);
+        var response = ProductionHelpers.ParseBackflushFromMesRequest(zf40n);
+        _logger.LogInformation("Backflushing: " + body.Material + " x " + body.Quantity + " || " + response.Msg);
+        var RfcParams = new RfcResponse
+        {
+            Parameters = new Dictionary<string, object?> {
+                ["Rc"] = response.Rc,
+                ["Msg"] = response.Msg,
+                ["MatDoc"] = response.MatDoc,
+                ["MatDocYear"] = response.MatDocYear,
+                ["SapBatch"] = response.SapBatch
+            }
+        };
+
+        return Ok(ApiResponse<RfcResponse>.Ok(RfcParams));
+    }
+
 // ── POST /api/production/drumming-backflush ──────────────────────────
 //
 // Drumming's one point of difference from every other production process:

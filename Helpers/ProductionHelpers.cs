@@ -8,6 +8,7 @@ namespace SapServer.Helpers;
 internal static class ProductionHelpers
 {
     internal const string FnReadTables  = "ZRFC_READ_TABLES";
+    private const string  FnBackflushFromMes = "Z_BACKFLUSH_FROM_MES";
     internal const string FnCreate = "Z_RFC_CALL_TRANSACTION";
     internal const string Warehouse     = "312";
     internal const string Plant         = "3012";
@@ -187,6 +188,40 @@ internal static class ProductionHelpers
                 .FieldIf(!string.IsNullOrEmpty(body.Packaging), "ST_ZMARA_C_T-MATNR", BuildPackagingInstruction(body.Customer, body.Packaging))
                 .Field("BDC_OKCODE", "=SAVE")
             .Build();
+
+
+    internal static RfcRequest BuildBackflushFromMesRequest(Zf40nRequest body, bool requiresCharge)
+    {
+    return new RfcRequestBuilder(FnBackflushFromMes)
+        .Import("WERKS", Plant) // Default Plant
+        .Import("MATNR", SapPad.Pad(body.Material, 18)) // Sap Material Number
+        .Import("MENGE", body.Quantity) // Quantity
+        .Import("BATCH", body.Charge) // Traceability
+        .Import("BKTXT", body.Header) // Header Text
+        .Import("BLDAT", DateTime.Today) // Document Date
+        .Import("BUDAT", DateTime.Today) // Posting Date
+        .Import("PNAME", "KR04") // Printer Name
+
+        .ReadParam("RC") // Message Code
+        .ReadParam("MSG") // Message Text
+        .ReadParam("MBLNR") // Material Document Number
+        .ReadParam("MJAHR") // Material Document Year
+        .ReadParam("CHARG") // Sap Batch Number
+
+        .Build();
+    }
+
+
+    internal static (string Rc, string Msg, string MatDoc, string MatDocYear, string SapBatch) ParseBackflushFromMesRequest(RfcResponse response)
+    {
+        var Rc = ReturnTableHelper.GetParam(response, "RC=") ?? "";
+        var Msg  = ReturnTableHelper.GetParam(response, "MSG") ?? "";
+        var MatDoc  = ReturnTableHelper.GetParam(response, "MBLNR") ?? "";
+        var MatDocYear  = ReturnTableHelper.GetParam(response, "MJAHR") ?? "";
+        var SapBatch  = ReturnTableHelper.GetParam(response, "CHARG") ?? "";
+        return (Rc, Msg, MatDoc, MatDocYear, SapBatch);
+    }
+
 
 
 // ── Reverse Backflush MF41 ──────────────────────────────────────────────────────
